@@ -1,0 +1,10 @@
+bin/
+tmp/
+hammerspace-cs-driver
+
+*.swp
+*.test
+*.tests
+.DS_Store
+go.sum
+.IDEA/
