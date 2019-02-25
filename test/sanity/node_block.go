@@ -124,7 +124,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
 					VolumeId:   "id",
-					TargetPath: sc.Config.TargetPath,
+					TargetPath: sc.Config.TargetPath + "/dev",
 					Secrets:    sc.Secrets.NodePublishVolumeSecret,
 				},
 			)
@@ -459,7 +459,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 								Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 							},
 						},
-						StagingTargetPath: sc.Config.StagingPath,
+						StagingTargetPath: sc.Config.StagingPath + "/dev",
 						VolumeContext:     vol.GetVolume().GetVolumeContext(),
 						PublishContext:    conpubvol.GetPublishContext(),
 						Secrets:           sc.Secrets.NodeStageVolumeSecret,
@@ -472,13 +472,13 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 			By("publishing the volume on a node")
 			var stagingPath string
 			if nodeStageSupported {
-				stagingPath = sc.Config.StagingPath
+				stagingPath = sc.Config.StagingPath + "/dev"
 			}
 			nodepubvol, err := c.NodePublishVolume(
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
 					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath,
+					TargetPath:        sc.Config.TargetPath + "/dev",
 					StagingTargetPath: stagingPath,
 					VolumeCapability: &csi.VolumeCapability{
 						AccessType: &csi.VolumeCapability_Block{
@@ -517,7 +517,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
 					VolumeId:   vol.GetVolume().GetVolumeId(),
-					TargetPath: sc.Config.TargetPath,
+					TargetPath: sc.Config.TargetPath + "/dev",
 				})
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nodeunpubvol).NotTo(BeNil())
@@ -528,7 +528,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 					context.Background(),
 					&csi.NodeUnstageVolumeRequest{
 						VolumeId:          vol.GetVolume().GetVolumeId(),
-						StagingTargetPath: sc.Config.StagingPath,
+						StagingTargetPath: sc.Config.StagingPath + "/dev",
 					},
 				)
 				Expect(err).NotTo(HaveOccurred())
@@ -646,7 +646,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 						},
 					},
-					StagingTargetPath: sc.Config.StagingPath,
+					StagingTargetPath: sc.Config.StagingPath + "/dev",
 					VolumeContext:     vol.GetVolume().GetVolumeContext(),
 					PublishContext:    conpubvol.GetPublishContext(),
 					Secrets:           sc.Secrets.NodeStageVolumeSecret,
@@ -659,13 +659,13 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 		By("publishing the volume on a node")
 		var stagingPath string
 		if nodeStageSupported {
-			stagingPath = sc.Config.StagingPath
+			stagingPath = sc.Config.StagingPath + "/dev"
 		}
 		nodepubvol, err := c.NodePublishVolume(
 			context.Background(),
 			&csi.NodePublishVolumeRequest{
 				VolumeId:          vol.GetVolume().GetVolumeId(),
-				TargetPath:        sc.Config.TargetPath,
+				TargetPath:        sc.Config.TargetPath + "/dev",
 				StagingTargetPath: stagingPath,
 				VolumeCapability: &csi.VolumeCapability{
 					AccessType: &csi.VolumeCapability_Block{
@@ -690,7 +690,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 				context.Background(),
 				&csi.NodeGetVolumeStatsRequest{
 					VolumeId:   vol.GetVolume().GetVolumeId(),
-					VolumePath: sc.Config.TargetPath,
+					VolumePath: sc.Config.TargetPath + "/dev",
 				},
 			)
 			Expect(err).ToNot(HaveOccurred())
@@ -703,7 +703,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 			context.Background(),
 			&csi.NodeUnpublishVolumeRequest{
 				VolumeId:   vol.GetVolume().GetVolumeId(),
-				TargetPath: sc.Config.TargetPath,
+				TargetPath: sc.Config.TargetPath + "/dev",
 			})
 		Expect(err).NotTo(HaveOccurred())
 		Expect(nodeunpubvol).NotTo(BeNil())
@@ -714,7 +714,7 @@ var _ = sanity.DescribeSanity("Block - Node Service", func(sc *sanity.SanityCont
 				context.Background(),
 				&csi.NodeUnstageVolumeRequest{
 					VolumeId:          vol.GetVolume().GetVolumeId(),
-					StagingTargetPath: sc.Config.StagingPath,
+					StagingTargetPath: sc.Config.StagingPath + "/dev",
 				},
 			)
 			Expect(err).NotTo(HaveOccurred())
