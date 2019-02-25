@@ -247,14 +247,8 @@ func (d *CSIDriver) NodeUnpublishVolume(
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 
-		//determine backing share FIXME: we can also get this from the volume id (it's a path)
-		backingSharePath, err := common.DetermineBackingShareFromLoopDevice(lodevice)
-		if err != nil {
-			log.Errorf("failed to determine backing share for loop device, %s", lodevice)
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-		log.Infof("found backing share path, %s, for loop device, %s", backingSharePath, lodevice)
-		backingShareName := filepath.Base(backingSharePath)
+		//determine backing share
+		backingShareName := filepath.Dir(req.GetVolumeId())
 
 		defer d.releaseVolumeLock(backingShareName)
 		d.getVolumeLock(backingShareName)

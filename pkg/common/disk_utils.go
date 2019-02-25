@@ -161,17 +161,6 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
 		"could not determine backing file for loop device")
 }
 
-func DetermineBackingShareFromLoopDevice(lodevice string) (string, error) {
-	filePath, err := determineBackingFileFromLoopDevice(lodevice)
-	if err != nil {
-		return "", err
-	}
-	dirPath := filepath.Dir(filePath)
-
-	return dirPath, nil
-
-}
-
 func IsShareMounted(targetPath string) (bool, error) {
 	notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath)
 
