@@ -18,7 +18,7 @@ unittest:
 
 sanity:
 	@echo "==> Running sanity functional tests"
-	@env vgo test -timeout=0 -v -run="[TestSanity]" ./...
+	@env vgo test -timeout=0 -v -run="TestSanity" ./...
 
 build:
 	@echo "==> Building Docker Image Latest"

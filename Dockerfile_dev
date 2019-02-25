@@ -1,0 +1,7 @@
+# Copyright 2019 Hammerspace
+# Dev Image
+
+FROM golang:1.10-alpine3.8
+RUN apk add --no-cache git make gcc libc-dev
+WORKDIR /go/src/github.com/hammerspace/hammerspace-csi-plugin/
+RUN go get golang.org/x/vgo
