@@ -2,6 +2,6 @@
 # Dev Image
 
 FROM golang:1.10-alpine3.8
-RUN apk add --no-cache git make gcc libc-dev
-WORKDIR /go/src/github.com/hammerspace/hammerspace-csi-plugin/
+RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img
+WORKDIR /hammerspace-csi-plugin/
 RUN go get golang.org/x/vgo
