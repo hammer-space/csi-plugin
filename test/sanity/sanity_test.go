@@ -25,8 +25,8 @@ import (
 
 func TestSanity(t *testing.T) {
 	// Set up variables
-	mountPath := "/tmp/"
-	stagePath := "/tmp/"
+	mountPath := "/tmp/sanity-mounts/"
+	stagePath := "/tmp/sanity-stage/"
 	// Set up driver and env
 	d := driver.NewCSIDriver(
 		os.Getenv("HS_ENDPOINT"),
