@@ -48,6 +48,7 @@ func TestSanity(t *testing.T) {
 		StagingPath:              stagePath,
 		Address:                  os.Getenv("CSI_ENDPOINT"),
 		TestVolumeParametersFile: os.Getenv("SANITY_PARAMS_FILE"),
+		TestVolumeSize:           1 * 1024 * 1024 * 1024,
 	}
 	sanity.Test(t, config)
 }

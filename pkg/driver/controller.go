@@ -273,7 +273,7 @@ func (d *CSIDriver) CreateVolume(
 
 	cr := req.CapacityRange
 	var requestedSize int64
-	if cr != nil && cr.LimitBytes == 0 {
+	if cr != nil {
 		if cr.LimitBytes != 0 {
 			requestedSize = cr.LimitBytes
 		} else {
@@ -425,9 +425,7 @@ func (d *CSIDriver) deleteMountVolume(share *common.ShareResponse) error {
 		return status.Errorf(codes.Internal, err.Error())
 	}
 	if len(snaps) > 0 {
-		if len(snaps) > 0 {
-			return status.Errorf(codes.FailedPrecondition, common.VolumeDeleteHasSnapshots)
-		}
+		return status.Errorf(codes.FailedPrecondition, common.VolumeDeleteHasSnapshots)
 	}
 
 	deleteDelay := int64(-1)
@@ -743,8 +741,10 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 
 	// If the snapshot does not exist then return an idempotent response.
 
+	shareName := d.GetVolumeNameFromPath(path)
+
 	// delete if it's a share snap
-	err := d.hsclient.DeleteShareSnapshot(path, snapshotName)
+	err := d.hsclient.DeleteShareSnapshot(shareName, snapshotName)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
