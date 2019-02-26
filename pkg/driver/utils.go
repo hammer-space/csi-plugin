@@ -27,7 +27,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	common "github.com/hammer-space/hammerspace-csi-plugin/pkg/common"
+	common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 func (c *CSIDriver) GetVolumeNameFromPath(path string) string {

@@ -15,7 +15,7 @@ limitations under the License.
 package sanitytest
 
 import (
-	"github.com/hammer-space/hammerspace-csi-plugin/pkg/driver"
+	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"net"
 	"os"
 	"testing"
@@ -24,6 +24,9 @@ import (
 )
 
 func TestSanity(t *testing.T) {
+
+	defer os.Remove(os.Getenv("CSI_ENDPOINT"))
+	os.Remove(os.Getenv("CSI_ENDPOINT"))
 	// Set up variables
 	mountPath := "/tmp/sanity-mounts/"
 	stagePath := "/tmp/sanity-stage/"
@@ -34,7 +37,6 @@ func TestSanity(t *testing.T) {
 		os.Getenv("HS_PASSWORD"),
 		os.Getenv("HS_TLS_VERIFY"),
 		os.Getenv("CSI_USE_ANVIL_FOR_DATA"))
-	defer os.Remove(os.Getenv("CSI_ENDPOINT"))
 	go func() {
 		l, _ := net.Listen("unix", os.Getenv("CSI_ENDPOINT"))
 		d.Start(l)

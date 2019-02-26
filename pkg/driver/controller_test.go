@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	common "github.com/hammer-space/hammerspace-csi-plugin/pkg/common"
+	common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 func TestListShares(t *testing.T) {

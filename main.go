@@ -26,7 +26,7 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	driver "github.com/hammer-space/hammerspace-csi-plugin/pkg/driver"
+	driver "github.com/hammer-space/csi-plugin/pkg/driver"
 )
 
 var ()

@@ -36,7 +36,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/publicsuffix"
 
-	"github.com/hammer-space/hammerspace-csi-plugin/pkg/common"
+	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/jpillora/backoff"
 )
 

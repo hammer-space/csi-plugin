@@ -28,7 +28,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	client "github.com/hammer-space/hammerspace-csi-plugin/pkg/client"
+	client "github.com/hammer-space/csi-plugin/pkg/client"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )

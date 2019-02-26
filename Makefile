@@ -5,7 +5,7 @@ NAME=bin/hs-csi-plugin
 compile:
 	@echo "==> Building the Hammerspace CSI Driver Version ${VERSION}"
 	@env vgo get -d ./
-	@env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 vgo build -ldflags "-X 'github.com/hammer-space/hammerspace-csi-plugin/pkg/common.Version=${VERSION}' -X 'github.com/hammer-space/hammerspace-csi-plugin/pkg/common.Githash=${GITHASH}'" -o ${NAME} ./
+	@env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 vgo build -ldflags "-X 'github.com/hammer-space/csi-plugin/pkg/common.Version=${VERSION}' -X 'github.com/hammer-space/csi-plugin/pkg/common.Githash=${GITHASH}'" -o ${NAME} ./
 
 clean:
 	@echo "==> Cleaning"
@@ -19,6 +19,10 @@ unittest:
 sanity:
 	@echo "==> Running sanity functional tests"
 	@env vgo test -timeout=0 -v -run="TestSanity" ./...
+
+build-d:
+	@echo "==> Building Docker Image for Dev Image"
+	@docker build -t "hs-csi-dev:latest" . -f Dockerfile_dev
 
 build:
 	@echo "==> Building Docker Image Latest"

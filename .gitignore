@@ -6,5 +6,4 @@ hammerspace-cs-driver
 *.test
 *.tests
 .DS_Store
-go.sum
 .IDEA/

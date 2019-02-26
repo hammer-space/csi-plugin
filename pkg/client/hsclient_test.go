@@ -26,8 +26,8 @@ import (
 
 	//log "github.com/sirupsen/logrus"
 
-	common "github.com/hammer-space/hammerspace-csi-plugin/pkg/common"
-	testutils "github.com/hammer-space/hammerspace-csi-plugin/test/utils"
+	common "github.com/hammer-space/csi-plugin/pkg/common"
+	testutils "github.com/hammer-space/csi-plugin/test/utils"
 )
 
 var (

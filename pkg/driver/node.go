@@ -26,7 +26,7 @@ import (
 	"strconv"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/hammer-space/hammerspace-csi-plugin/pkg/common"
+	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
