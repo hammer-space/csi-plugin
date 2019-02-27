@@ -1,7 +1,11 @@
 # Copyright 2019 Hammerspace
 # Dev Image
+# Convenience image for testing the plugin
+# The local source code directory should be mapped to "/hammerspace-csi-plugin/"
+# via a docker volume (docker run -v /source-code/:/hammerspace-csi-plugin/
 
 FROM golang:1.10-alpine3.8
 RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img
 WORKDIR /hammerspace-csi-plugin/
 RUN go get golang.org/x/vgo
+RUN go get github.com/rexray/gocsi

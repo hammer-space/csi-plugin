@@ -107,14 +107,32 @@ docker push <registry>/hs-csi-plugin:$(cat VERSION)
 
 ### Testing
 #### Manual tests
-Manual tests can be facilitated by using the CSC tool
+Manual tests can be facilitated by using the Dev Image. Local files can be shared with the container to facilitate testing.
+
+Example Usage:
+
+Running the image - 
 ```bash
-go get github.com/rexray/gocsi
-cd src/github.com/rexray/gocsi/csc
-go install .
-export CSI_ENDPOINT=/tmp/csi.sock
+docker build -t hs-csi-dev -f Dockerfile_dev .
+docker run --privileged=true -v /tmp/:/tmp/:shared -v /dev/:/dev/ --env-file ~/csi-env -it -v ~/csi_sanity_params.yaml:/tmp/csi_sanity_params.yaml -v ~/src/github.com/hammer-space/csi-plugin:/hammerspace-csi-plugin/:shared --name=hs-csi-dev hs-csi-dev
+```
+
+Running CSI plugin in image - Assuming env vars are set
+```bash
+make build
+./bin/hs-csi-plugin
+```
+
+Using csc to call the plugin - 
+```bash
+# open additional shell into dev container
+docker exec -it hs-csi-dev /bin/sh
+
+# use csc tool
+CSI_DEBUG=true csc node get-info
 csc -h
 ```
+
 
 #### Running unit tests
 ``$ make unittest``
@@ -122,9 +140,8 @@ csc -h
 #### Running Sanity tests
 These tests are functional and will create and delete volumes on the backend.
 
-Must have connections from the host to the HS_ENDPOINT.
-Uses the [CSI sanity package](
-)
+Must have connections from the host to the HS_ENDPOINT. This can be run from within the Dev image.
+Uses the [CSI sanity package](https://github.com/kubernetes-csi/csi-test/tree/master/cmd/csi-sanity)
 
 Make a parameters
 ```bash
@@ -146,5 +163,5 @@ export HS_TLS_VERIFY=false
 export CSI_USE_ANVIL_FOR_DATA=true
 export CSI_NODE_NAME=test
 export SANITY_PARAMS_FILE=~/csi_sanity_params.yaml
-sudo make sanity
+make sanity
 ```
