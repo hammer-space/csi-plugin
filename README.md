@@ -67,11 +67,11 @@ Supported volume parameters for CreateVolume requests (maps to Kubernetes storag
 
 Name                     |     Default            | Description
 ----------------         |     ------------       | -----
-``exportOptions``        |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of <subnet>,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
+``exportOptions``        |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of subnet,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
 ``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults
 ``volumeNameFormat``     |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
 ``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares in addition to default objectives.
-``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning a Block Volume.
+``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
 
 
 ## Development
@@ -89,7 +89,7 @@ sudo touch /usr/lib/go-1.10/api/go1.10.txt
 
 ### Building
 ##### Build a new docker image from local source:
-``$ make build``
+```make build```
 
 ##### Build a new release:
 Update VERSION file, then

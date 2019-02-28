@@ -20,7 +20,7 @@ sanity:
 	@echo "==> Running sanity functional tests"
 	@env vgo test -timeout=0 -v -run="TestSanity" ./...
 
-build-d:
+build-dev:
 	@echo "==> Building Docker Image for Dev Image"
 	@docker build -t "hs-csi-dev:latest" . -f Dockerfile_dev
 
