@@ -43,7 +43,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: us.gcr.io/ameade-hs-dev/hs-csi-plugin:latest
+          image: hammerspace/hs-csi-plugin:v0.1.0
           env:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock
