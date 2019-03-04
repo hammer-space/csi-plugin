@@ -76,7 +76,7 @@ spec:
             capabilities:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
-          image: hammerspace/hs-csi-plugin:v0.1.0
+          image: hammerspaceinc/csi-plugin:v0.1.0
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock

@@ -22,12 +22,12 @@ sanity:
 
 build-dev:
 	@echo "==> Building Docker Image for Dev Image"
-	@docker build -t "hs-csi-dev:latest" . -f Dockerfile_dev
+	@docker build -t "hammerspaceinc/csi-plugin-dev:latest" . -f Dockerfile_dev
 
 build:
 	@echo "==> Building Docker Image Latest"
-	@docker build -t "hs-csi-plugin:latest" . -f Dockerfile
+	@docker build -t "hammerspaceinc/csi-plugin:latest" . -f Dockerfile
 
 build-release:
 	@echo "==> Building Docker Image ${VERSION}"
-	@docker build --build-arg version=${VERSION} -t "hs-csi-plugin:${VERSION}" . -f Dockerfile
+	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
