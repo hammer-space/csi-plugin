@@ -1,9 +1,12 @@
 bin/
 tmp/
 hammerspace-cs-driver
+csi-plugin
 
 *.swp
 *.test
 *.tests
 .DS_Store
 .IDEA/
+.idea/
+go.sum

@@ -76,9 +76,9 @@ Name                     |     Default            | Description
 
 ## Development
 ### Requirements
+* Docker
 * Golang 1.10+
 * nfs-utils
-
 * vgo - `go get -u golang.org/x/vgo`
 
 **NOTE** Workaround for [go issue #24773](https://github.com/golang/go/issues/24773)
@@ -89,7 +89,7 @@ sudo touch /usr/lib/go-1.10/api/go1.10.txt
 
 ### Building
 ##### Build a new docker image from local source:
-```make build```
+```sudo make build```
 
 ##### Build a new release:
 Update VERSION file, then

@@ -386,24 +386,47 @@ func (client *HammerspaceClient) CreateShare(name string,
 	}
 
 	// Set objectives on share
+	err = client.SetObjectives(name, "/", objectives, true)
+	if err != nil {
+		log.Errorf("Failed to set objectives %s, %v", objectives, err)
+		defer client.DeleteShare(share.Name, 0)
+		return err
+	}
+
+	return nil
+}
+
+// Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
+// The path must start with a slash
+func (client *HammerspaceClient) SetObjectives(shareName string,
+	path string,
+	objectives []string,
+	replaceExisting bool) error {
+	log.Debugf("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
+	// Set objectives on share at path
+	cleared := false
 	for _, objectiveName := range objectives {
-		req, err := client.generateRequest("POST",
-			fmt.Sprintf("/shares/%s/objective-set?objective-identifier=%s", name, objectiveName),
-			"")
+		urlPath := fmt.Sprintf("/shares/%s/objective-set?path=%s&objective-identifier=%s",
+			shareName, path, objectiveName)
+		if replaceExisting && !cleared {
+			urlPath += "&clear-existing=true"
+			cleared = true
+		}
+		req, err := client.generateRequest("POST", urlPath, "")
 		if err != nil {
-			log.Errorf("Failed to set objective %s, %v", objectiveName, err)
-			defer client.DeleteShare(share.Name, 0)
+			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
+				objectiveName, shareName, path, err)
 			return err
 		}
 		statusCode, _, _, err := client.doRequest(*req)
 		if err != nil {
-			log.Errorf("Failed to set objective %s, %v", objectiveName, err)
-			defer client.DeleteShare(share.Name, 0)
+			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
+				objectiveName, shareName, path, err)
 			return err
 		}
 		if statusCode != 200 {
-			log.Errorf("Failed to set objective %s", objectiveName)
-			defer client.DeleteShare(share.Name, 0)
+			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
+				objectiveName, shareName, path, err)
 			return errors.New(fmt.Sprint("failed to set objective"))
 		}
 	}
