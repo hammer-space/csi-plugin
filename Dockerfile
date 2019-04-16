@@ -8,7 +8,7 @@ RUN go get golang.org/x/vgo
 RUN make clean compile
 
 FROM alpine:3.8
-RUN apk add --no-cache nfs-utils qemu-img
+RUN apk add --no-cache nfs-utils qemu-img ca-certificates
 WORKDIR /bin/
 COPY --from=0 /go/src/github.com/hammerspace/hammerspace-csi-plugin/bin/hs-csi-plugin .
 ENTRYPOINT ["/bin/hs-csi-plugin"]
