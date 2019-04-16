@@ -188,7 +188,7 @@ func (d *CSIDriver) ensureBlockVolumeExists(
 			hsVolume.BlockBackingShareName,
 			"/"+hsVolume.BlockBackingShareName,
 			-1,
-			hsVolume.Objectives,
+			[]string{},
 			hsVolume.ExportOptions,
 			hsVolume.DeleteDelay,
 		)
@@ -242,6 +242,21 @@ func (d *CSIDriver) ensureBlockVolumeExists(
 			log.Errorf("failed to create backing file for volume, %v", err)
 			return err
 		}
+	}
+
+	const max_retries = 60
+	for retry := 0; retry < max_retries; retry++ {
+		err = d.hsclient.SetObjectives(hsVolume.BlockBackingShareName, "/" + hsVolume.Name, hsVolume.Objectives, true)
+		if err != nil {
+			log.Errorf("failed to set objectives on backing file for volume %v. retrying in 1 second", err)
+			time.Sleep(time.Second)
+		} else {
+			break
+		}
+	}
+	if err != nil {
+		log.Errorf("failed to set objectives on backing file for volume %v after retrying %d times", err, max_retries)
+		return err
 	}
 
 	return nil
