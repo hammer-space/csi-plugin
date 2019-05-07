@@ -60,7 +60,7 @@ Variable                   |     Default           | Description
 *``HS_ENDPOINT``           |                       | Hammerspace API gateway
 *``HS_USERNAME``           |                       | Hammerspace username
 *``HS_PASSWORD``           |                       | Hammerspace password
-``HS_TLS_VERIFY``          |     ``true``          | Whether to validate the Hammerspace API gateway certificates
+``HS_TLS_VERIFY``          |     ``false``         | Whether to validate the Hammerspace API gateway certificates
 
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):
