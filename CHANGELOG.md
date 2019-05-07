@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Combined Kubernetes Deployment yaml files
+- HS_TLS_VERIFY defaults to false
+
 ### Fixed
 - Set objectives on file for block volumes
 
