@@ -66,6 +66,10 @@ spec:
               valueFrom:
                 fieldRef:
                  fieldPath: spec.nodeName
+            - name: CSI_USE_ANVIL_FOR_DATA
+              value: true
+            - name: HS_TLS_VERIFY
+              value: false
           volumeMounts:
             - name: socket-dir
               mountPath: /csi

@@ -42,7 +42,7 @@ Centos
 $ yum install nfs-utils
 ```
 
-The plugin container(s) must run as priviledge containers
+The plugin container(s) must run as privileged containers
 
 ## Installation
 Kubernetes specific deployment instructions are located at [here](./deploy/kubernetes/README.md)
