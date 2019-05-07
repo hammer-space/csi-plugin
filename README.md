@@ -45,7 +45,7 @@ $ yum install nfs-utils
 The plugin container(s) must run as privileged containers
 
 ## Installation
-Kubernetes specific deployment instructions are located at [here](./deploy/kubernetes/README.md)
+Kubernetes specific deployment instructions are located at [here](https://github.com/hammer-space/csi-plugin/blob/master/deploy/kubernetes/README.md)
 
 ### Configuration
 Configuration parameters for the driver (Passed as environment variables to plugin container):
