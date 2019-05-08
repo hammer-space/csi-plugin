@@ -94,6 +94,8 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, 
 
 func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath string, mountFlags []string) error {
 	var err error
+
+	log.Infof("Finding best host exporting %s", shareExportPath)
 	if d.UseAnvil {
 		dataPortal, _ := d.hsclient.GetAnvilPortal()
 		source := fmt.Sprintf("%s:%s", dataPortal, shareExportPath)
@@ -115,9 +117,35 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 
 	for _, p := range portals {
 		addr := p.Node.MgmtIpAddress.Address
-		source := fmt.Sprintf("%s:%s%s", addr, common.DataPortalMountPrefix, shareExportPath)
+		// TODO: use configured prefix if specified
+		// grab exports with showmount
+		exports, err := common.GetNFSExports(addr)
+		if err != nil {
+			log.Infof("Could not get exports for data-portal, %s. Error: %v", p.Uoid["uuid"], err)
+			continue
+		}
+		log.Infof("Found exports for data-portal %s, %v", addr, exports)
+
+		// Check configured prefix
+		// Check the default prefixes
+		export := ""
+		for _, mountPrefix := range common.DefaultDataPortalMountPrefixes {
+			for _, e := range exports {
+				if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
+					export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
+					log.Infof("Found export %s", export)
+					break
+				}
+			}
+			if export != "" {
+				break
+			}
+		}
+		if export == "" {
+			continue
+		}
 		mo := append(mountFlags, "nfsvers=3")
-		err := common.MountShare(source, targetPath, mo)
+		err = common.MountShare(export, targetPath, mo)
 		if err != nil {
 			log.Infof("Could not mount via data-portal, %s. Error: %v", p.Uoid["uuid"], err)
 		} else {
@@ -126,5 +154,5 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		}
 	}
 
-	return errors.New("Could not mount to any data-portals")
+	return errors.New("could not mount to any data-portals")
 }

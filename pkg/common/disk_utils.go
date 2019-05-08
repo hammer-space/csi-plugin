@@ -161,6 +161,23 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
 		"could not determine backing file for loop device")
 }
 
+func GetNFSExports(address string) ([]string, error) {
+	output, err := exec.Command("showmount", "--no-headers", "-e", address).CombinedOutput()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal,
+			"could not determine nfs exports, %v: %s", err, output)
+	}
+	exports := strings.Split(string(output), "\n")
+	toReturn := []string{}
+	for _, export := range exports {
+		exportTokens := strings.Fields(export)
+		if len(exportTokens) > 0 {
+			toReturn = append(toReturn, exportTokens[0])
+		}
+	}
+	return toReturn, nil
+}
+
 func IsShareMounted(targetPath string) (bool, error) {
 	notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath)
 

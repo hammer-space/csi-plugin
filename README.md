@@ -113,20 +113,43 @@ Example Usage:
 
 Running the image - 
 ```bash
-docker build -t hs-csi-dev -f Dockerfile_dev .
-docker run --privileged=true -v /tmp/:/tmp/:shared -v /dev/:/dev/ --env-file ~/csi-env -it -v ~/csi_sanity_params.yaml:/tmp/csi_sanity_params.yaml -v ~/src/github.com/hammer-space/csi-plugin:/hammerspace-csi-plugin/:shared --name=hs-csi-dev hs-csi-dev
+make build-dev
+echo "
+CSI_ENDPOINT=/tmp/csi.sock
+HS_ENDPOINT=https://anvil.example.com
+HS_USERNAME=admin
+HS_PASSWORD=admin
+HS_TLS_VERIFY=false
+CSI_NODE_NAME=test
+CSI_USE_ANVIL_FOR_DATA=true
+SANITY_PARAMS_FILE=/tmp/csi_sanity_params.yaml
+ " >  ~/csi-env
+echo "
+blockBackingShareName: test-csi-block
+deleteDelay: 0
+objectives: "test-objective"
+" > ~/csi_sanity_params.yaml
+docker run --privileged=true \
+-v /tmp/:/tmp/:shared \
+-v /dev/:/dev/ \
+--env-file ~/csi-env \
+-it \
+-v ~/csi_sanity_params.yaml:/tmp/csi_sanity_params.yaml \
+-v ~/csi-plugin:/csi-plugin/:shared \
+--name=csi-dev \
+hammerspaceinc/csi-plugin-dev
 ```
 
-Running CSI plugin in image - Assuming env vars are set
+Running CSI plugin in dev image
 ```bash
-make build
+make compile # Recompile
 ./bin/hs-csi-plugin
 ```
 
 Using csc to call the plugin - 
 ```bash
 # open additional shell into dev container
-docker exec -it hs-csi-dev /bin/sh
+docker exec -it csi-dev /bin/sh
 
 # use csc tool
 CSI_DEBUG=true csc node get-info
@@ -135,7 +158,7 @@ csc -h
 
 
 #### Running unit tests
-``$ make unittest``
+``make unittest``
 
 #### Running Sanity tests
 These tests are functional and will create and delete volumes on the backend.

@@ -425,6 +425,7 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
 			return err
 		}
 		if statusCode != 200 {
+			//FIXME: err is not set here
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
 			return errors.New(fmt.Sprint("failed to set objective"))
