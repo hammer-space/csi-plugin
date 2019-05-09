@@ -32,6 +32,10 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 )
 
+func execCommandHelper(command string, args...string) ([]byte, error) {
+	return exec.Command(command, args...).CombinedOutput()
+}
+var execCommand = execCommandHelper
 // EnsureFreeLoopbackDeviceFile finds the next available loop device under /dev/loop*
 // If no free loop devices exist, a new one is created
 func EnsureFreeLoopbackDeviceFile() (uint64, error) {
@@ -88,7 +92,7 @@ func GetDeviceMinorNumber(device string) (uint32, error) {
 func MakeEmptyRawFile(pathname string, size int64) error {
 	log.Infof("creating file '%s'", pathname)
 	sizeStr := strconv.FormatInt(size, 10)
-	output, err := exec.Command("qemu-img", "create", "-fraw", pathname, sizeStr).CombinedOutput()
+	output, err := execCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
 	if err != nil {
 		log.Errorf("%s, %v", output, err.Error())
 		return err
@@ -143,7 +147,7 @@ func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 }
 
 func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
-	output, err := exec.Command("losetup", "-a").CombinedOutput()
+	output, err := execCommand("losetup", "-a")
 	if err != nil {
 		return "", status.Errorf(codes.Internal,
 			"could not determine backing file for loop device, %v", err)
@@ -162,7 +166,7 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
 }
 
 func GetNFSExports(address string) ([]string, error) {
-	output, err := exec.Command("showmount", "--no-headers", "-e", address).CombinedOutput()
+	output, err := execCommand("showmount", "--no-headers", "-e", address)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal,
 			"could not determine nfs exports, %v: %s", err, output)
