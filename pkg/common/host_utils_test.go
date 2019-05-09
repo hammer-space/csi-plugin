@@ -79,3 +79,25 @@ func TestDetermineBackingFileFromLoopDevice(t *testing.T) {
 		t.FailNow()
 	}
 }
+
+func TestExecCommandHelper(t *testing.T) {
+	expected := []byte("test\n")
+	actual, err := execCommandHelper("echo", "test")
+	if err != nil {
+		t.Logf("Unexpected error, %v", err)
+		t.FailNow()
+	}
+	if !reflect.DeepEqual(actual, expected) {
+		t.Logf("Expected: %v", expected)
+		t.Logf("Actual: %v", actual)
+		t.FailNow()
+	}
+
+	CommandExecTimeout = 1
+	_, err = execCommandHelper("sleep", "5")
+	if err == nil {
+		t.Logf("Expected error")
+		t.FailNow()
+	}
+
+}

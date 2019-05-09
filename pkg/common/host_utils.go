@@ -17,12 +17,14 @@ limitations under the License.
 package common
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	unix "golang.org/x/sys/unix"
@@ -33,8 +35,35 @@ import (
 )
 
 func execCommandHelper(command string, args...string) ([]byte, error) {
-	return exec.Command(command, args...).CombinedOutput()
+	cmd := exec.Command(command, args...)
+	var b bytes.Buffer
+	cmd.Stdout = &b
+	cmd.Stderr = &b
+	if err := cmd.Start(); err != nil {
+		log.Error(err)
+		return nil, err
+	}
+	// Wait for the process to finish or kill it after a timeout (whichever happens first):
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+	select {
+	case <-time.After(CommandExecTimeout):
+		log.Warnf("Command '%s' with args '%v' did not completed after %d seconds",
+			command, args, CommandExecTimeout)
+		if err := cmd.Process.Kill(); err != nil {
+			log.Error("failed to kill process: ", err)
+		}
+		return nil, fmt.Errorf("process killed as timeout reached")
+	case err := <-done:
+		if err != nil {
+			log.Errorf("process finished with error = %v", err)
+		}
+	}
+	return b.Bytes(), nil
 }
+
 var execCommand = execCommandHelper
 // EnsureFreeLoopbackDeviceFile finds the next available loop device under /dev/loop*
 // If no free loop devices exist, a new one is created
