@@ -16,6 +16,7 @@ limitations under the License.
 package main
 
 import (
+	"github.com/hammer-space/csi-plugin/pkg/common"
 	"net"
 	"net/url"
 	"os"
@@ -25,8 +26,7 @@ import (
 	"syscall"
 
 	log "github.com/sirupsen/logrus"
-
-	driver "github.com/hammer-space/csi-plugin/pkg/driver"
+    "github.com/hammer-space/csi-plugin/pkg/driver"
 )
 
 var ()
@@ -86,6 +86,7 @@ func validateEnvironmentVars() {
 			os.Exit(1)
 		}
 	}
+	common.DataPortalMountPrefix = os.Getenv("HS_DATA_PORTAL_MOUNT_PREFIX")
 }
 
 func main() {

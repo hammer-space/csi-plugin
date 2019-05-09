@@ -21,7 +21,6 @@ import "time"
 const (
 	CsiPluginName = "com.hammerspace.csi"
 
-	DataPortalMountPrefix = "/mnt/data-portal"
 	// Directory on hosts where backing shares for block volumes will be mounted
 	// Must end with a "/"
 	BlockProvisioningDir = "/tmp/"
@@ -36,5 +35,6 @@ var (
 	// TODO: Make into an ordered list of defaults
 	// The list of export path prefixes to try to use, in order, when mounting to a data portal with NFS v3
 	DefaultDataPortalMountPrefixes = [...]string{"/hs", "/mnt/data-portal"}
-	CommandExecTimeout   = 300 * time.Second  // Seconds
+	DataPortalMountPrefix = ""
+	CommandExecTimeout = 300 * time.Second  // Seconds
 )

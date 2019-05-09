@@ -118,32 +118,36 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 
 	for _, p := range portals {
 		addr := p.Node.MgmtIpAddress.Address
-		// TODO: use configured prefix if specified
-		// grab exports with showmount
-		exports, err := common.GetNFSExports(addr)
-		if err != nil {
-			log.Infof("Could not get exports for data-portal, %s. Error: %v", p.Uoid["uuid"], err)
-			continue
-		}
-		log.Infof("Found exports for data-portal %s, %v", addr, exports)
-
-		// Check configured prefix
-		// Check the default prefixes
 		export := ""
-		for _, mountPrefix := range common.DefaultDataPortalMountPrefixes {
-			for _, e := range exports {
-				if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
-					export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
-					log.Infof("Found export %s", export)
+		// Use configured prefix if specified
+		if common.DataPortalMountPrefix != "" {
+			export = fmt.Sprintf("%s:%s%s", addr, common.DataPortalMountPrefix, shareExportPath)
+		} else {
+			// grab exports with showmount
+			exports, err := common.GetNFSExports(addr)
+			if err != nil {
+				log.Infof("Could not get exports for data-portal, %s. Error: %v", p.Uoid["uuid"], err)
+				continue
+			}
+			log.Infof("Found exports for data-portal %s, %v", addr, exports)
+
+			// Check configured prefix
+			// Check the default prefixes
+			for _, mountPrefix := range common.DefaultDataPortalMountPrefixes {
+				for _, e := range exports {
+					if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
+						export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
+						log.Infof("Found export %s", export)
+						break
+					}
+				}
+				if export != "" {
 					break
 				}
 			}
-			if export != "" {
-				break
+			if export == "" {
+				continue
 			}
-		}
-		if export == "" {
-			continue
 		}
 		mo := append(mountFlags, "nfsvers=3")
 		err = common.MountShare(export, targetPath, mo)

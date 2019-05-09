@@ -52,15 +52,16 @@ Configuration parameters for the driver (Passed as environment variables to plug
 
 ``*`` Required
 
-Variable                   |     Default           | Description
-----------------           |     ------------      | -----
-*``CSI_ENDPOINT``          |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
-*``CSI_NODE_NAME``         |                       | Identifier for the host the plugin is running on
-``CSI_USE_ANVIL_FOR_DATA`` |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS. If false, data-portals are used.
-*``HS_ENDPOINT``           |                       | Hammerspace API gateway
-*``HS_USERNAME``           |                       | Hammerspace username
-*``HS_PASSWORD``           |                       | Hammerspace password
-``HS_TLS_VERIFY``          |     ``false``         | Whether to validate the Hammerspace API gateway certificates
+Variable                       |     Default           | Description
+----------------               |     ------------      | -----
+*``CSI_ENDPOINT``              |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
+*``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
+``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS. If false, data-portals are used.
+*``HS_ENDPOINT``               |                       | Hammerspace API gateway
+*``HS_USERNAME``               |                       | Hammerspace username
+*``HS_PASSWORD``               |                       | Hammerspace password
+``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
+``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data-portal mounts. Ex "/hs"
 
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):
