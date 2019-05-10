@@ -6,6 +6,6 @@
 
 FROM golang:1.10-alpine3.8
 RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img
-WORKDIR /hammerspace-csi-plugin/
+WORKDIR /csi-plugin/
 RUN go get golang.org/x/vgo
 RUN go get github.com/rexray/gocsi && cd /go/src/github.com/rexray/gocsi/csc && make all

@@ -244,6 +244,7 @@ func (d *CSIDriver) ensureBlockVolumeExists(
 		}
 	}
 
+	//FIXME: change to exponential backoff
 	const max_retries = 60
 	for retry := 0; retry < max_retries; retry++ {
 		err = d.hsclient.SetObjectives(hsVolume.BlockBackingShareName, "/" + hsVolume.Name, hsVolume.Objectives, true)

@@ -51,7 +51,7 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr, useAnvilStr string
 	if os.Getenv("HS_TLS_VERIFY") != "" {
 		tlsVerify, _ = strconv.ParseBool(tlsVerifyStr)
 	} else {
-		tlsVerify = true
+		tlsVerify = false
 	}
 	client, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
 	if err != nil {
