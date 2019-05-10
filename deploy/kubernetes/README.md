@@ -10,6 +10,12 @@ Apply all from within this directory:
 kubectl apply -f *.yaml
 ```
 
+
+## Plugin Updates
+
+To deploy updates to the plugin, simply change the image tag ```hammerspaceinc/csi-plugin``` of the StatefulSet and DaemonSet to the new plugin image, make any other update to environment variables, and reapply the yaml files.
+
+If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the existing plugin pods so the new image is pulled and the pods are recreated automatically. Otherwise, changing the image tag will trigger an update to occur. Ex. ```hammerspaceinc/csi-plugin:v0.1.0``` -> ```hammerspaceinc/csi-plugin:v0.1.1```
 ## Kubernetes  Cluster Prerequisites
 Kubernetes documentation for CSI support can be found [here](https://kubernetes-csi.github.io/)
 
