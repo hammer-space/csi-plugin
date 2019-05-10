@@ -57,8 +57,8 @@ func validateEnvironmentVars() {
 	}
 
 	endpointUrl, err := url.Parse(hsEndpoint)
-	if err != nil || endpointUrl.Scheme == "" || endpointUrl.Host == "" {
-		log.Error("HS_ENDPOINT must be a valid URL")
+	if err != nil || endpointUrl.Scheme != "https" || endpointUrl.Host == "" {
+		log.Error("HS_ENDPOINT must be a valid HTTPS URL")
 		os.Exit(1)
 	}
 
