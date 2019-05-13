@@ -52,4 +52,8 @@ const (
     OutOfCapacity             = "requested capacity %d exceeds available %d"
     LoopDeviceAttachFailed    = "failed setting up loop device: device=%s, filePath=%s"
     TargetPathUnknownFiletype = "target path exists but is not a block device nor directory"
+
+
+    // CSI v0
+    BlockVolumesUnsupported   = "Block volumes are unsupported in CSI v0.3"
 )
