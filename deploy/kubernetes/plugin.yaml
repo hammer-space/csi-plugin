@@ -101,6 +101,8 @@ spec:
               value: true
             - name: HS_TLS_VERIFY
               value: false
+            - name: CSI_MAJOR_VERSION
+              value: "1"
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/
@@ -250,6 +252,8 @@ spec:
               value: true
             - name: HS_TLS_VERIFY
               value: false
+            - name: CSI_MAJOR_VERSION
+              value: "1"
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -281,6 +285,7 @@ spec:
         - name: staging-dir
           hostPath:
             path: /tmp/
+---
 apiVersion: v1
 kind: ServiceAccount
 metadata:

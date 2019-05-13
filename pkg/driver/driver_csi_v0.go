@@ -35,10 +35,10 @@ type CSIDriver_v0Support struct {
     wg            sync.WaitGroup
     running       bool
     lock          sync.Mutex
-    driver        CSIDriver
+    driver        *CSIDriver
 }
 
-func NewCSIDriver_v0Support(driver CSIDriver) *CSIDriver_v0Support {
+func NewCSIDriver_v0Support(driver *CSIDriver) *CSIDriver_v0Support {
     return &CSIDriver_v0Support{
         driver:      driver,
     }
@@ -123,7 +123,6 @@ func (d *CSIDriver_v0Support) CreateVolume(
     ctx context.Context,
     req *csi_v0.CreateVolumeRequest) (
     *csi_v0.CreateVolumeResponse, error) {
-
 
     // Change capabilities from v0 -> v1
     caps := []*csi.VolumeCapability{}

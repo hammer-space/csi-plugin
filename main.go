@@ -86,21 +86,42 @@ func validateEnvironmentVars() {
             os.Exit(1)
         }
     }
+    if os.Getenv("CSI_MAJOR_VERSION") != "0" || os.Getenv("CSI_MAJOR_VERSION") != "1" {
+        if err != nil {
+            log.Error("CSI_MAJOR_VERSION must be set to \"0\" or \"1\"")
+            os.Exit(1)
+        }
+    }
     common.DataPortalMountPrefix = os.Getenv("HS_DATA_PORTAL_MOUNT_PREFIX")
+}
+
+type Server interface {
+    Start(net.Listener) error
+    Stop()
 }
 
 func main() {
 
     validateEnvironmentVars()
 
+    var server Server
+
+    CSI_version := os.Getenv("CSI_MAJOR_VERSION")
+
     endpoint := os.Getenv("CSI_ENDPOINT")
-    d := driver.NewCSIDriver(
+    csiDriver := driver.NewCSIDriver(
         os.Getenv("HS_ENDPOINT"),
         os.Getenv("HS_USERNAME"),
         os.Getenv("HS_PASSWORD"),
         os.Getenv("HS_TLS_VERIFY"),
         os.Getenv("CSI_USE_ANVIL_FOR_DATA"),
     )
+
+    if CSI_version == "0" {
+        server = driver.NewCSIDriver_v0Support(csiDriver)
+    } else {
+        server = csiDriver
+    }
 
     // Listen
     os.Remove(endpoint)
@@ -114,7 +135,7 @@ func main() {
     defer os.Remove(endpoint)
 
     // Start server
-    if err := d.Start(l); err != nil {
+    if err := server.Start(l); err != nil {
         log.Errorf("Error: Unable to start CSI server: %v\n",
             err)
         os.Exit(1)
@@ -132,6 +153,6 @@ func main() {
     signal.Notify(sigc, sigs...)
 
     <-sigc
-    d.Stop()
+    server.Stop()
     log.Info("hammerspace driver stopped")
 }

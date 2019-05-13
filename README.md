@@ -62,6 +62,7 @@ Variable                       |     Default           | Description
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
 ``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data-portal mounts. Ex "/hs"
+``CSI_MAJOR_VERSION``          |     ``"1"``           | The major version of the CSI interface used to communicate with the plugin. Valid values are "1" and "0"
 
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):
