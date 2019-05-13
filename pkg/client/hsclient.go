@@ -85,7 +85,7 @@ func NewHammerspaceClient(endpoint, username, password string, tlsVerify bool) (
 func (client *HammerspaceClient) GetAnvilPortal() (string, error) {
     endpointUrl, _ := url.Parse(client.endpoint)
 
-    return endpointUrl.Host, nil
+    return endpointUrl.Hostname(), nil
 }
 
 // GetDataPortals returns a list of operational data-portals

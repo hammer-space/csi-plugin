@@ -25,6 +25,7 @@ import (
     "google.golang.org/grpc/codes"
     "google.golang.org/grpc/reflection"
     "google.golang.org/grpc/status"
+    "k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
     "net"
     "sync"
 )
@@ -63,6 +64,8 @@ func (c *CSIDriver_v0Support) Address() string {
 func (c *CSIDriver_v0Support) Start(l net.Listener) error {
     c.lock.Lock()
     defer c.lock.Unlock()
+
+    log.Infof("Starting gRPC server with CSI v0 support")
 
     // Set listener
     c.listener = l
@@ -410,9 +413,35 @@ func (d *CSIDriver_v0Support) NodeStageVolume(
     req *csi_v0.NodeStageVolumeRequest) (
     *csi_v0.NodeStageVolumeResponse, error) {
 
+    cap := req.GetVolumeCapability()
+    // convert accesstype
+    accessType := cap.GetMount()
+
+    // Make sure it's only a request for mount volume
+    if accessType == nil {
+        return nil, status.Error(codes.InvalidArgument, common.BlockVolumesUnsupported)
+    }
+
+    accessMode := csi.VolumeCapability_AccessMode_Mode(cap.GetAccessMode().GetMode())
+
+    capv1 :=&csi.VolumeCapability{
+        AccessType: &csi.VolumeCapability_Mount{
+            Mount: &csi.VolumeCapability_MountVolume{
+                FsType:     accessType.GetFsType(),
+                MountFlags: accessType.GetMountFlags(),
+            },
+        },
+        AccessMode: &csi.VolumeCapability_AccessMode{
+            Mode: accessMode,
+        },
+    }
+
     _, err := d.driver.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{
         StagingTargetPath: req.GetStagingTargetPath(),
         VolumeId: req.GetVolumeId(),
+        VolumeCapability: capv1,
+        PublishContext: req.GetVolumeAttributes(),
+        Secrets: req.GetNodeStageSecrets(),
     })
 
     return &csi_v0.NodeStageVolumeResponse{}, err

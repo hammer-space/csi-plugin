@@ -98,9 +98,9 @@ spec:
                   name: com.hammerspace.csi.credentials
                   key: endpoint
             - name: CSI_USE_ANVIL_FOR_DATA
-              value: true
+              value: "true"
             - name: HS_TLS_VERIFY
-              value: false
+              value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
           volumeMounts:
@@ -249,9 +249,9 @@ spec:
                 fieldRef:
                   fieldPath: spec.nodeName
             - name: CSI_USE_ANVIL_FOR_DATA
-              value: true
+              value: "true"
             - name: HS_TLS_VERIFY
-              value: false
+              value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
           volumeMounts:
