@@ -34,7 +34,6 @@ var (
 
     CsiVersion = "1"
 
-    // TODO: Make into an ordered list of defaults
     // The list of export path prefixes to try to use, in order, when mounting to a data portal with NFS v3
     DefaultDataPortalMountPrefixes = [...]string{"/hs", "/mnt/data-portal"}
     DataPortalMountPrefix = ""
