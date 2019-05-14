@@ -150,6 +150,7 @@ func (client *HammerspaceClient) EnsureLogin() error {
         "statusCode": resp.StatusCode,
         "body":       bodyString,
         "headers":    resp.Header,
+        "url":        resp.Request.URL,
     })
 
     if err != nil {
@@ -337,6 +338,8 @@ func (client *HammerspaceClient) CreateShare(name string,
     extendedInfo := map[string]string{
         "csi_created_by_plugin_name":    common.CsiPluginName,
         "csi_created_by_plugin_version": common.Version,
+        "csi_created_by_plugin_git_hash": common.Githash,
+        "csi_created_by_csi_version": common.CsiVersion,
     }
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))

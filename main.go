@@ -119,6 +119,7 @@ func main() {
 
     if CSI_version == "0" {
         server = driver.NewCSIDriver_v0Support(csiDriver)
+        common.CsiVersion = "0"
     } else {
         server = csiDriver
     }
