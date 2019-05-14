@@ -64,7 +64,9 @@ const (
 	"extendedInfo": {
 		"csi_created_by_plugin_version": "test_version",
 		"csi_created_by_plugin_name": "test_plugin",
-		"csi_delayed_delete": "0"
+		"csi_delayed_delete": "0",
+        "csi_created_by_plugin_git_hash": "",
+        "csi_created_by_csi_version": "1"
 	},
 	"comment": null,
 	"name": "test-client-code",

@@ -109,6 +109,8 @@ func TestListShares(t *testing.T) {
                 "csi_created_by_plugin_version": "test_version",
                 "csi_created_by_plugin_name":    "test_plugin",
                 "csi_delayed_delete":            "0",
+                "csi_created_by_plugin_git_hash": "",
+                "csi_created_by_csi_version": "1",
             },
             Size:       1073741824,
             ShareState: "PUBLISHED",
@@ -177,11 +179,13 @@ func TestCreateShare(t *testing.T) {
          "extendedInfo":{
              "csi_created_by_plugin_version": "%s",
              "csi_created_by_plugin_name": "%s",
-             "csi_delete_delay": "0"
+             "csi_delete_delay": "0",
+             "csi_created_by_plugin_git_hash": "%s",
+             "csi_created_by_csi_version": "%s"
          },
          "shareSizeLimit":0,
          "exportOptions":[]}
-    `, common.Version, common.CsiPluginName)
+    `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
     err := hsclient.CreateShare("test",
         "/test", -1,
         []string{}, []common.ShareExportOptions{}, 0)
@@ -220,11 +224,13 @@ func TestCreateShare(t *testing.T) {
          "path":"/test",
          "extendedInfo":{
              "csi_created_by_plugin_version": "%s",
-             "csi_created_by_plugin_name": "%s"
+             "csi_created_by_plugin_name": "%s",
+             "csi_created_by_plugin_git_hash": "%s",
+             "csi_created_by_csi_version": "%s"
          },
          "shareSizeLimit":100,
          "exportOptions":[]}
-    `, common.Version, common.CsiPluginName)
+    `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
     err = hsclient.CreateShare("test",
         "/test",
         100,
@@ -243,7 +249,9 @@ func TestCreateShare(t *testing.T) {
          "extendedInfo":{
              "csi_created_by_plugin_version": "%s",
              "csi_created_by_plugin_name": "%s",
-             "csi_delete_delay": "0"
+             "csi_delete_delay": "0",
+             "csi_created_by_plugin_git_hash": "%s",
+             "csi_created_by_csi_version": "%s"
          },
          "shareSizeLimit":100,
          "exportOptions":[
@@ -258,7 +266,7 @@ func TestCreateShare(t *testing.T) {
                 "rootSquash": true
             }
          ]}
-    `, common.Version, common.CsiPluginName)
+    `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
     exportOptions := []common.ShareExportOptions{
         common.ShareExportOptions{
             Subnet:            "172.168.0.0/24",
@@ -290,11 +298,13 @@ func TestCreateShare(t *testing.T) {
          "extendedInfo":{
              "csi_created_by_plugin_version": "%s",
              "csi_created_by_plugin_name": "%s",
-             "csi_delete_delay": "0"
+             "csi_delete_delay": "0",
+             "csi_created_by_plugin_git_hash": "%s",
+             "csi_created_by_csi_version": "%s"
          },
          "shareSizeLimit":0,
          "exportOptions":[]}
-    `, common.Version, common.CsiPluginName)
+    `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
     err = hsclient.CreateShare("test", "/test", -1, []string{}, []common.ShareExportOptions{}, 0)
     if err == nil {
         t.Logf("Expected error")

@@ -130,28 +130,12 @@ func (d *CSIDriver_v0Support) CreateVolume(
     // Change capabilities from v0 -> v1
     caps := []*csi.VolumeCapability{}
     for _, cap := range req.GetVolumeCapabilities() {
+        capv1, err := ConvertVolumeCapabilityFromv0Tov1(cap)
 
-        // convert accesstype
-        accessType := cap.GetMount()
-
-        // Make sure it's only a request for mount volume
-        if accessType == nil {
-            return nil, status.Error(codes.InvalidArgument, common.BlockVolumesUnsupported)
+        if err != nil {
+            return nil, err
         }
-
-        accessMode := csi.VolumeCapability_AccessMode_Mode(cap.GetAccessMode().GetMode())
-
-        caps = append(caps, &csi.VolumeCapability{
-            AccessType: &csi.VolumeCapability_Mount{
-                Mount: &csi.VolumeCapability_MountVolume{
-                    FsType: accessType.GetFsType(),
-                    MountFlags: accessType.GetMountFlags(),
-                },
-            },
-            AccessMode: &csi.VolumeCapability_AccessMode{
-                Mode: accessMode,
-            },
-        })
+        caps = append(caps, capv1)
     }
 
     // CapacityRange from v0 -> v1
@@ -217,30 +201,15 @@ func (d *CSIDriver_v0Support) ValidateVolumeCapabilities(
     // Change capabilities from v0 -> v1
     caps := []*csi.VolumeCapability{}
     for _, cap := range req.GetVolumeCapabilities() {
+        capv1, err := ConvertVolumeCapabilityFromv0Tov1(cap)
 
-        // convert accesstype
-        accessType := cap.GetMount()
-
-        // Make sure it's only a request for mount volume
-        if accessType == nil {
+        if err != nil {
             return &csi_v0.ValidateVolumeCapabilitiesResponse{
                 Supported: false,
             }, nil
         }
 
-        accessMode := csi.VolumeCapability_AccessMode_Mode(cap.GetAccessMode().GetMode())
-
-        caps = append(caps, &csi.VolumeCapability{
-            AccessType: &csi.VolumeCapability_Mount{
-                Mount: &csi.VolumeCapability_MountVolume{
-                    FsType: accessType.GetFsType(),
-                    MountFlags: accessType.GetMountFlags(),
-                },
-            },
-            AccessMode: &csi.VolumeCapability_AccessMode{
-                Mode: accessMode,
-            },
-        })
+        caps = append(caps, capv1)
     }
     request := &csi.ValidateVolumeCapabilitiesRequest{
         VolumeId: req.GetVolumeId(),
@@ -413,30 +382,13 @@ func (d *CSIDriver_v0Support) NodeStageVolume(
     req *csi_v0.NodeStageVolumeRequest) (
     *csi_v0.NodeStageVolumeResponse, error) {
 
-    cap := req.GetVolumeCapability()
-    // convert accesstype
-    accessType := cap.GetMount()
+    capv1, err := ConvertVolumeCapabilityFromv0Tov1(req.GetVolumeCapability())
 
-    // Make sure it's only a request for mount volume
-    if accessType == nil {
-        return nil, status.Error(codes.InvalidArgument, common.BlockVolumesUnsupported)
+    if err != nil {
+        return nil, err
     }
 
-    accessMode := csi.VolumeCapability_AccessMode_Mode(cap.GetAccessMode().GetMode())
-
-    capv1 :=&csi.VolumeCapability{
-        AccessType: &csi.VolumeCapability_Mount{
-            Mount: &csi.VolumeCapability_MountVolume{
-                FsType:     accessType.GetFsType(),
-                MountFlags: accessType.GetMountFlags(),
-            },
-        },
-        AccessMode: &csi.VolumeCapability_AccessMode{
-            Mode: accessMode,
-        },
-    }
-
-    _, err := d.driver.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{
+    _, err = d.driver.NodeStageVolume(ctx, &csi.NodeStageVolumeRequest{
         StagingTargetPath: req.GetStagingTargetPath(),
         VolumeId: req.GetVolumeId(),
         VolumeCapability: capv1,
@@ -460,44 +412,55 @@ func (d *CSIDriver_v0Support) NodeUnstageVolume(
     return &csi_v0.NodeUnstageVolumeResponse{}, err
 }
 
+func ConvertVolumeCapabilityFromv0Tov1(capability *csi_v0.VolumeCapability) (*csi.VolumeCapability, error) {
+
+    // convert accesstype
+    accessType := capability.GetMount()
+
+    if accessType == nil {
+        return &csi.VolumeCapability{}, status.Error(codes.InvalidArgument, common.BlockVolumesUnsupported)
+    }
+
+    accessMode := csi.VolumeCapability_AccessMode_Mode(capability.AccessMode.GetMode())
+
+    return &csi.VolumeCapability{
+        AccessType: &csi.VolumeCapability_Mount{
+            Mount: &csi.VolumeCapability_MountVolume{
+                FsType: accessType.GetFsType(),
+                MountFlags: accessType.GetMountFlags(),
+            },
+        },
+        AccessMode: &csi.VolumeCapability_AccessMode{
+            Mode: accessMode,
+        },
+    }, nil
+}
+
 func (d *CSIDriver_v0Support) NodePublishVolume(
     ctx context.Context,
     req *csi_v0.NodePublishVolumeRequest) (
     *csi_v0.NodePublishVolumeResponse, error) {
 
-        // convert accesstype
-        accessType := req.VolumeCapability.GetMount()
+    capv1, err := ConvertVolumeCapabilityFromv0Tov1(req.GetVolumeCapability())
 
-        if accessType == nil {
-            //TODO: If it's not mount, we dont support it
-        }
+    if err != nil {
+        return nil, err
+    }
 
-        accessMode := csi.VolumeCapability_AccessMode_Mode(req.VolumeCapability.AccessMode.GetMode())
-
-        request := &csi.NodePublishVolumeRequest{
-            TargetPath: req.TargetPath,
-            VolumeId: req.VolumeId,
-            PublishContext: req.PublishInfo,
-            StagingTargetPath: req.StagingTargetPath,
-            VolumeCapability: &csi.VolumeCapability{
-                AccessType: &csi.VolumeCapability_Mount{
-                    Mount: &csi.VolumeCapability_MountVolume{
-                        FsType: accessType.GetFsType(),
-                        MountFlags: accessType.GetMountFlags(),
-                    },
-                },
-                AccessMode: &csi.VolumeCapability_AccessMode{
-                    Mode: accessMode,
-                },
-            },
-            Readonly: req.Readonly,
-            Secrets: req.NodePublishSecrets,
-            VolumeContext: req.VolumeAttributes,
-        }
-        _, err := d.driver.NodePublishVolume(ctx, request)
-        if err != nil {
-            return nil, err
-        }
+    request := &csi.NodePublishVolumeRequest{
+        TargetPath: req.TargetPath,
+        VolumeId: req.VolumeId,
+        PublishContext: req.PublishInfo,
+        StagingTargetPath: req.StagingTargetPath,
+        VolumeCapability: capv1,
+        Readonly: req.Readonly,
+        Secrets: req.NodePublishSecrets,
+        VolumeContext: req.VolumeAttributes,
+    }
+    _, err = d.driver.NodePublishVolume(ctx, request)
+    if err != nil {
+        return nil, err
+    }
 
     return &csi_v0.NodePublishVolumeResponse{}, nil
 }
