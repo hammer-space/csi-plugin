@@ -36,41 +36,29 @@ spec:
       containers:
         - name: csi-provisioner
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-provisioner:v1.0.1
+          image: quay.io/k8scsi/csi-provisioner:v0.4.2
           args:
             - "--provisioner=com.hammerspace.csi"
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
           env:
             - name: CSI_ENDPOINT
-              value: /var/lib/csi/hs-csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
           volumeMounts:
             - name: socket-dir
-              mountPath: /var/lib/csi/
+              mountPath: /var/lib/csi/sockets/pluginproxy/
         - name: csi-attacher
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-attacher:v1.0.1
+          image: quay.io/k8scsi/csi-attacher:v0.4.2
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
           env:
             - name: CSI_ENDPOINT
-              value: /var/lib/csi/hs-csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
           volumeMounts:
             - name: socket-dir
-              mountPath: /var/lib/csi/
-        - name: csi-snapshotter
-          imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-snapshotter:v1.0.1
-          args:
-            - "--csi-address=$(CSI_ENDPOINT)"
-            - "--v=5"
-          env:
-            - name: CSI_ENDPOINT
-              value: /var/lib/csi/hs-csi.sock
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /var/lib/csi/
+              mountPath: /var/lib/csi/sockets/pluginproxy/
         - name: hs-csi-plugin-controller
           securityContext:
             privileged: true
@@ -78,10 +66,10 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v0.1.0
+          image: hammerspaceinc/csi-plugin:latest
           env:
             - name: CSI_ENDPOINT
-              value: /var/lib/csi/hs-csi.sock
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
             - name: HS_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -102,10 +90,10 @@ spec:
             - name: HS_TLS_VERIFY
               value: "false"
             - name: CSI_MAJOR_VERSION
-              value: "1"
+              value: "0"
           volumeMounts:
             - name: socket-dir
-              mountPath: /var/lib/csi/
+              mountPath: /var/lib/csi/sockets/pluginproxy
             - name: staging-dir
               mountPath: /tmp/
               mountPropagation: Bidirectional
@@ -199,7 +187,7 @@ spec:
       containers:
         - name: driver-registrar
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-node-driver-registrar:v1.0.2
+          image: quay.io/k8scsi/driver-registrar:v0.4.2
           args:
             - "--v=5"
             - "--csi-address=$(CSI_ENDPOINT)"
@@ -208,7 +196,7 @@ spec:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock
             - name: REG_SOCKET
-              value: /var/lib/kubelet/plugins_registry/com.hammerspace.csi/csi.sock
+              value: /var/lib/kubelet/plugins/com.hammerspace.csi/csi.sock
             - name: KUBE_NODE_NAME
               valueFrom:
                 fieldRef:
@@ -225,7 +213,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v0.1.0
+          image: hammerspaceinc/csi-plugin:latest
           env:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock
@@ -253,7 +241,7 @@ spec:
             - name: HS_TLS_VERIFY
               value: "false"
             - name: CSI_MAJOR_VERSION
-              value: "1"
+              value: "0"
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
@@ -261,7 +249,7 @@ spec:
               mountPath: /registration
               mountPropagation: Bidirectional
             - name: mountpoint-dir
-              mountPath: /var/lib/kubelet/
+              mountPath: /var/lib/kubelet
               mountPropagation: Bidirectional
             - name: dev-dir
               mountPath: /dev
@@ -271,14 +259,15 @@ spec:
       volumes:
         - name: socket-dir
           hostPath:
-            path: /var/lib/kubelet/plugins_registry/com.hammerspace.csi
+            path: /var/lib/kubelet/plugins/com.hammerspace.csi
             type: DirectoryOrCreate
         - name: mountpoint-dir
+          type: Directory
           hostPath:
-            path: /var/lib/kubelet/
+            path: /var/lib/kubelet
         - name: registration-dir
           hostPath:
-            path: /var/lib/kubelet/plugins_registry/
+            path: /var/lib/kubelet/plugins/
         - name: dev-dir
           hostPath:
             path: /dev

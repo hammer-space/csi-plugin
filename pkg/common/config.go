@@ -16,22 +16,26 @@ limitations under the License.
 
 package common
 
-const (
-	CsiPluginName = "com.hammerspace.csi"
+import "time"
 
-	DataPortalMountPrefix = "/mnt/data-portal"
-	// Directory on hosts where backing shares for block volumes will be mounted
-	// Must end with a "/"
-	BlockProvisioningDir = "/tmp/"
-	SharePathPrefix      = "/"
+const (
+    CsiPluginName = "com.hammerspace.csi"
+
+    // Directory on hosts where backing shares for block volumes will be mounted
+    // Must end with a "/"
+    BlockProvisioningDir = "/tmp/"
+    SharePathPrefix      = "/"
 )
 
 var (
-	// These should be set at compile time
-	Version = "NONE"
-	Githash = "NONE"
+    // These should be set at compile time
+    Version = "NONE"
+    Githash = "NONE"
 
-	// TODO: Make into an ordered list of defaults
-	// The list of export path prefixes to try to use, in order, when mounting to a data portal with NFS v3
-	DefaultDataPortalMountPrefixes = [...]string{"/hs", "/mnt/data-portal"}
+    CsiVersion = "1"
+
+    // The list of export path prefixes to try to use, in order, when mounting to a data portal with NFS v3
+    DefaultDataPortalMountPrefixes = [...]string{"/hs", "/mnt/data-portal"}
+    DataPortalMountPrefix = ""
+    CommandExecTimeout = 300 * time.Second  // Seconds
 )

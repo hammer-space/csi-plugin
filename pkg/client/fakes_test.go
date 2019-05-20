@@ -17,7 +17,7 @@ limitations under the License.
 package client
 
 const (
-	FakeShareRoot = `
+    FakeShareRoot = `
 {
     "uoid": {
         "uuid": "acd90e88-ed23-3464-90ee-320e11de31ae",
@@ -53,7 +53,7 @@ const (
     "scheduledPurgeTime": null
 }
 `
-	FakeShare1 = `
+    FakeShare1 = `
 {
 	"uoid": {
 		"uuid": "ac486652-6957-43cd-ac75-9885b3b3e9c9",
@@ -64,7 +64,9 @@ const (
 	"extendedInfo": {
 		"csi_created_by_plugin_version": "test_version",
 		"csi_created_by_plugin_name": "test_plugin",
-		"csi_delayed_delete": "0"
+		"csi_delayed_delete": "0",
+        "csi_created_by_plugin_git_hash": "",
+        "csi_created_by_csi_version": "1"
 	},
 	"comment": null,
 	"name": "test-client-code",
@@ -100,7 +102,7 @@ const (
 }
 `
 
-	FakeTaskCompleted = `
+    FakeTaskCompleted = `
 {
     "uuid": "a59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
@@ -109,7 +111,7 @@ const (
 }
 `
 
-	FakeTaskFailed = `
+    FakeTaskFailed = `
 {
     "uuid": "b59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
@@ -118,7 +120,7 @@ const (
 }
 `
 
-	FakeTaskRunning = `
+    FakeTaskRunning = `
 {
     "uuid": "c59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
