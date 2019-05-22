@@ -102,8 +102,7 @@ make build-release
 
 ##### Publish a new release
 ```bash
-docker tag hs-csi-plugin:$(cat VERSION)  <registry>/hs-csi-plugin:$(cat VERSION)
-docker push <registry>/hs-csi-plugin:$(cat VERSION)
+docker push hammerspaceinc/csi-plugin:$(cat VERSION)
 ```
 
 
