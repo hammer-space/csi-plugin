@@ -98,6 +98,9 @@ func (d *CSIDriver) NodePublishVolume(
     case *csi.VolumeCapability_Mount:
         volumeMode = "Filesystem"
         fsType = cap.GetMount().FsType
+        if fsType == "" {
+            fsType = "nfs"
+        }
     default:
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.GetVolumeId())
     }
@@ -227,7 +230,7 @@ func (d *CSIDriver) NodeUnpublishVolume(
     }
 
     switch mode := fi.Mode(); {
-    case mode&os.ModeDevice != 0: // if target path is a device, it's block TODO: or a file-backed mount voume
+    case mode&os.ModeDevice != 0: // if target path is a device, it's block TODO: or a file-backed mount volume
         // find loopback device location from target path
         deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
         if err != nil {

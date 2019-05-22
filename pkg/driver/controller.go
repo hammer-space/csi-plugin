@@ -19,6 +19,7 @@ package driver
 import (
     "fmt"
     "github.com/golang/protobuf/ptypes/timestamp"
+    "github.com/jpillora/backoff"
     "strconv"
     "strings"
     "time"
@@ -246,19 +247,26 @@ func (d *CSIDriver) ensureDeviceFileExists(
         }
     }
 
-    //FIXME: change to exponential backoff
-    const max_retries = 60
-    for retry := 0; retry < max_retries; retry++ {
+    b := &backoff.Backoff{
+        Max:    10 * time.Second,
+        Factor: 1.5,
+        Jitter: true,
+    }
+    startTime := time.Now()
+
+    for time.Now().Sub(startTime) < 10 * time.Minute {
+        dur := b.Duration()
+        time.Sleep(dur)
         err = d.hsclient.SetObjectives(backingShare.ExportPath, "/" + hsVolume.Name, hsVolume.Objectives, true)
         if err != nil {
-            log.Errorf("failed to set objectives on backing file for volume %v. retrying in 1 second", err)
+            log.Warnf("failed to set objectives on backing file for volume %v", err)
             time.Sleep(time.Second)
         } else {
             break
         }
     }
     if err != nil {
-        log.Errorf("failed to set objectives on backing file for volume %v after retrying %d times", err, max_retries)
+        log.Errorf("failed to set objectives on backing file for volume %v after retrying for 10 minutes", err)
         return err
     }
 

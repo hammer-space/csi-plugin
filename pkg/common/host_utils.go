@@ -237,7 +237,7 @@ func UnmountShare(targetPath string) error {
         return status.Error(codes.Internal, err.Error())
     }
     if !isMounted {
-        return status.Error(codes.NotFound, ShareNotMounted)
+        return nil
     }
 
     err = mounter.Unmount(targetPath)
