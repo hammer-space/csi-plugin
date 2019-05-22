@@ -90,16 +90,18 @@ func (d *CSIDriver) NodePublishVolume(
 
     log.Infof("Attempting to publish volume %s", req.GetVolumeId())
 
-    var volumeMode string
-    switch req.GetVolumeCapability().AccessType.(type) {
+    var volumeMode, fsType string
+    cap := req.GetVolumeCapability()
+    switch cap.GetAccessType().(type) {
     case *csi.VolumeCapability_Block:
         volumeMode = "Block"
     case *csi.VolumeCapability_Mount:
         volumeMode = "Filesystem"
+        fsType = cap.GetMount().FsType
     default:
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.GetVolumeId())
     }
-    if volumeMode == "Filesystem" {
+    if volumeMode == "Filesystem" && fsType == "nfs"{
         path := req.GetVolumeId()
         targetPath := req.GetTargetPath()
         notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
@@ -127,6 +129,9 @@ func (d *CSIDriver) NodePublishVolume(
         if err != nil {
             return nil, err
         }
+    } else if volumeMode == "Filesystem"{
+        //TODO: file backed mount volumes
+
     } else if volumeMode == "Block" {
 
         // Lock on backing share
@@ -158,7 +163,7 @@ func (d *CSIDriver) NodePublishVolume(
 
         // Mount the file
         log.Infof("Mounting block volume at %s", targetPath)
-        filePath := common.BlockProvisioningDir + req.GetVolumeId()
+        filePath := common.BackingShareProvisioningDir + req.GetVolumeId()
 
         deviceNumber, err := common.EnsureFreeLoopbackDeviceFile()
         if err != nil {
@@ -222,7 +227,7 @@ func (d *CSIDriver) NodeUnpublishVolume(
     }
 
     switch mode := fi.Mode(); {
-    case mode&os.ModeDevice != 0: // if target path is a device, it's block
+    case mode&os.ModeDevice != 0: // if target path is a device, it's block TODO: or a file-backed mount voume
         // find loopback device location from target path
         deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
         if err != nil {
@@ -343,7 +348,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
     switch mode := fi.Mode(); {
     case mode&os.ModeDevice != 0:
         // we must stat the actual file, not the dev files, to get the size
-        fileInfo, err := os.Stat(common.BlockProvisioningDir + req.GetVolumeId())
+        fileInfo, err := os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
         if err != nil {
             return nil, status.Error(codes.NotFound, common.VolumeNotFound)
         }

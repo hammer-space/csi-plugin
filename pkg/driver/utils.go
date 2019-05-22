@@ -42,7 +42,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
     if err != nil {
         return status.Errorf(codes.Internal, err.Error())
     }
-    backingDir := common.BlockProvisioningDir + backingShare.ExportPath
+    backingDir := common.BackingShareProvisioningDir + backingShare.ExportPath
     // Mount backing share
     if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
         mo := []string{"sync"}
@@ -61,7 +61,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
 
 func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, error) {
     backingShare, err := d.hsclient.GetShare(backingShareName)
-    mountPath := common.BlockProvisioningDir + backingShare.ExportPath
+    mountPath := common.BackingShareProvisioningDir + backingShare.ExportPath
     if isMounted, _ := common.IsShareMounted(mountPath); !isMounted {
         return true, nil
     }

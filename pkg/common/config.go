@@ -23,9 +23,8 @@ const (
 
     // Directory on hosts where backing shares for file-backed volumes will be mounted
     // Must end with a "/"
-    //TODO: Change to backingShareProvisioningDir
-    BlockProvisioningDir = "/tmp/"
-    SharePathPrefix      = "/"
+    BackingShareProvisioningDir = "/tmp/"
+    SharePathPrefix             = "/"
 )
 
 var (
