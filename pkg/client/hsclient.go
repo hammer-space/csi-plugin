@@ -293,7 +293,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
     if err != nil {
         log.Error("Error parsing JSON response: " + err.Error())
     }
-    return &share, nil
+    return &share, err
 }
 
 func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {

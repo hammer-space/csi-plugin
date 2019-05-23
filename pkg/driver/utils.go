@@ -84,7 +84,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, 
     }
 
     log.Infof("unmounting backing share %s", mountPath)
-    err = common.UnmountShare(mountPath)
+    err = common.UnmountFilesystem(mountPath)
     if err != nil {
         log.Errorf("failed to unmount backing share %s", mountPath)
         return false, err
