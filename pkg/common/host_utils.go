@@ -130,6 +130,20 @@ func MakeEmptyRawFile(pathname string, size int64) error {
     return nil
 }
 
+func FormatDevice(device, fsType string) error {
+    output, err := execCommand(fmt.Sprintf("mkfs.%s", fsType), device)
+    if err != nil {
+        log.Info(err)
+        if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
+            log.Warningf("Device %s is already mounted", device)
+            return err
+        }
+        log.Errorf("Could not format device %s: %s", device, err.Error())
+        return err
+    }
+    return nil
+}
+
 func DeleteFile(pathname string) error {
     log.Infof("deleting file '%s'", pathname)
     err := os.Remove(pathname)

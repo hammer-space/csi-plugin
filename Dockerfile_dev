@@ -5,7 +5,7 @@
 # via a docker volume (docker run -v /source-code/:/hammerspace-csi-plugin/
 
 FROM golang:1.10-alpine3.8
-RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img
+RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img xfsprogs e2fsprogs zfs btrfs-progs
 WORKDIR /csi-plugin/
 RUN go get golang.org/x/vgo
 RUN go get github.com/rexray/gocsi && cd /go/src/github.com/rexray/gocsi/csc && make all

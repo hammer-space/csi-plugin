@@ -8,7 +8,7 @@ RUN go get golang.org/x/vgo
 RUN make clean compile
 
 FROM alpine:3.8
-RUN apk add --no-cache nfs-utils qemu-img ca-certificates
+RUN apk add --no-cache nfs-utils qemu-img ca-certificates xfsprogs e2fsprogs zfs btrfs-progs
 WORKDIR /bin/
 COPY --from=0 /go/src/github.com/hammer-space/csi-plugin/bin/hs-csi-plugin .
 ENTRYPOINT ["/bin/hs-csi-plugin"]

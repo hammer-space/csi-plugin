@@ -62,7 +62,7 @@ type HSVolume struct {
     Path                  string
     VolumeMode            string
     SourceSnapPath        string
-    FSType         string
+    FSType                string
 }
 
 func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
@@ -237,18 +237,29 @@ func (d *CSIDriver) ensureDeviceFileExists(
         // Create from snapshot
         d.hsclient.RestoreFileSnapToDestination(hsVolume.SourceSnapPath, hsVolume.Path)
     } else {
-        // Create empty Blockvolume file
+        // Create empty device file
         //// Mount Backing Share
 
         defer d.UnmountBackingShareIfUnused(backingShare.Name)
         d.EnsureBackingShareMounted(backingShare.Name)
         //// Create an empty file of the correct size
         backingDir := common.BackingShareProvisioningDir + backingShare.ExportPath
-        err = common.MakeEmptyRawFile(backingDir+"/"+hsVolume.Name, hsVolume.Size)
+        deviceFile := backingDir+"/"+hsVolume.Name
+        err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
         if err != nil {
             log.Errorf("failed to create backing file for volume, %v", err)
             return err
         }
+
+        // Add filesystem
+        if hsVolume.FSType != "" {
+            err = common.FormatDevice(deviceFile, hsVolume.FSType)
+            if err != nil {
+                log.Errorf("failed to format volume, %v", err)
+                return err
+            }
+        }
+
     }
 
     b := &backoff.Backoff{
@@ -277,11 +288,11 @@ func (d *CSIDriver) ensureDeviceFileExists(
     return nil
 }
 
-func (d *CSIDriver) ensureBlockVolumeExists(
+func (d *CSIDriver) ensureFileBackedVolumeExists(
     ctx context.Context,
-    hsVolume *HSVolume) error {
+    hsVolume *HSVolume,
+    backingShareName string) error {
 
-        backingShareName := hsVolume.BlockBackingShareName
 
     //// Check if backing share exists
     defer d.releaseVolumeLock(backingShareName)
@@ -382,6 +393,7 @@ func (d *CSIDriver) CreateVolume(
         ExportOptions:         vParams.ExportOptions,
         Objectives:            vParams.Objectives,
         BlockBackingShareName: vParams.BlockBackingShareName,
+        MountBackingShareName: vParams.MountBackingShareName,
         Size:                  requestedSize,
         Name:                  volumeName,
         VolumeMode:            volumeMode,
@@ -398,7 +410,7 @@ func (d *CSIDriver) CreateVolume(
         // restore snap to weird path
         // move weird path to proper location
 
-        if fsType == "nfs" {
+        if fsType == "nfs" || fsType == ""{
             hsVolume.Path = common.SharePathPrefix + volumeName
             err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
             if err != nil {
@@ -408,7 +420,12 @@ func (d *CSIDriver) CreateVolume(
             if hsVolume.MountBackingShareName == "" {
                 return nil, status.Error(codes.InvalidArgument, common.MissingMountBackingShareName)
             }
-            //TODO: if fstype is not nfs, d.ensureFileBackedMountVolumeExists
+
+            backingShareName := hsVolume.MountBackingShareName
+            err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
+            if err != nil {
+                return nil, err
+            }
         }
 
 
@@ -416,7 +433,9 @@ func (d *CSIDriver) CreateVolume(
         if hsVolume.BlockBackingShareName == "" {
             return nil, status.Error(codes.InvalidArgument, common.MissingBlockBackingShareName)
         }
-        err = d.ensureBlockVolumeExists(ctx, hsVolume)
+
+        backingShareName := hsVolume.BlockBackingShareName
+        err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
         if err != nil {
             return nil, err
         }
