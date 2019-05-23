@@ -32,6 +32,7 @@ const (
     EmptySnapshotId               = "snapshot Id cannot be empty"
     MissingSnapshotSourceVolumeId = "snapshot SourceVolumeId cannot be empty"
     MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
+    MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
     BlockVolumeSizeNotSpecified   = "capacity must be specified for block volumes"
 
     InvalidExportOptions = "export options must consist of 3 values. Value received '%s'"

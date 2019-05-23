@@ -30,7 +30,7 @@ import (
     "google.golang.org/grpc/codes"
     "google.golang.org/grpc/status"
 
-    common "github.com/hammer-space/csi-plugin/pkg/common"
+    "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 const (
@@ -47,6 +47,7 @@ type HSVolumeParameters struct {
     ExportOptions         []common.ShareExportOptions
     Objectives            []string
     BlockBackingShareName string
+    MountBackingShareName string
     VolumeNameFormat      string
 }
 
@@ -55,11 +56,13 @@ type HSVolume struct {
     ExportOptions         []common.ShareExportOptions
     Objectives            []string
     BlockBackingShareName string
+    MountBackingShareName string
     Size                  int64
     Name                  string
     Path                  string
     VolumeMode            string
     SourceSnapPath        string
+    FSType         string
 }
 
 func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
@@ -90,6 +93,7 @@ func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
     }
 
     vParams.BlockBackingShareName = params["blockBackingShareName"]
+    vParams.MountBackingShareName = params["mountBackingShareName"]
 
     if exportOptionsParam, exists := params["exportOptions"]; exists {
         if exists {
@@ -344,13 +348,14 @@ func (d *CSIDriver) CreateVolume(
     var volumeMode string
     var blockRequested bool
     var filesystemRequested bool
+    var fsType string
     for _, cap := range req.VolumeCapabilities {
         switch cap.AccessType.(type) {
         case *csi.VolumeCapability_Block:
             blockRequested = true
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
-            //TODO: set fsType
+            fsType = cap.GetMount().GetFsType()
         }
 
     }
@@ -380,6 +385,7 @@ func (d *CSIDriver) CreateVolume(
         Size:                  requestedSize,
         Name:                  volumeName,
         VolumeMode:            volumeMode,
+        FSType:                fsType,
     }
     if snap != nil {
         hsVolume.SourceSnapPath = strings.SplitN(snap.GetSnapshotId(), "|", 2)[0]
@@ -392,13 +398,20 @@ func (d *CSIDriver) CreateVolume(
         // restore snap to weird path
         // move weird path to proper location
 
-        //TODO: if fstype is not nfs, d.ensureFileBackedMountVolumeExists
-
-        hsVolume.Path = common.SharePathPrefix + volumeName
-        err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
-        if err != nil {
-            return nil, err
+        if fsType == "nfs" {
+            hsVolume.Path = common.SharePathPrefix + volumeName
+            err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
+            if err != nil {
+                return nil, err
+            }
+        } else {
+            if hsVolume.MountBackingShareName == "" {
+                return nil, status.Error(codes.InvalidArgument, common.MissingMountBackingShareName)
+            }
+            //TODO: if fstype is not nfs, d.ensureFileBackedMountVolumeExists
         }
+
+
     } else if volumeMode == "Block" {
         if hsVolume.BlockBackingShareName == "" {
             return nil, status.Error(codes.InvalidArgument, common.MissingBlockBackingShareName)
@@ -415,6 +428,9 @@ func (d *CSIDriver) CreateVolume(
 
     if volumeMode == "Block" {
         volContext["blockBackingShareName"] = hsVolume.BlockBackingShareName
+    } else if volumeMode == "Filesystem" && fsType != "nfs"{
+        volContext["mountBackingShareName"] = hsVolume.MountBackingShareName
+        volContext["fsType"] = fsType
     }
 
     return &csi.CreateVolumeResponse{
