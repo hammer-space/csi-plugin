@@ -46,12 +46,14 @@ const (
     VolumeNotFound       = "volume does not exist"
     ShareNotFound        = "share does not exist"
     BackingShareNotFound = "could not find specified backing share"
+    SourceSnapshotNotFound = "could not find source snapshots"
 
     // Internal errors
     UnexpectedHSStatusCode    = "unexpected HTTP response from Hammerspace API: recieved status code %d, expected %d"
     OutOfCapacity             = "requested capacity %d exceeds available %d"
     LoopDeviceAttachFailed    = "failed setting up loop device: device=%s, filePath=%s"
     TargetPathUnknownFiletype = "target path exists but is not a block device nor directory"
+    UnknownError              = "Unknown internal error"
 
 
     // CSI v0

@@ -238,6 +238,12 @@ func (d *CSIDriver) NodePublishVolume(
 func (d *CSIDriver) unpublishFileBackedVolume(
     volumePath, targetPath string) (error) {
 
+    //determine backing share
+    backingShareName := filepath.Dir(volumePath)
+
+    defer d.releaseVolumeLock(backingShareName)
+    d.getVolumeLock(backingShareName)
+
     deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
     if err != nil {
         log.Errorf("could not determine corresponding device path for target path, %s, %v", targetPath, err)
@@ -260,12 +266,6 @@ func (d *CSIDriver) unpublishFileBackedVolume(
         log.Errorf("could not remove target path, %v", err)
         return status.Error(codes.Internal, err.Error())
     }
-
-    //determine backing share
-    backingShareName := filepath.Dir(volumePath)
-
-    defer d.releaseVolumeLock(backingShareName)
-    d.getVolumeLock(backingShareName)
 
     // detach from loopback device
     log.Infof("detaching loop device, %s", lodevice)

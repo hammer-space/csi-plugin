@@ -20,6 +20,8 @@ import (
     "fmt"
     "github.com/golang/protobuf/ptypes/timestamp"
     "github.com/jpillora/backoff"
+    "k8s.io/kubernetes/pkg/util/slice"
+    "path"
     "strconv"
     "strings"
     "time"
@@ -162,6 +164,21 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
 
         return nil
     }
+    if hsVolume.SourceSnapPath != "" {
+        // Create from snapshot
+        snapshots, err := d.hsclient.GetShareSnapshots(hsVolume.Name)
+        if err != nil {
+            log.Errorf("Failed to restore from snapshot, %v", err)
+            return status.Error(codes.Internal, common.UnknownError)
+        }
+
+        snapshotName := path.Base(hsVolume.SourceSnapPath)
+        if !slice.ContainsString(snapshots, snapshotName, strings.TrimSpace) {
+            return status.Error(codes.NotFound, common.SourceSnapshotNotFound)
+        }
+
+        // FIXME: Allow creating a share from snapshot, for now we ignore
+    }
 
     // Create the Mountvolume
     err = d.hsclient.CreateShare(
@@ -237,7 +254,11 @@ func (d *CSIDriver) ensureDeviceFileExists(
 
     if hsVolume.SourceSnapPath != "" {
         // Create from snapshot
-        d.hsclient.RestoreFileSnapToDestination(hsVolume.SourceSnapPath, hsVolume.Path)
+        err := d.hsclient.RestoreFileSnapToDestination(hsVolume.SourceSnapPath, hsVolume.Path)
+        if err != nil {
+            log.Errorf("Failed to restore from snapshot, %v", err)
+            return status.Error(codes.NotFound, common.UnknownError)
+        }
     } else {
         // Create empty device file
         //// Mount Backing Share
