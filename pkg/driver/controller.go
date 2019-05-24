@@ -587,6 +587,7 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
     req *csi.ValidateVolumeCapabilitiesRequest) (
     *csi.ValidateVolumeCapabilitiesResponse, error) {
 
+    // Validate Arguments
     if req.GetVolumeId() == "" {
         return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
     }
@@ -594,6 +595,7 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.VolumeId)
     }
 
+    // Find Share
     typeBlock := false
     typeMount := false
     fileBacked := false
@@ -609,38 +611,29 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
         return nil, err
     }
 
+    typeBlock = vParams.BlockBackingShareName != ""
+    typeMount = vParams.MountBackingShareName != ""
+
     //  Check if the specified backing share or file exists
-    if vParams.BlockBackingShareName != "" {
-        backingShare, err := d.hsclient.GetShare(vParams.BlockBackingShareName)
+    if share == nil {
+        backingFile, err := d.hsclient.GetFile(req.GetVolumeId())
         if err != nil {
-            _, err := d.hsclient.GetFile(backingShare.ExportPath + volumeName)
-            if err != nil {
-                typeBlock = true
-                fileBacked = true
-            }
+            log.Error(err)
         }
-    }
-    if vParams.MountBackingShareName != "" {
-        backingShare, err := d.hsclient.GetShare(vParams.MountBackingShareName)
-        if err != nil {
-            _, err := d.hsclient.GetFile(backingShare.ExportPath + volumeName)
-            if err != nil {
-                typeMount = true
-                fileBacked = true
-            }
+        if backingFile == nil {
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        } else {
+            fileBacked = true
         }
     }
 
     if fileBacked {
         log.Infof("Validating volume capabilities for file-backed volume %s", volumeName)
-    } else {
+    } else if share != nil {
         log.Infof("Validating volume capabilities for share-backed volume %s", volumeName)
     }
 
-    if !(typeMount || typeBlock) {
-        return nil, status.Error(codes.NotFound, common.VolumeNotFound)
-    }
-
+    // Calculate Capabilties
     confirmedCapabilities := make([]*csi.VolumeCapability, 0, len(req.VolumeCapabilities))
     for _, c := range req.VolumeCapabilities {
         if (c.GetBlock() != nil) && typeBlock {
@@ -649,7 +642,6 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
             confirmedCapabilities = append(confirmedCapabilities, c)
             //}
         } else if (c.GetMount() != nil){
-            //FIXME: if it's file backed, check the filesystem type and ensure it matches the requested capability
             //if it's a file backed, do not allow multinode
             if !(fileBacked &&
                  c.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER) {
@@ -685,14 +677,19 @@ func (d *CSIDriver) GetCapacity(
 
     var blockRequested bool
     var filesystemRequested bool
+    fileBacked := false
     var fsType string
     for _, cap := range req.VolumeCapabilities {
         switch cap.AccessType.(type) {
         case *csi.VolumeCapability_Block:
             blockRequested = true
+            fileBacked = true
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
             fsType = cap.GetMount().FsType
+            if fsType != "nfs" {
+                fileBacked = true
+            }
         }
     }
 
@@ -709,21 +706,20 @@ func (d *CSIDriver) GetCapacity(
 
     var available int64
     //  Check if the specified backing share or file exists
-    if blockRequested {
-        backingShare, err := d.hsclient.GetShare(vParams.BlockBackingShareName)
+    if fileBacked {
+        var backingShareName string
+        if blockRequested {
+            backingShareName = vParams.BlockBackingShareName
+        } else {
+            backingShareName = vParams.MountBackingShareName
+        }
+        backingShare, err := d.hsclient.GetShare(backingShareName)
         if err != nil {
             available = 0
         } else {
             available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
         }
 
-    } else if fsType != "nfs" {
-        backingShare, err := d.hsclient.GetShare(vParams.MountBackingShareName)
-        if err != nil {
-            available = 0
-        } else {
-            available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
-        }
     } else {
         // Return all capacity of cluster if capabilities are mount
         available, err = d.hsclient.GetClusterAvailableCapacity()
