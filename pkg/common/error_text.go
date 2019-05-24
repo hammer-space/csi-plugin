@@ -23,6 +23,7 @@ const (
     EmptyVolumeId                 = "volume ID cannot be empty"
     VolumeIdTooLong               = "Volume ID cannot be longer than %d characters"
     SnapshotIdTooLong             = "Shapshot ID cannot be longer than %d characters"
+    ImproperlyFormattedSnapshotId             = "Shapshot ID should be of the format <datetime>|<share export path>, received %s"
     EmptyTargetPath               = "target Path cannot be empty"
     EmptyStagingTargetPath        = "staging Target Path cannot be empty"
     EmptyVolumePath               = "volume Path cannot be empty"
@@ -47,6 +48,7 @@ const (
     ShareNotFound        = "share does not exist"
     BackingShareNotFound = "could not find specified backing share"
     SourceSnapshotNotFound = "could not find source snapshots"
+    SourceSnapshotShareNotFound = "could not find the share for the source snapshot"
 
     // Internal errors
     UnexpectedHSStatusCode    = "unexpected HTTP response from Hammerspace API: recieved status code %d, expected %d"

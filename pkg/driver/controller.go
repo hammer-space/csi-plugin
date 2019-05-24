@@ -66,6 +66,7 @@ type HSVolume struct {
     VolumeMode            string
     SourceSnapPath        string
     FSType                string
+    SourceSnapShareName   string
 }
 
 func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
@@ -166,7 +167,15 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
     }
     if hsVolume.SourceSnapPath != "" {
         // Create from snapshot
-        snapshots, err := d.hsclient.GetShareSnapshots(hsVolume.Name)
+        sourceShare, err := d.hsclient.GetShare(hsVolume.SourceSnapShareName)
+        if err != nil {
+            log.Errorf("Failed to restore from snapshot, %v", err)
+            return status.Error(codes.Internal, common.UnknownError)
+        }
+        if sourceShare == nil {
+            return status.Error(codes.NotFound, common.SourceSnapshotShareNotFound)
+        }
+        snapshots, err := d.hsclient.GetShareSnapshots(hsVolume.SourceSnapShareName)
         if err != nil {
             log.Errorf("Failed to restore from snapshot, %v", err)
             return status.Error(codes.Internal, common.UnknownError)
@@ -454,7 +463,17 @@ func (d *CSIDriver) CreateVolume(
         FSType:                fsType,
     }
     if snap != nil {
-        hsVolume.SourceSnapPath = strings.SplitN(snap.GetSnapshotId(), "|", 2)[0]
+        sourceSnapName, err := common.GetSnapshotNameFromSnapshotId(snap.GetSnapshotId())
+        if err != nil {
+            return nil, status.Error(codes.NotFound, err.Error())
+        }
+        hsVolume.SourceSnapPath = sourceSnapName
+
+        sourceSnapShareName, err := common.GetShareNameFromSnapshotId(snap.GetSnapshotId())
+        if err != nil {
+            return nil, status.Error(codes.NotFound, err.Error())
+        }
+        hsVolume.SourceSnapShareName = sourceSnapShareName
     }
 
     if fileBacked {
