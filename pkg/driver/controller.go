@@ -596,6 +596,7 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
 
     typeBlock := false
     typeMount := false
+    fileBacked := false
 
     volumeName := d.GetVolumeNameFromPath(req.GetVolumeId())
     share, _ := d.hsclient.GetShare(volumeName)
@@ -615,8 +616,25 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
             _, err := d.hsclient.GetFile(backingShare.ExportPath + volumeName)
             if err != nil {
                 typeBlock = true
+                fileBacked = true
             }
         }
+    }
+    if vParams.MountBackingShareName != "" {
+        backingShare, err := d.hsclient.GetShare(vParams.MountBackingShareName)
+        if err != nil {
+            _, err := d.hsclient.GetFile(backingShare.ExportPath + volumeName)
+            if err != nil {
+                typeMount = true
+                fileBacked = true
+            }
+        }
+    }
+
+    if fileBacked {
+        log.Infof("Validating volume capabilities for file-backed volume %s", volumeName)
+    } else {
+        log.Infof("Validating volume capabilities for share-backed volume %s", volumeName)
     }
 
     if !(typeMount || typeBlock) {
@@ -630,11 +648,13 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
             //if c.GetAccessMode().GetMode() != csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER {
             confirmedCapabilities = append(confirmedCapabilities, c)
             //}
-        } else if (c.GetMount() != nil) && typeMount {
-            //FIXME: if it's file backed, check the filesystem and ensure it matches the requested capability
+        } else if (c.GetMount() != nil){
+            //FIXME: if it's file backed, check the filesystem type and ensure it matches the requested capability
             //if it's a file backed, do not allow multinode
-            if !(c.GetMount().GetFsType() != "nfs" &&
+            if !(fileBacked &&
                  c.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER) {
+                confirmedCapabilities = append(confirmedCapabilities, c)
+            } else if typeMount {
                 confirmedCapabilities = append(confirmedCapabilities, c)
             }
         }

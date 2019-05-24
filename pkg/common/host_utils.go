@@ -263,7 +263,7 @@ func IsShareMounted(targetPath string) (bool, error) {
         }
     }
     if notMnt {
-        return false, status.Error(codes.NotFound, ShareNotMounted)
+        return false, nil
     }
     return true, nil
 }

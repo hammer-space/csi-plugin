@@ -45,7 +45,6 @@ const (
     // Not Found errors
     VolumeNotFound       = "volume does not exist"
     ShareNotFound        = "share does not exist"
-    ShareNotMounted      = "share not mounted"
     BackingShareNotFound = "could not find specified backing share"
 
     // Internal errors
