@@ -300,12 +300,12 @@ func (d *CSIDriver) ensureDeviceFileExists(
     }
     startTime := time.Now()
     var backingFileExists bool
-    for time.Now().Sub(startTime) < 10 * time.Minute {
+    for time.Now().Sub(startTime) < (10 * time.Minute) {
         dur := b.Duration()
         time.Sleep(dur)
 
         //Wait for file to exists on metadata server
-        backingFileExists, _ := d.hsclient.DoesFileExist(hsVolume.Path)
+        backingFileExists, err = d.hsclient.DoesFileExist(hsVolume.Path)
         if !backingFileExists {
             time.Sleep(time.Second)
         } else {
@@ -332,11 +332,9 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(
     hsVolume *HSVolume,
     backingShareName string) error {
 
-
     //// Check if backing share exists
     defer d.releaseVolumeLock(backingShareName)
     d.getVolumeLock(backingShareName)
-
 
     backingShare, err := d.ensureBackingShareExists(backingShareName, hsVolume)
     if err != nil {
