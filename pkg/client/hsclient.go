@@ -564,8 +564,13 @@ func (client *HammerspaceClient) GetFileSnapshots(filePath string) ([]common.Fil
 }
 
 func (client *HammerspaceClient) DeleteFileSnapshot(filePath, snapshotName string) error {
+    // Get only the timestamp from the snapshot path
+    snapshotTime := strings.Join(strings.SplitN(url.PathEscape(path.Base(snapshotName)),
+                                           "-", 6)[0:5],
+                            "-")
+
     req, _ := client.generateRequest("POST",
-        fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotName)), "")
+        fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
     if err != nil {
