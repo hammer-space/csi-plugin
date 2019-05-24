@@ -25,6 +25,7 @@ const (
     // Must end with a "/"
     BackingShareProvisioningDir = "/tmp/"
     SharePathPrefix             = "/"
+    DefaultBackingFileSizeBytes = 1073741824
 )
 
 var (

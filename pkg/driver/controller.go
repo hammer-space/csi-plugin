@@ -49,6 +49,7 @@ type HSVolumeParameters struct {
     BlockBackingShareName string
     MountBackingShareName string
     VolumeNameFormat      string
+    FSType                string
 }
 
 type HSVolume struct {
@@ -94,6 +95,7 @@ func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
 
     vParams.BlockBackingShareName = params["blockBackingShareName"]
     vParams.MountBackingShareName = params["mountBackingShareName"]
+    vParams.FSType = params["fsType"]
 
     if exportOptionsParam, exists := params["exportOptions"]; exists {
         if exists {
@@ -333,27 +335,7 @@ func (d *CSIDriver) CreateVolume(
     cs := req.VolumeContentSource
     snap := cs.GetSnapshot()
 
-    cr := req.CapacityRange
-    var requestedSize int64
-    if cr != nil {
-        if cr.LimitBytes != 0 {
-            requestedSize = cr.LimitBytes
-        } else {
-            requestedSize = cr.RequiredBytes
-        }
-    } else {
-        requestedSize = 0
-    }
 
-    if requestedSize > 0 {
-        available, err := d.hsclient.GetClusterAvailableCapacity()
-        if err != nil {
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-        if available < requestedSize {
-            return nil, status.Errorf(codes.OutOfRange, common.OutOfCapacity, requestedSize, available)
-        }
-    }
 
     // Get volumeMode
     var volumeMode string
@@ -367,6 +349,9 @@ func (d *CSIDriver) CreateVolume(
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
             fsType = cap.GetMount().GetFsType()
+            if fsType == "" {
+                fsType = vParams.FSType
+            }
         }
 
     }
@@ -383,6 +368,31 @@ func (d *CSIDriver) CreateVolume(
         volumeName = fmt.Sprintf(vParams.VolumeNameFormat, req.Name)
     } else {
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.Name)
+    }
+
+    cr := req.CapacityRange
+    var requestedSize int64
+    if cr != nil {
+        if cr.LimitBytes != 0 {
+            requestedSize = cr.LimitBytes
+        } else {
+            requestedSize = cr.RequiredBytes
+        }
+    } else if blockRequested || fsType != "nfs"{
+        requestedSize = common.DefaultBackingFileSizeBytes
+    } else {
+        requestedSize = 0
+    }
+
+    if requestedSize > 0 {
+        //FIXME: if it's file backed, we should check capacity of backing share
+        available, err := d.hsclient.GetClusterAvailableCapacity()
+        if err != nil {
+            return nil, status.Error(codes.Internal, err.Error())
+        }
+        if available < requestedSize {
+            return nil, status.Errorf(codes.OutOfRange, common.OutOfCapacity, requestedSize, available)
+        }
     }
 
     defer d.releaseVolumeLock(volumeName)
@@ -410,7 +420,7 @@ func (d *CSIDriver) CreateVolume(
         // restore snap to weird path
         // move weird path to proper location
 
-        if fsType == "nfs" || fsType == ""{
+        if fsType == "nfs" || fsType == "" {
             hsVolume.Path = common.SharePathPrefix + volumeName
             err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
             if err != nil {
@@ -471,7 +481,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
     shares, _ := d.hsclient.ListShares()
     for _, share := range shares {
         if exists, _ := d.hsclient.DoesFileExist(share.ExportPath + "/" + volumeName); exists {
-            log.Debugf("found block volume to delete, %s", filepath)
+            log.Debugf("found file-backed volume to delete, %s", filepath)
             residingShare = &share
             break
         }
@@ -621,9 +631,12 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
             confirmedCapabilities = append(confirmedCapabilities, c)
             //}
         } else if (c.GetMount() != nil) && typeMount {
-            //TODO: if it's a file backed, do not allow multinode
-            //if c.GetAccessMode().GetMode() != csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER {
-            confirmedCapabilities = append(confirmedCapabilities, c)
+            //FIXME: if it's file backed, check the filesystem and ensure it matches the requested capability
+            //if it's a file backed, do not allow multinode
+            if !(c.GetMount().GetFsType() != "nfs" &&
+                 c.GetAccessMode().GetMode() == csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER) {
+                confirmedCapabilities = append(confirmedCapabilities, c)
+            }
         }
     }
 
@@ -652,12 +665,14 @@ func (d *CSIDriver) GetCapacity(
 
     var blockRequested bool
     var filesystemRequested bool
+    var fsType string
     for _, cap := range req.VolumeCapabilities {
         switch cap.AccessType.(type) {
         case *csi.VolumeCapability_Block:
             blockRequested = true
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
+            fsType = cap.GetMount().FsType
         }
     }
 
@@ -682,7 +697,13 @@ func (d *CSIDriver) GetCapacity(
             available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
         }
 
-        //TODO: if it's file backed for mounts, check space available for mount backing share
+    } else if fsType != "nfs" {
+        backingShare, err := d.hsclient.GetShare(vParams.MountBackingShareName)
+        if err != nil {
+            available = 0
+        } else {
+            available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+        }
     } else {
         // Return all capacity of cluster if capabilities are mount
         available, err = d.hsclient.GetClusterAvailableCapacity()
