@@ -179,9 +179,10 @@ func (client *HammerspaceClient) doRequest(req http.Request) (int, string, map[s
     body, err := ioutil.ReadAll(resp.Body)
     bodyString := string(body)
     responseLog := log.WithFields(log.Fields{
-        "statusCode": resp.StatusCode,
-        "body":       bodyString,
-        "headers":    resp.Header,
+        "statusCode":  resp.StatusCode,
+        "body":        bodyString,
+        "headers":     resp.Header,
+        "request_url": req.URL,
     })
     if resp.StatusCode >= 500 {
         responseLog.Error("received error response")
