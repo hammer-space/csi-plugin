@@ -299,21 +299,29 @@ func (d *CSIDriver) ensureDeviceFileExists(
         Jitter: true,
     }
     startTime := time.Now()
-
+    var backingFileExists bool
     for time.Now().Sub(startTime) < 10 * time.Minute {
         dur := b.Duration()
         time.Sleep(dur)
-        err = d.hsclient.SetObjectives(backingShare.ExportPath, "/" + hsVolume.Name, hsVolume.Objectives, true)
-        if err != nil {
-            log.Warnf("failed to set objectives on backing file for volume %v", err)
+
+        //Wait for file to exists on metadata server
+        backingFileExists, _ := d.hsclient.DoesFileExist(hsVolume.Path)
+        if !backingFileExists {
             time.Sleep(time.Second)
         } else {
             break
         }
     }
-    if err != nil {
-        log.Errorf("failed to set objectives on backing file for volume %v after retrying for 10 minutes", err)
+    if !backingFileExists {
+        log.Errorf("backing file failed to show up in API after 10 minutes")
         return err
+    }
+
+    if len(hsVolume.Objectives) > 0 {
+        err = d.hsclient.SetObjectives(backingShare.ExportPath, "/" + hsVolume.Name, hsVolume.Objectives, true)
+        if err != nil {
+            log.Warnf("failed to set objectives on backing file for volume %v", err)
+        }
     }
 
     return nil
@@ -533,15 +541,20 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
     // FIXME: Optimize this by getting backing share info from the filepath
     // Could also be a help function, findBackingShare
 
-    volumeName := d.GetVolumeNameFromPath(filepath)
-    var residingShare *common.ShareResponse
-    shares, _ := d.hsclient.ListShares()
-    for _, share := range shares {
-        if exists, _ := d.hsclient.DoesFileExist(share.ExportPath + "/" + volumeName); exists {
-            log.Debugf("found file-backed volume to delete, %s", filepath)
-            residingShare = &share
-            break
-        }
+  //  volumeName := d.GetVolumeNameFromPath(filepath)
+    //var residingShare *common.ShareResponse
+    //shares, _ := d.hsclient.ListShares()
+    //for _, share := range shares {
+    //    if exists, _ := d.hsclient.DoesFileExist(share.ExportPath + "/" + volumeName); exists {
+    //        log.Debugf("found file-backed volume to delete, %s", filepath)
+    //        residingShare = &share
+    //        break
+    //    }
+    //}
+
+    var exists bool
+    if exists, _ = d.hsclient.DoesFileExist(filepath); exists {
+        log.Debugf("found file-backed volume to delete, %s", filepath)
     }
 
     // Check if file has snapshots and fail
@@ -550,14 +563,17 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
         return status.Errorf(codes.FailedPrecondition, common.VolumeDeleteHasSnapshots)
     }
 
-    if residingShare != nil {
+    residingSharePath := path.Dir(filepath)
+    residingShareName := path.Base(path.Dir(filepath))
+
+    if exists {
         // mount share and delete file
-        destination := common.BackingShareProvisioningDir + residingShare.ExportPath
+        destination := common.BackingShareProvisioningDir + path.Dir(filepath)
         // grab and defer a lock here for the backing share
-        defer d.releaseVolumeLock(residingShare.Name)
-        d.getVolumeLock(residingShare.Name)
-        defer d.UnmountBackingShareIfUnused(residingShare.Name)
-        d.EnsureBackingShareMounted(residingShare.ExportPath)
+        defer d.releaseVolumeLock(residingShareName)
+        d.getVolumeLock(residingShareName)
+        defer d.UnmountBackingShareIfUnused(residingShareName)
+        d.EnsureBackingShareMounted(residingSharePath)
 
         //// Delete File
         volumeName := d.GetVolumeNameFromPath(filepath)
@@ -680,11 +696,11 @@ func (d *CSIDriver) ValidateVolumeCapabilities(
 
     //  Check if the specified backing share or file exists
     if share == nil {
-        backingFile, err := d.hsclient.GetFile(req.GetVolumeId())
+        backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
         if err != nil {
             log.Error(err)
         }
-        if backingFile == nil {
+        if !backingFileExists{
             return nil, status.Error(codes.NotFound, common.VolumeNotFound)
         } else {
             fileBacked = true
