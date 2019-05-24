@@ -20,6 +20,7 @@ import (
     "errors"
     "fmt"
     "os/exec"
+    "path"
     "path/filepath"
     "strings"
 
@@ -30,8 +31,30 @@ import (
     common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
-func (c *CSIDriver) GetVolumeNameFromPath(path string) string {
+func GetVolumeNameFromPath(path string) string {
     return filepath.Base(path)
+}
+
+func GetSnapshotNameFromSnapshotId(snapshotId string) (string, error) {
+    tokens := strings.SplitN(snapshotId, "|", 2)
+    if len(tokens) != 2 {
+        return "", errors.New(fmt.Sprintf(common.ImproperlyFormattedSnapshotId, snapshotId))
+    }
+    return tokens[0], nil
+}
+
+func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
+    tokens := strings.SplitN(snapshotId, "|", 2)
+    if len(tokens) != 2 {
+        return "", errors.New(fmt.Sprintf(common.ImproperlyFormattedSnapshotId, snapshotId))
+    }
+    return path.Base(tokens[1]), nil
+}
+
+// generate snapshot ID to be stored by the CO
+// <created snapshot name>|<sharepath or filepath>
+func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) (string) {
+    return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
 func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {

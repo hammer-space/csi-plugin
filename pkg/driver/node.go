@@ -415,7 +415,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
             },
         }, nil
     } else {
-        volumeName := d.GetVolumeNameFromPath(req.GetVolumeId())
+        volumeName := GetVolumeNameFromPath(req.GetVolumeId())
         share, err := d.hsclient.GetShare(volumeName)
         if err != nil {
             return nil, status.Error(codes.NotFound, common.ShareNotFound)
