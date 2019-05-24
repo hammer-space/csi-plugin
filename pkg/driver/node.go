@@ -68,6 +68,113 @@ func (d *CSIDriver) NodeUnstageVolume(
     return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
+func (d *CSIDriver) publishShareBackedVolume(
+    exportPath,
+    targetPath string, mountFlags []string, readOnly bool) error{
+
+    notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+    if err != nil {
+        if os.IsNotExist(err) {
+            if err := os.MkdirAll(targetPath, 0750); err != nil {
+                return status.Error(codes.Internal, err.Error())
+            }
+            notMnt = true
+        } else {
+            return status.Error(codes.Internal, err.Error())
+        }
+    }
+
+    if !notMnt {
+        log.Debugf("Volume already published at %s", targetPath)
+        return nil
+    }
+
+    if readOnly {
+        mountFlags = append(mountFlags, "ro")
+    }
+    err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags)
+    return err
+}
+
+func (d *CSIDriver) publishFileBackedVolume(
+    backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool) (error) {
+    defer d.releaseVolumeLock(backingShareName)
+    d.getVolumeLock(backingShareName)
+
+    notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+    if err != nil {
+        if os.IsNotExist(err) {
+            if err := mount.New("").MakeFile(targetPath); err != nil {
+                return status.Error(codes.Internal, err.Error())
+            }
+            notMnt = true
+        } else {
+            return status.Error(codes.Internal, err.Error())
+        }
+    }
+    if !notMnt {
+        log.Debugf("Volume already published at %s", targetPath)
+        return nil
+    }
+
+    // Ensure the backing share is mounted
+    err = d.EnsureBackingShareMounted(backingShareName)
+    if err != nil {
+        return err
+    }
+
+    // Mount the file
+    log.Infof("Mounting file-backed volume at %s", targetPath)
+    filePath := common.BackingShareProvisioningDir + volumePath
+
+    // If no fsType specified, mount as a device
+    if fsType == "" {
+        deviceNumber, err := common.EnsureFreeLoopbackDeviceFile()
+        if err != nil {
+            log.Error(err.Error())
+            return err
+        }
+        deviceStr := fmt.Sprintf("/dev/loop%d", deviceNumber)
+
+        losetupFlags := []string{}
+        // is read only?
+        if readOnly {
+            losetupFlags = append(losetupFlags, "-r")
+        }
+        losetupFlags = append(losetupFlags, deviceStr)
+        losetupFlags = append(losetupFlags, filePath)
+        output, err := exec.Command("losetup", losetupFlags...).CombinedOutput()
+        if err != nil {
+            log.Errorf("issue setting up loop device: device=%s, filePath=%s, %s, %v",
+                deviceStr, filePath, output, err.Error())
+            exec.Command("losetup", "-d", deviceStr)
+            d.UnmountBackingShareIfUnused(backingShareName)
+            return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
+        }
+        log.Infof("File %s attached to %s", filePath, deviceStr)
+
+        // bind mount to target path
+        err = common.BindMountDevice(deviceStr, targetPath)
+        if err != nil {
+            // clean up losetup
+            // FIXME, sometimes this command succeeds and doesnt do the detach, make a retry here
+            exec.Command("losetup", "-d", deviceStr)
+            d.UnmountBackingShareIfUnused(backingShareName)
+            return err
+        }
+    } else {
+        if readOnly {
+            mountFlags = append(mountFlags, "ro")
+        }
+        err = common.MountFilesystem(filePath, targetPath, fsType, mountFlags)
+        if err != nil {
+            d.UnmountBackingShareIfUnused(backingShareName)
+            return err
+        }
+    }
+    return nil
+}
+
 func (d *CSIDriver) NodePublishVolume(
     ctx context.Context,
     req *csi.NodePublishVolumeRequest) (
@@ -101,42 +208,16 @@ func (d *CSIDriver) NodePublishVolume(
         fsType = cap.GetMount().FsType
         if fsType == "" {
             fsType = "nfs"
-            mountFlags = cap.GetMount().MountFlags
         }
+        mountFlags = cap.GetMount().MountFlags
     default:
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.GetVolumeId())
     }
-    if volumeMode == "Filesystem" && fsType == "nfs"{
-        path := req.GetVolumeId()
-        targetPath := req.GetTargetPath()
-        notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-        if err != nil {
-            if os.IsNotExist(err) {
-                if err := os.MkdirAll(targetPath, 0750); err != nil {
-                    return nil, status.Error(codes.Internal, err.Error())
-                }
-                notMnt = true
-            } else {
-                return nil, status.Error(codes.Internal, err.Error())
-            }
-        }
 
-        if !notMnt {
-            log.Debugf("Volume already published at %s", targetPath)
-            return &csi.NodePublishVolumeResponse{}, nil
-        }
-
-        mo := req.GetVolumeCapability().GetMount().GetMountFlags()
-        if req.GetReadonly() {
-            mo = append(mo, "ro")
-        }
-        err = d.MountShareAtBestDataportal(path, targetPath, mo)
-        if err != nil {
-            return nil, err
-        }
+    if fsType == "nfs" {
+        err := d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly())
+        return &csi.NodePublishVolumeResponse{}, err
     } else {
-
-        // Lock on backing share
         var backingShareName string
         if volumeMode == "Block"{
             backingShareName = req.GetVolumeContext()["blockBackingShareName"]
@@ -144,85 +225,67 @@ func (d *CSIDriver) NodePublishVolume(
             backingShareName = req.GetVolumeContext()["mountBackingShareName"]
         }
         log.Infof("Found backing share %s for volume %s", backingShareName, req.GetVolumeId())
-        defer d.releaseVolumeLock(backingShareName)
-        d.getVolumeLock(backingShareName)
 
-
-        targetPath := req.GetTargetPath()
-        notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-        if err != nil {
-            if os.IsNotExist(err) {
-                if err := mount.New("").MakeFile(targetPath); err != nil {
-                    return nil, status.Error(codes.Internal, err.Error())
-                }
-                notMnt = true
-            } else {
-                return nil, status.Error(codes.Internal, err.Error())
-            }
-        }
-        if !notMnt {
-            log.Debugf("Volume already published at %s", targetPath)
-            return &csi.NodePublishVolumeResponse{}, nil
-        }
-
-        // Ensure the backing share is mounted
-        err = d.EnsureBackingShareMounted(backingShareName)
-        if err != nil {
-            return nil, err
-        }
-
-        // Mount the file
-        log.Infof("Mounting file-backed volume at %s", targetPath)
-        filePath := common.BackingShareProvisioningDir + req.GetVolumeId()
-
-        if volumeMode == "Block" {
-            deviceNumber, err := common.EnsureFreeLoopbackDeviceFile()
-            if err != nil {
-                log.Error(err.Error())
-                return nil, err
-            }
-            deviceStr := fmt.Sprintf("/dev/loop%d", deviceNumber)
-
-            losetupFlags := []string{}
-            // is read only?
-            if req.GetReadonly() {
-                losetupFlags = append(losetupFlags, "-r")
-            }
-            losetupFlags = append(losetupFlags, deviceStr)
-            losetupFlags = append(losetupFlags, filePath)
-            output, err := exec.Command("losetup", losetupFlags...).CombinedOutput()
-            if err != nil {
-                log.Errorf("issue setting up loop device: device=%s, filePath=%s, %s, %v",
-                    deviceStr, filePath, output, err.Error())
-                exec.Command("losetup", "-d", deviceStr)
-                d.UnmountBackingShareIfUnused(backingShareName)
-                return nil, status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
-            }
-            log.Infof("File %s attached to %s", filePath, deviceStr)
-
-            // bind mount to target path
-            err = common.BindMountDevice(deviceStr, targetPath)
-            if err != nil {
-                // clean up losetup
-                // FIXME, sometimes this command succeeds and doesnt do the detach, make a retry here
-                exec.Command("losetup", "-d", deviceStr)
-                d.UnmountBackingShareIfUnused(backingShareName)
-                return nil, err
-            }
-        } else {
-            err = common.MountFilesystem(filePath, targetPath, fsType, mountFlags)
-            if err != nil {
-                d.UnmountBackingShareIfUnused(backingShareName)
-                return nil, err
-            }
-        }
-
+        err := d.publishFileBackedVolume(
+            backingShareName, req.GetVolumeId(), req.GetTargetPath(), fsType, mountFlags, req.GetReadonly())
+        return &csi.NodePublishVolumeResponse{}, err
 
     }
 
     return &csi.NodePublishVolumeResponse{}, nil
 }
 
+func (d *CSIDriver) unpublishFileBackedVolume(
+    volumePath, targetPath string) (error) {
+
+    deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
+    if err != nil {
+        log.Errorf("could not determine corresponding device path for target path, %s, %v", targetPath, err)
+        return status.Error(codes.Internal, err.Error())
+    }
+    lodevice := fmt.Sprintf("/dev/loop%d", deviceMinor)
+    log.Infof("found device %s for mount %s", lodevice, targetPath)
+
+    // Remove bind mount
+    command := exec.Command("umount", "-f", targetPath)
+    output, err := command.CombinedOutput()
+    if err != nil {
+        log.Errorf("could not remove bind mount, %s", err)
+        return status.Error(codes.Internal, err.Error())
+    }
+
+    // delete target path
+    err = os.Remove(targetPath)
+    if err != nil {
+        log.Errorf("could not remove target path, %v", err)
+        return status.Error(codes.Internal, err.Error())
+    }
+
+    //determine backing share
+    backingShareName := filepath.Dir(volumePath)
+
+    defer d.releaseVolumeLock(backingShareName)
+    d.getVolumeLock(backingShareName)
+
+    // detach from loopback device
+    log.Infof("detaching loop device, %s", lodevice)
+    output, err = exec.Command("losetup", "-d", lodevice).CombinedOutput()
+    if err != nil {
+        log.Errorf("%s, %v", output, err.Error())
+        return status.Error(codes.Internal, err.Error())
+    }
+
+    // Unmount backing share if appropriate
+    unmounted, err := d.UnmountBackingShareIfUnused(backingShareName)
+    if unmounted {
+        log.Infof("unmounted backing share, %s", backingShareName)
+    }
+    if err != nil {
+        log.Errorf("unmounted backing share, %s, failed: %v", backingShareName, err)
+        return status.Error(codes.Internal, err.Error())
+    }
+    return nil
+}
 func (d *CSIDriver) NodeUnpublishVolume(
     ctx context.Context,
     req *csi.NodeUnpublishVolumeRequest) (
@@ -248,60 +311,15 @@ func (d *CSIDriver) NodeUnpublishVolume(
 
     switch mode := fi.Mode(); {
     case mode&os.ModeDevice != 0: // if target path is a device, it's block
-        // find loopback device location from target path
-        deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
+        err := d.unpublishFileBackedVolume(req.GetVolumeId(), targetPath)
         if err != nil {
-            log.Errorf("could not determine corresponding device path for target path, %s, %v", targetPath, err)
-            return nil, status.Error(codes.Internal, err.Error())
+            return nil, err
         }
-        lodevice := fmt.Sprintf("/dev/loop%d", deviceMinor)
-        log.Infof("found device %s for mount %s", lodevice, targetPath)
-
-        // Remove bind mount
-        command := exec.Command("umount", "-f", targetPath)
-        output, err := command.CombinedOutput()
-        if err != nil {
-            log.Errorf("could not remove bind mount, %s", err)
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-
-        // delete target path
-        err = os.Remove(targetPath)
-        if err != nil {
-            log.Errorf("could not remove target path, %v", err)
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-
-        //determine backing share
-        backingShareName := filepath.Dir(req.GetVolumeId())
-
-        defer d.releaseVolumeLock(backingShareName)
-        d.getVolumeLock(backingShareName)
-
-        // detach from loopback device
-        log.Infof("detaching loop device, %s", lodevice)
-        output, err = exec.Command("losetup", "-d", lodevice).CombinedOutput()
-        if err != nil {
-            log.Errorf("%s, %v", output, err.Error())
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-
-        // Unmount backing share if appropriate
-        unmounted, err := d.UnmountBackingShareIfUnused(backingShareName)
-        if unmounted {
-            log.Infof("unmounted backing share, %s", backingShareName)
-        }
-        if err != nil {
-            log.Errorf("unmounted backing share, %s, failed: %v", backingShareName, err)
-            return nil, status.Error(codes.Internal, err.Error())
-        }
-
     case mode.IsDir(): // if target path is a directory, it's filesystem
         err := common.UnmountFilesystem(targetPath)
         if err != nil {
             return nil, status.Error(codes.Internal, err.Error())
         }
-
     default:
         return nil, status.Error(codes.InvalidArgument, common.TargetPathUnknownFiletype)
     }
@@ -404,4 +422,10 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
     }
 
     return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+}
+func (d *CSIDriver) NodeExpandVolume(
+    ctx context.Context,
+    req *csi.NodeExpandVolumeRequest) (
+    *csi.NodeExpandVolumeResponse, error) {
+    return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not supported")
 }

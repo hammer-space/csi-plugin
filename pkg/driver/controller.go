@@ -261,7 +261,6 @@ func (d *CSIDriver) ensureDeviceFileExists(
                 return err
             }
         }
-
     }
 
     b := &backoff.Backoff{
@@ -316,6 +315,7 @@ func (d *CSIDriver) CreateVolume(
     req *csi.CreateVolumeRequest) (
     *csi.CreateVolumeResponse, error) {
 
+    // Validate Parameters
     if req.Name == "" {
         return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
     }
@@ -334,8 +334,6 @@ func (d *CSIDriver) CreateVolume(
     // Check for snapshot source specified
     cs := req.VolumeContentSource
     snap := cs.GetSnapshot()
-
-
 
     // Get volumeMode
     var volumeMode string
@@ -358,7 +356,6 @@ func (d *CSIDriver) CreateVolume(
                 fileBacked = true
             }
         }
-
     }
 
     var volumeName string
@@ -375,6 +372,7 @@ func (d *CSIDriver) CreateVolume(
         return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.Name)
     }
 
+    // Check we have available capacity
     cr := req.CapacityRange
     var requestedSize int64
     if cr != nil {
@@ -419,6 +417,7 @@ func (d *CSIDriver) CreateVolume(
         }
     }
 
+    // Create Volume
     defer d.releaseVolumeLock(volumeName)
     d.getVolumeLock(volumeName)
 
@@ -437,44 +436,38 @@ func (d *CSIDriver) CreateVolume(
         hsVolume.SourceSnapPath = strings.SplitN(snap.GetSnapshotId(), "|", 2)[0]
     }
 
-    if volumeMode == "Filesystem" {
+    if fileBacked {
+        var backingShareName string
+        if blockRequested {
+            if hsVolume.BlockBackingShareName == "" {
+                return nil, status.Error(codes.InvalidArgument, common.MissingBlockBackingShareName)
+            }
+            backingShareName = hsVolume.BlockBackingShareName
+        } else {
+            if hsVolume.MountBackingShareName == "" {
+                return nil, status.Error(codes.InvalidArgument, common.MissingMountBackingShareName)
+            }
+            backingShareName = hsVolume.MountBackingShareName
+        }
+        err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
+        if err != nil {
+            return nil, err
+        }
+    } else {
         // TODO/FIXME: create from snapshot
         // Workaround:
         // create new share (with weird path)
         // restore snap to weird path
         // move weird path to proper location
 
-        if fsType == "nfs" || fsType == "" {
-            hsVolume.Path = common.SharePathPrefix + volumeName
-            err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
-            if err != nil {
-                return nil, err
-            }
-        } else {
-            if hsVolume.MountBackingShareName == "" {
-                return nil, status.Error(codes.InvalidArgument, common.MissingMountBackingShareName)
-            }
-
-            backingShareName := hsVolume.MountBackingShareName
-            err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
-            if err != nil {
-                return nil, err
-            }
-        }
-
-
-    } else if volumeMode == "Block" {
-        if hsVolume.BlockBackingShareName == "" {
-            return nil, status.Error(codes.InvalidArgument, common.MissingBlockBackingShareName)
-        }
-
-        backingShareName := hsVolume.BlockBackingShareName
-        err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
+        hsVolume.Path = common.SharePathPrefix + volumeName
+        err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
         if err != nil {
             return nil, err
         }
     }
 
+    // Create Response
     volContext := make(map[string]string)
     volContext["size"] = strconv.FormatInt(hsVolume.Size, 10)
     volContext["mode"] = volumeMode
@@ -597,6 +590,13 @@ func (d *CSIDriver) ControllerPublishVolume(
     req *csi.ControllerPublishVolumeRequest) (
     *csi.ControllerPublishVolumeResponse, error) {
     return nil, status.Error(codes.Unimplemented, "ControllerPublishVolume not supported")
+}
+
+func (d *CSIDriver) ControllerExpandVolume(
+    ctx context.Context,
+    req *csi.ControllerExpandVolumeRequest) (
+    *csi.ControllerExpandVolumeResponse, error) {
+    return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume not supported")
 }
 
 func (d *CSIDriver) ControllerUnpublishVolume(
