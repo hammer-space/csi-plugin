@@ -341,16 +341,21 @@ func (d *CSIDriver) CreateVolume(
     var volumeMode string
     var blockRequested bool
     var filesystemRequested bool
+    var fileBacked bool
     var fsType string
     for _, cap := range req.VolumeCapabilities {
         switch cap.AccessType.(type) {
         case *csi.VolumeCapability_Block:
             blockRequested = true
+            fileBacked = true
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
             fsType = cap.GetMount().GetFsType()
             if fsType == "" {
                 fsType = vParams.FSType
+            }
+            if fsType != "nfs" {
+                fileBacked = true
             }
         }
 
@@ -385,10 +390,29 @@ func (d *CSIDriver) CreateVolume(
     }
 
     if requestedSize > 0 {
-        //FIXME: if it's file backed, we should check capacity of backing share
-        available, err := d.hsclient.GetClusterAvailableCapacity()
-        if err != nil {
-            return nil, status.Error(codes.Internal, err.Error())
+        var available int64
+        if fileBacked {
+            // if it's file backed, we should check capacity of backing share
+            var backingShareName string
+            if blockRequested {
+                backingShareName = vParams.BlockBackingShareName
+            } else {
+                backingShareName = vParams.MountBackingShareName
+            }
+            backingShare, err := d.hsclient.GetShare(backingShareName)
+            if backingShare == nil || err != nil {
+                available, err = d.hsclient.GetClusterAvailableCapacity()
+                if err != nil {
+                    return nil, status.Error(codes.Internal, err.Error())
+                }
+            } else {
+                available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+            }
+        } else {
+            available, err = d.hsclient.GetClusterAvailableCapacity()
+            if err != nil {
+                return nil, status.Error(codes.Internal, err.Error())
+            }
         }
         if available < requestedSize {
             return nil, status.Errorf(codes.OutOfRange, common.OutOfCapacity, requestedSize, available)
@@ -721,7 +745,7 @@ func (d *CSIDriver) GetCapacity(
         }
 
     } else {
-        // Return all capacity of cluster if capabilities are mount
+        // Return all capacity of cluster for share backed volumes
         available, err = d.hsclient.GetClusterAvailableCapacity()
         if err != nil {
             return nil, status.Error(codes.Internal, err.Error())
