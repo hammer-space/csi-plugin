@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Default size (1GB) for file-backed volumes
+- Support for filesystems other than nfs for Mount Volumes
+
+### Changed
+- Wait for file-backed volumes to exist on metadata server before responded successful for create
+- Return error if source snapshot does not exist
+
 ### Fixed
 - Issue where block volume snapshots may not be properly deleted
 
