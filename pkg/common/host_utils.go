@@ -158,6 +158,7 @@ func MakeEmptyRawFile(pathname string, size int64) error {
 }
 
 func FormatDevice(device, fsType string) error {
+    log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
     output, err := execCommand(fmt.Sprintf("mkfs.%s", fsType), device)
     if err != nil {
         log.Info(err)

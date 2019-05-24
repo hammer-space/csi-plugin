@@ -104,8 +104,14 @@ func (d *CSIDriver) publishFileBackedVolume(
     notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
     if err != nil {
         if os.IsNotExist(err) {
-            if err := mount.New("").MakeFile(targetPath); err != nil {
-                return status.Error(codes.Internal, err.Error())
+            if fsType != "" {
+                if err := mount.New("").MakeDir(targetPath); err != nil {
+                    return status.Error(codes.Internal, err.Error())
+                }
+            }else {
+                if err := mount.New("").MakeFile(targetPath); err != nil {
+                    return status.Error(codes.Internal, err.Error())
+                }
             }
             notMnt = true
         } else {
@@ -207,7 +213,10 @@ func (d *CSIDriver) NodePublishVolume(
         volumeMode = "Filesystem"
         fsType = cap.GetMount().FsType
         if fsType == "" {
-            fsType = "nfs"
+            fsType = req.GetVolumeContext()["fsType"]
+            if fsType == "" {
+                fsType = "nfs"
+            }
         }
         mountFlags = cap.GetMount().MountFlags
     default:
@@ -378,13 +387,20 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
         return nil, status.Error(codes.InvalidArgument, common.EmptyVolumePath)
     }
 
-    fi, err := os.Stat(req.GetVolumePath())
+    // Check if volume is published at path
+    _, err := os.Stat(req.GetVolumePath())
     if err != nil {
         return nil, status.Error(codes.NotFound, common.VolumeNotFound)
     }
 
-    switch mode := fi.Mode(); {
-    case mode&os.ModeDevice != 0:
+    // Check if volume is on a backing share
+    isFileBacked := false
+    _, err = os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
+    if err == nil {
+        isFileBacked = true
+    }
+
+    if isFileBacked {
         // we must stat the actual file, not the dev files, to get the size
         fileInfo, err := os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
         if err != nil {
@@ -398,7 +414,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
                 },
             },
         }, nil
-    case mode.IsDir():
+    } else {
         volumeName := d.GetVolumeNameFromPath(req.GetVolumeId())
         share, err := d.hsclient.GetShare(volumeName)
         if err != nil {
