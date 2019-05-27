@@ -388,6 +388,9 @@ func (d *CSIDriver) CreateVolume(
             if fsType == "" {
                 fsType = vParams.FSType
             }
+            if fsType == "" {
+                fsType = "nfs"
+            }
             if fsType != "nfs" {
                 fileBacked = true
             }

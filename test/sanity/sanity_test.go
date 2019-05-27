@@ -20,6 +20,8 @@ import (
 	"os"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
+
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 )
 
@@ -32,6 +34,11 @@ func TestSanity(t *testing.T) {
 
 	defer os.Remove(os.Getenv("CSI_ENDPOINT"))
 	os.Remove(os.Getenv("CSI_ENDPOINT"))
+
+	// Set up logging
+	log.SetLevel(log.DebugLevel)
+	log.SetReportCaller(true)
+
 	// Set up variables
 	mountPath := "/tmp/sanity-mounts"
 	stagePath := "/tmp/sanity-stage"
