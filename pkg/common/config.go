@@ -26,6 +26,9 @@ const (
     BackingShareProvisioningDir = "/tmp/"
     SharePathPrefix             = "/"
     DefaultBackingFileSizeBytes = 1073741824
+
+    // Topology keys
+    TopologyKeyDataPortal       = "topology.csi.hammerspace.com/is-data-portal"
 )
 
 var (

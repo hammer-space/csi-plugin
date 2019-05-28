@@ -370,8 +370,26 @@ func (d *CSIDriver) NodeGetCapabilities(
 
 func (d *CSIDriver) NodeGetInfo(ctx context.Context,
     req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+
+    // Determine if this node is a data portal
+    dataPortals, err := d.hsclient.GetDataPortals(d.NodeID)
+    if err != nil {
+        log.Errorf("Could not list data-portals, %s", err.Error())
+    }
+    var isDataPortal bool
+    for _, p := range dataPortals {
+        if p.Node.Name == d.NodeID {
+            isDataPortal = true
+        }
+    }
+
     csiNodeResponse := &csi.NodeGetInfoResponse{
         NodeId: d.NodeID,
+        AccessibleTopology: &csi.Topology{
+            Segments: map[string]string{
+                common.TopologyKeyDataPortal: strconv.FormatBool(isDataPortal),
+            },
+        },
     }
     return csiNodeResponse, nil
 }
