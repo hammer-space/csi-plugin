@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 0.1.3
 ### Added
 - Default size (1GB) for file-backed volumes
 - Support for filesystems other than nfs for Mount Volumes
