@@ -135,3 +135,72 @@ spec:
     name: mydevice
     kind: PersistentVolumeClaim
 ```
+## Example Topology Usage
+
+### Create an Application Using the Filesystem Volume, only schedule to nodes that are data-portals
+Example Pod
+```yaml
+kind: Pod
+apiVersion: v1
+metadata:
+  name: my-app
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.csi.hammerspace.com/is-data-portal
+            operator: In
+            values:
+            - "true"
+  containers:
+    - name: my-app
+      image: alpine
+      volumeMounts:
+      - mountPath: "/data"
+        name: data-dir
+      command: [ "ls", "-al", "/data" ]
+  volumes:
+    - name: data-dir
+      persistentVolumeClaim:
+        claimName: myfilesystem
+```
+### Create an Application Using the Filesystem Volume, *prefer* scheduling to nodes that are data-portals
+Example Pod
+```yaml
+kind: Pod
+apiVersion: v1
+metadata:
+  name: my-app
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.csi.hammerspace.com/is-data-portal
+            operator: In
+            values:
+            - "true"
+            - "false"
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+            - key: topology.csi.hammerspace.com/is-data-portal
+              operator: In
+              values:
+              - "true"
+        weight: 1
+  containers:
+    - name: my-app
+      image: alpine
+      volumeMounts:
+      - mountPath: "/data"
+        name: data-dir
+      command: [ "ls", "-al", "/data" ]
+  volumes:
+    - name: data-dir
+      persistentVolumeClaim:
+        claimName: myfilesystem
+```

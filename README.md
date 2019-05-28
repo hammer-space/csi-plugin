@@ -82,6 +82,9 @@ Name                     |     Default            | Description
 ``fsType``               |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
 
 
+### Topology support
+Currently, only the ``topology.csi.hammerspace.com/is-data-portal`` key is supported. Values are 'true' and 'false'
+
 ## Development
 ### Requirements
 * Docker
