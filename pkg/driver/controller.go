@@ -45,28 +45,30 @@ var (
 )
 
 type HSVolumeParameters struct {
-    DeleteDelay           int64
-    ExportOptions         []common.ShareExportOptions
-    Objectives            []string
-    BlockBackingShareName string
-    MountBackingShareName string
-    VolumeNameFormat      string
-    FSType                string
+    DeleteDelay             int64
+    ExportOptions           []common.ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    VolumeNameFormat        string
+    FSType                  string
+    AdditionalMetadataTags  map[string]string
 }
 
 type HSVolume struct {
-    DeleteDelay           int64
-    ExportOptions         []common.ShareExportOptions
-    Objectives            []string
-    BlockBackingShareName string
-    MountBackingShareName string
-    Size                  int64
-    Name                  string
-    Path                  string
-    VolumeMode            string
-    SourceSnapPath        string
-    FSType                string
-    SourceSnapShareName   string
+    DeleteDelay             int64
+    ExportOptions           []common.ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    Size                    int64
+    Name                    string
+    Path                    string
+    VolumeMode              string
+    SourceSnapPath          string
+    FSType                  string
+    SourceSnapShareName     string
+    AdditionalMetadataTags  map[string]string
 }
 
 func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
@@ -140,6 +142,25 @@ func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
         vParams.VolumeNameFormat = DefaultVolumeNameFormat
     }
 
+    if extendedInfoParam, exists := params["additionalMetadataTags"]; exists {
+        vParams.AdditionalMetadataTags = map[string]string{}
+        if exists {
+            extendedInfoList := strings.Split(extendedInfoParam, ",")
+            for _, m := range extendedInfoList {
+                extendedInfo := strings.Split(m, "=")
+                //assert options is len 2
+                if len(extendedInfo) != 2 {
+                    return vParams, status.Errorf(codes.InvalidArgument, common.InvalidAdditionalMetadataTags, m)
+                }
+                key := strings.TrimSpace(extendedInfo[0])
+                value := strings.TrimSpace(extendedInfo[1])
+
+                vParams.AdditionalMetadataTags[key] = value
+            }
+        }
+    }
+
+
     return vParams, nil
 }
 
@@ -194,6 +215,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
             hsVolume.SourceSnapPath,
+            hsVolume.AdditionalMetadataTags,
         )
 
         if err != nil {
@@ -208,6 +230,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.Objectives,
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
+            hsVolume.AdditionalMetadataTags,
         )
 
         if err != nil {
@@ -230,6 +253,7 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
             []string{},
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
+            hsVolume.AdditionalMetadataTags,
         )
         if err != nil {
             return share, status.Errorf(codes.Internal, err.Error())
@@ -334,6 +358,16 @@ func (d *CSIDriver) ensureDeviceFileExists(
         if err != nil {
             log.Warnf("failed to set objectives on backing file for volume %v", err)
         }
+    }
+
+    // Set additional metadata on file
+    standardTags := common.GetCommonMetadataTags()
+    for k, v := range standardTags {
+        hsVolume.AdditionalMetadataTags[k] = v
+    }
+    err = d.hsclient.SetMetadataTagsOnFile(hsVolume.Path, hsVolume.AdditionalMetadataTags)
+    if err != nil {
+        log.Warnf("failed to set additional metadata on backing file for volume %v", err)
     }
 
     return nil

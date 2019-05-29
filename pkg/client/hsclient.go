@@ -329,25 +329,19 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
     return file != nil, err
 }
 
-func getCommonExtendedInfo() (map[string]string) {
-    extendedInfo := map[string]string{
-        "csi_created_by_plugin_name":    common.CsiPluginName,
-        "csi_created_by_plugin_version": common.Version,
-        "csi_created_by_plugin_git_hash": common.Githash,
-        "csi_created_by_csi_version": common.CsiVersion,
-    }
-    return extendedInfo
-}
+
+
 
 func (client *HammerspaceClient) CreateShare(name string,
     exportPath string,
     size int64, //size in bytes
     objectives []string,
     exportOptions []common.ShareExportOptions,
-    deleteDelay int64) error {
+    deleteDelay int64,
+    tags map[string]string) error {
 
     log.Debug("Creating share: " + name)
-    extendedInfo := getCommonExtendedInfo()
+    extendedInfo := common.GetCommonExtendedInfo()
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
@@ -404,6 +398,15 @@ func (client *HammerspaceClient) CreateShare(name string,
         return err
     }
 
+    standardTags := common.GetCommonMetadataTags()
+    for k, v := range standardTags {
+        tags[k] = v
+    }
+    err = client.SetMetadataTagsOnShare(name, tags)
+    if err != nil {
+        log.Warnf("failed to set additional metadata on share %v", err)
+    }
+
     return nil
 }
 
@@ -413,9 +416,10 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     objectives []string,
     exportOptions []common.ShareExportOptions,
     deleteDelay int64,
-    snapshotPath string) error {
+    snapshotPath string,
+    tags map[string]string) error {
     log.Debug("Creating share from snapshot: " + name)
-    extendedInfo := getCommonExtendedInfo()
+    extendedInfo := common.GetCommonExtendedInfo()
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
@@ -474,6 +478,15 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         log.Errorf("Failed to set objectives %s, %v", objectives, err)
         defer client.DeleteShare(share.Name, 0)
         return err
+    }
+
+    standardTags := common.GetCommonMetadataTags()
+    for k, v := range standardTags {
+        tags[k] = v
+    }
+    err = client.SetMetadataTagsOnShare(name, tags)
+    if err != nil {
+        log.Warnf("failed to set additional metadata on share %v", err)
     }
 
     return nil
@@ -727,4 +740,15 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
     free, _ := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
 
     return free, nil
+}
+
+
+func (client *HammerspaceClient) SetMetadataTagsOnFile(filepath string, tags map[string]string) (error) {
+    // TODO
+    return nil
+}
+
+func (client *HammerspaceClient) SetMetadataTagsOnShare(shareName string, tags map[string]string) (error) {
+    // TODO
+    return nil
 }

@@ -43,3 +43,23 @@ var (
     DataPortalMountPrefix = ""
     CommandExecTimeout = 300 * time.Second  // Seconds
 )
+
+func GetCommonMetadataTags() (map[string]string) {
+    tags := map[string]string{
+        "csi_created_by_plugin_name":    CsiPluginName,
+        "csi_created_by_plugin_version": Version,
+        "csi_created_by_plugin_git_hash": Githash,
+        "csi_created_by_csi_version": CsiVersion,
+    }
+    return tags
+}
+
+func GetCommonExtendedInfo() (map[string]string) {
+    extendedInfo := map[string]string{
+        "csi_created_by_plugin_name":    CsiPluginName,
+        "csi_created_by_plugin_version": Version,
+        "csi_created_by_plugin_git_hash": Githash,
+        "csi_created_by_csi_version": CsiVersion,
+    }
+    return extendedInfo
+}

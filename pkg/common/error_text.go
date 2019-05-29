@@ -38,6 +38,7 @@ const (
 
     InvalidExportOptions = "export options must consist of 3 values. Value received '%s'"
     InvalidRootSquash    = "rootSquash must be a bool. Value received '%s'"
+    InvalidAdditionalMetadataTags   = "Extended Info must be of format key=value, received '%s'"
 
     VolumeExistsSizeMismatch = "requested volume exists, but has a different size. Existing: %d, Requested: %d"
 
