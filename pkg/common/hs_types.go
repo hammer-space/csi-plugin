@@ -16,12 +16,42 @@ limitations under the License.
 
 package common
 
-type ClusterResponse struct {
-    Capacity map[string]string `json:"capacity"`
+
+// Structures to hold information about a plugin created volume
+type HSVolumeParameters struct {
+    DeleteDelay             int64
+    ExportOptions           []ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    VolumeNameFormat        string
+    FSType                  string
+    AdditionalMetadataTags  map[string]string
 }
+
+type HSVolume struct {
+    DeleteDelay             int64
+    ExportOptions           []ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    Size                    int64
+    Name                    string
+    Path                    string
+    VolumeMode              string
+    SourceSnapPath          string
+    FSType                  string
+    SourceSnapShareName     string
+    AdditionalMetadataTags  map[string]string
+}
+
+///// Request and Response objects for interacting with the HS API
 
 // We must create separate req and response objects since the API does not allow
 // specifying unused fields
+type ClusterResponse struct {
+    Capacity map[string]string `json:"capacity"`
+}
 type ShareRequest struct {
     Name          string               `json:"name"`
     ExportPath    string               `json:"path"`

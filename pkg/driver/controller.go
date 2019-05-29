@@ -37,42 +37,14 @@ import (
 
 const (
     MaxNameLength           int = 128
-    DefaultVolumeNameFormat     = "%s"
 )
 
 var (
     recentlyCreatedSnapshots = map[string]*csi.Snapshot{}
 )
 
-type HSVolumeParameters struct {
-    DeleteDelay             int64
-    ExportOptions           []common.ShareExportOptions
-    Objectives              []string
-    BlockBackingShareName   string
-    MountBackingShareName   string
-    VolumeNameFormat        string
-    FSType                  string
-    AdditionalMetadataTags  map[string]string
-}
-
-type HSVolume struct {
-    DeleteDelay             int64
-    ExportOptions           []common.ShareExportOptions
-    Objectives              []string
-    BlockBackingShareName   string
-    MountBackingShareName   string
-    Size                    int64
-    Name                    string
-    Path                    string
-    VolumeMode              string
-    SourceSnapPath          string
-    FSType                  string
-    SourceSnapShareName     string
-    AdditionalMetadataTags  map[string]string
-}
-
-func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
-    vParams := HSVolumeParameters{}
+func parseVolParams(params map[string]string) (common.HSVolumeParameters, error) {
+    vParams := common.HSVolumeParameters{}
 
     if deleteDelayParam, exists := params["deleteDelay"]; exists {
         var err error
@@ -139,7 +111,7 @@ func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
         }
         vParams.VolumeNameFormat = volumeNameFormat
     } else {
-        vParams.VolumeNameFormat = DefaultVolumeNameFormat
+        vParams.VolumeNameFormat = common.DefaultVolumeNameFormat
     }
 
     if extendedInfoParam, exists := params["additionalMetadataTags"]; exists {
@@ -166,7 +138,7 @@ func parseVolParams(params map[string]string) (HSVolumeParameters, error) {
 
 func (d *CSIDriver) ensureShareBackedVolumeExists(
     ctx context.Context,
-    hsVolume *HSVolume) error {
+    hsVolume *common.HSVolume) error {
 
     //// Check if Mount Volume Exists
     share, err := d.hsclient.GetShare(hsVolume.Name)
@@ -240,7 +212,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
     return nil
 }
 
-func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *HSVolume) (*common.ShareResponse, error){
+func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error){
     share, err := d.hsclient.GetShare(backingShareName)
     if err != nil {
         return share, status.Errorf(codes.Internal, err.Error())
@@ -270,7 +242,7 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
 func (d *CSIDriver) ensureDeviceFileExists(
     ctx context.Context,
     backingShare *common.ShareResponse,
-    hsVolume *HSVolume) error {
+    hsVolume *common.HSVolume) error {
 
     // Check if File Exists
     hsVolume.Path = backingShare.ExportPath + "/" + hsVolume.Name
@@ -375,7 +347,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 
 func (d *CSIDriver) ensureFileBackedVolumeExists(
     ctx context.Context,
-    hsVolume *HSVolume,
+    hsVolume *common.HSVolume,
     backingShareName string) error {
 
     //// Check if backing share exists
@@ -506,7 +478,7 @@ func (d *CSIDriver) CreateVolume(
     defer d.releaseVolumeLock(volumeName)
     d.getVolumeLock(volumeName)
 
-    hsVolume := &HSVolume{
+    hsVolume := &common.HSVolume{
         DeleteDelay:           vParams.DeleteDelay,
         ExportOptions:         vParams.ExportOptions,
         Objectives:            vParams.Objectives,

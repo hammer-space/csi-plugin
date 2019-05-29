@@ -26,6 +26,7 @@ const (
     BackingShareProvisioningDir = "/tmp/"
     SharePathPrefix             = "/"
     DefaultBackingFileSizeBytes = 1073741824
+    DefaultVolumeNameFormat     = "%s"
 
     // Topology keys
     TopologyKeyDataPortal       = "topology.csi.hammerspace.com/is-data-portal"
@@ -44,6 +45,7 @@ var (
     CommandExecTimeout = 300 * time.Second  // Seconds
 )
 
+// Metadata to be set on every share and file created by the driver
 func GetCommonMetadataTags() (map[string]string) {
     tags := map[string]string{
         "csi_created_by_plugin_name":    CsiPluginName,
@@ -54,6 +56,7 @@ func GetCommonMetadataTags() (map[string]string) {
     return tags
 }
 
+// Extended info to be set on every share created by the driver
 func GetCommonExtendedInfo() (map[string]string) {
     extendedInfo := map[string]string{
         "csi_created_by_plugin_name":    CsiPluginName,
