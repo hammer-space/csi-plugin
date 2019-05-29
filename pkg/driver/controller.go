@@ -186,21 +186,33 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             return status.Error(codes.NotFound, common.SourceSnapshotNotFound)
         }
 
-        // FIXME: Allow creating a share from snapshot, for now we ignore
-    }
+        err = d.hsclient.CreateShareFromSnapshot(
+            hsVolume.Name,
+            hsVolume.Path,
+            hsVolume.Size,
+            hsVolume.Objectives,
+            hsVolume.ExportOptions,
+            hsVolume.DeleteDelay,
+            hsVolume.SourceSnapPath,
+        )
 
-    // Create the Mountvolume
-    err = d.hsclient.CreateShare(
-        hsVolume.Name,
-        hsVolume.Path,
-        hsVolume.Size,
-        hsVolume.Objectives,
-        hsVolume.ExportOptions,
-        hsVolume.DeleteDelay,
-    )
+        if err != nil {
+            return status.Errorf(codes.Internal, err.Error())
+        }
+    } else { // Create empty share
+        // Create the Mountvolume
+        err = d.hsclient.CreateShare(
+            hsVolume.Name,
+            hsVolume.Path,
+            hsVolume.Size,
+            hsVolume.Objectives,
+            hsVolume.ExportOptions,
+            hsVolume.DeleteDelay,
+        )
 
-    if err != nil {
-        return status.Errorf(codes.Internal, err.Error())
+        if err != nil {
+            return status.Errorf(codes.Internal, err.Error())
+        }
     }
     return nil
 }

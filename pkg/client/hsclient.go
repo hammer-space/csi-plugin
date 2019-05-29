@@ -329,22 +329,29 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
     return file != nil, err
 }
 
-func (client *HammerspaceClient) CreateShare(name string,
-    exportPath string,
-    size int64, //size in bytes
-    objectives []string,
-    exportOptions []common.ShareExportOptions,
-    deleteDelay int64) error {
-    log.Debug("Creating share: " + name)
+func getCommonExtendedInfo() (map[string]string) {
     extendedInfo := map[string]string{
         "csi_created_by_plugin_name":    common.CsiPluginName,
         "csi_created_by_plugin_version": common.Version,
         "csi_created_by_plugin_git_hash": common.Githash,
         "csi_created_by_csi_version": common.CsiVersion,
     }
+    return extendedInfo
+}
+
+func (client *HammerspaceClient) CreateShare(name string,
+    exportPath string,
+    size int64, //size in bytes
+    objectives []string,
+    exportOptions []common.ShareExportOptions,
+    deleteDelay int64) error {
+
+    log.Debug("Creating share: " + name)
+    extendedInfo := getCommonExtendedInfo()
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
+
     share := common.ShareRequest{
         Name:          name,
         ExportPath:    exportPath,
@@ -388,6 +395,78 @@ func (client *HammerspaceClient) CreateShare(name string,
     } else {
         log.Errorf("No task returned to monitor")
     }
+
+    // Set objectives on share
+    err = client.SetObjectives(name, "/", objectives, true)
+    if err != nil {
+        log.Errorf("Failed to set objectives %s, %v", objectives, err)
+        defer client.DeleteShare(share.Name, 0)
+        return err
+    }
+
+    return nil
+}
+
+func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
+    exportPath string,
+    size int64, //size in bytes
+    objectives []string,
+    exportOptions []common.ShareExportOptions,
+    deleteDelay int64,
+    snapshotPath string) error {
+    log.Debug("Creating share from snapshot: " + name)
+    extendedInfo := getCommonExtendedInfo()
+    if deleteDelay >= 0 {
+        extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+    }
+
+    ////// FIXME: Replace with new api to clone a snapshot to a new share
+    share := common.ShareRequest{
+        Name:          name,
+        ExportPath:    exportPath,
+        ExportOptions: exportOptions,
+        ExtendedInfo:  extendedInfo,
+    }
+    if size > 0 {
+        share.Size = size
+    }
+
+    shareString := new(bytes.Buffer)
+    json.NewEncoder(shareString).Encode(share)
+
+
+    req, err := client.generateRequest("POST", "/shares", shareString.String())
+    statusCode, _, respHeaders, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return err
+    }
+    if statusCode == 400 {
+        // FIXME: We get a 400 if there is already a share-create task for a share with this name
+        // can we check if a task exists somehow?
+    }
+    if statusCode != 202 {
+        return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+    }
+
+    // ensure the location header is set and also make sure length >= 1
+    if locs, exists := respHeaders["Location"]; exists {
+        success, err := client.WaitForTaskCompletion(locs[0])
+        if err != nil {
+            log.Error(err)
+            return err
+        }
+        if !success {
+            return errors.New("Share failed to create")
+            defer client.DeleteShare(share.Name, 0)
+        }
+
+    } else {
+        log.Errorf("No task returned to monitor")
+    }
+
+    ////// End FIXME
 
     // Set objectives on share
     err = client.SetObjectives(name, "/", objectives, true)
