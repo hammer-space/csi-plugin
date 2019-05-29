@@ -29,5 +29,5 @@ build:
 	@docker build -t "hammerspaceinc/csi-plugin:latest" . -f Dockerfile
 
 build-release:
-	@echo "==> Building Docker Image ${VERSION}"
+	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
 	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile

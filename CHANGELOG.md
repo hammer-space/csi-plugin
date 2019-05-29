@@ -6,7 +6,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 ### Added
-- Topology support
+- Topology key ``topology.csi.hammerspace.com/is-data-portal``
+- Ability to set additional metadata tags on plugin created shares and files
 
 ## 0.1.3
 ### Added

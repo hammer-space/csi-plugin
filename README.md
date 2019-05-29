@@ -20,17 +20,18 @@ Implements the Identity, Node, and Controller interfaces as single Golang binary
 * CLONE_VOLUME
 
 ## Volume Types
-Block Volume
-- Storage is exposed to the container as a block device
+File-backed Block Volume (raw device)
+- Storage is exposed to the container as a raw device
 - Exists as a special device file on a Hammerspace share (backing share)
 
-File-backed Mounted (filesystem) volume
+File-backed Mounted volume (filesystem)
 - Storage is exposed to the container as a directory
 - Exists as a special device file on a Hammerspace share (backing share) which contains a filesystem
 
-Mounted (shared filesystem) volume
+Share-backed Mounted volume (shared filesystem)
 - Storage is exposed to the container as a directory
 - Exists as a Hammerspace share
+- Mounted via NFS
 
 ## Plugin Dependencies
 
@@ -65,7 +66,7 @@ Variable                       |     Default           | Description
 *``HS_USERNAME``               |                       | Hammerspace username (admin role credentials)
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
-``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex "/hs"
+``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data-portal mounts. Ex ``/mnt/data-portal``
 ``CSI_MAJOR_VERSION``          |     ``"1"``           | The major version of the CSI interface used to communicate with the plugin. Valid values are "1" and "0"
 
 ## Usage
@@ -117,13 +118,16 @@ docker push hammerspaceinc/csi-plugin:$(cat VERSION)
 
 ### Testing
 #### Manual tests
-Manual tests can be facilitated by using the Dev Image. Local files can be shared with the container to facilitate testing.
+Manual tests can be facilitated by using the Dev Image. Local files can be exposed to the container to facilitate iterative development and testing.
 
 Example Usage:
 
-Running the image - 
+Building the image - 
 ```bash
 make build-dev
+```
+Create ENV file for plugin and csi-sanity configuration.
+```bash
 echo "
 CSI_ENDPOINT=/tmp/csi.sock
 HS_ENDPOINT=https://anvil.example.com
@@ -134,13 +138,19 @@ CSI_NODE_NAME=test
 CSI_USE_ANVIL_FOR_DATA=true
 SANITY_PARAMS_FILE=/tmp/csi_sanity_params.yaml
  " >  ~/csi-env
+ ```
  
-echo "
-blockBackingShareName: test-csi-block
-deleteDelay: 0
-objectives: "test-objective"
-" > ~/csi_sanity_params.yaml
-
+ Create params file for csi-sanity (defines the parameters passed to CreateVolume)
+ ```bash
+ echo "
+ blockBackingShareName: test-csi-block
+ deleteDelay: 0
+ objectives: "test-objective"
+ " > ~/csi_sanity_params.yaml
+ ```
+ 
+Running the image - 
+```bash
 docker run --privileged=true \
 -v /tmp/:/tmp/:shared \
 -v /dev/:/dev/ \
@@ -164,7 +174,16 @@ Using csc to call the plugin -
 docker exec -it csi-dev /bin/sh
 
 # use csc tool
-CSI_DEBUG=true csc node get-info
+## Call GetPluginInfo 
+CSI_DEBUG=true CSI_ENDPOINT=/tmp/csi.sock csc identity plugin-info
+
+## Make a 1GB file-backed mount volume
+CSI_DEBUG=true CSI_ENDPOINT=/tmp/csi.sock csc controller create --cap 5,mount,ext4 --req-bytes 1073741824 --params mountBackingShareName=file-backed test-filesystem
+
+## Delete volume
+CSI_DEBUG=true CSI_ENDPOINT=/tmp/csi.sock csc controller delete  /file-backed/test-filesystem
+
+## Explore additional commands
 csc -h
 ```
 

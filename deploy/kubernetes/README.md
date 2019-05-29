@@ -30,7 +30,22 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
       VolumeSnapshotDataSource: true
     ...
     ```
-* VolumeSnapshot support requires the VolumeSnapshotDataSource feature flag
+* Topology support requires v1.14+ ``Topology`` and ``CSINodeInfo``
+    Example in /var/lib/kubelet/config.yaml
+    ```yaml
+    ...
+    featureGates:
+      CSINodeInfo: true  # On by default in kubernetes 1.14+
+      Topology: true
+    ...
+    ```
+* VolumeSnapshot support requires the ``VolumeSnapshotDataSource`` feature flag
+    Example in /var/lib/kubelet/config.yaml
+    ```yaml
+    ...
+    featureGates:
+      VolumeSnapshotDataSource: true
+    ...
 * Each host should have support for NFS v4.2 or v3 with the relevant network ports open between the host and storage
 
 ### NOTE on Google Kubernetes Engine
