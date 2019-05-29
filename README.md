@@ -71,16 +71,16 @@ Variable                       |     Default           | Description
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):
 
-Name                     |     Default            | Description
-----------------         |     ------------       | -----
-``exportOptions``        |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of subnet,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
-``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to Hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults.
-``volumeNameFormat``     |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
-``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares and files in addition to default objectives.
-``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
-``mountBackingShareName``|                        | The share in which to store File-backed Mount Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Filesystem Volumes other than 'nfs'.
-``fsType``               |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
-
+Name                      |     Default            | Description
+----------------          |     ------------       | -----
+``exportOptions``         |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of subnet,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
+``deleteDelay``           |     ``-1``             | The value of the delete delay parameter passed to Hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults.
+``volumeNameFormat``      |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
+``objectives``            |     ``""``             | Comma separated list of objectives to set on created shares and files in addition to default objectives.
+``blockBackingShareName`` |                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
+``mountBackingShareName`` |                        | The share in which to store File-backed Mount Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Filesystem Volumes other than 'nfs'.
+``fsType``                |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
+``additionalMetadataTags``|                        | Comma separated list of tags to set on files and shares created by the plugin. Format is ',' separated list of key=value pairs. Ex ``storageClassName=hs-storage,fsType=nfs``
 
 ### Topology support
 Currently, only the ``topology.csi.hammerspace.com/is-data-portal`` key is supported. Values are 'true' and 'false'

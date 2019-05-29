@@ -23,3 +23,5 @@ parameters:
   deleteDelay: "0"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
+  # Metadata to set on files and shares created by the plugin.
+  additionalMetadataTags: "storageClassName=hs-storage,fsType=nfs"
