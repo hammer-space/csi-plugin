@@ -23,6 +23,7 @@ const (
     EmptyVolumeId                 = "volume ID cannot be empty"
     VolumeIdTooLong               = "Volume ID cannot be longer than %d characters"
     SnapshotIdTooLong             = "Shapshot ID cannot be longer than %d characters"
+    ImproperlyFormattedSnapshotId             = "Shapshot ID should be of the format <datetime>|<share export path>, received %s"
     EmptyTargetPath               = "target Path cannot be empty"
     EmptyStagingTargetPath        = "staging Target Path cannot be empty"
     EmptyVolumePath               = "volume Path cannot be empty"
@@ -32,6 +33,7 @@ const (
     EmptySnapshotId               = "snapshot Id cannot be empty"
     MissingSnapshotSourceVolumeId = "snapshot SourceVolumeId cannot be empty"
     MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
+    MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
     BlockVolumeSizeNotSpecified   = "capacity must be specified for block volumes"
 
     InvalidExportOptions = "export options must consist of 3 values. Value received '%s'"
@@ -44,14 +46,16 @@ const (
     // Not Found errors
     VolumeNotFound       = "volume does not exist"
     ShareNotFound        = "share does not exist"
-    ShareNotMounted      = "share not mounted"
     BackingShareNotFound = "could not find specified backing share"
+    SourceSnapshotNotFound = "could not find source snapshots"
+    SourceSnapshotShareNotFound = "could not find the share for the source snapshot"
 
     // Internal errors
     UnexpectedHSStatusCode    = "unexpected HTTP response from Hammerspace API: recieved status code %d, expected %d"
     OutOfCapacity             = "requested capacity %d exceeds available %d"
     LoopDeviceAttachFailed    = "failed setting up loop device: device=%s, filePath=%s"
     TargetPathUnknownFiletype = "target path exists but is not a block device nor directory"
+    UnknownError              = "Unknown internal error"
 
 
     // CSI v0

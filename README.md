@@ -2,7 +2,7 @@
 
 This plugin uses Hammerspace storage backend as distributed data storage for containers.
 
-Supports [CSI Spec 1.0.0](https://github.com/container-storage-interface/spec/blob/master/spec.md) 
+Supports [CSI Spec 1.1.0](https://github.com/container-storage-interface/spec/blob/master/spec.md) 
  
 Implements the Identity, Node, and Controller interfaces as single Golang binary.
  
@@ -23,6 +23,10 @@ Implements the Identity, Node, and Controller interfaces as single Golang binary
 Block Volume
 - Storage is exposed to the container as a block device
 - Exists as a special device file on a Hammerspace share (backing share)
+
+File-backed Mounted (filesystem) volume
+- Storage is exposed to the container as a directory
+- Exists as a special device file on a Hammerspace share (backing share) which contains a file-system
 
 Mounted (shared filesystem) volume
 - Storage is exposed to the container as a directory
@@ -74,6 +78,8 @@ Name                     |     Default            | Description
 ``volumeNameFormat``     |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
 ``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares in addition to default objectives.
 ``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
+``mountBackingShareName``|                        | The share in which to store File-backed Mount Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Filesystem Volumes other than 'nfs'.
+``fsType``               |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
 
 
 ## Development
@@ -102,8 +108,7 @@ make build-release
 
 ##### Publish a new release
 ```bash
-docker tag hs-csi-plugin:$(cat VERSION)  <registry>/hs-csi-plugin:$(cat VERSION)
-docker push <registry>/hs-csi-plugin:$(cat VERSION)
+docker push hammerspaceinc/csi-plugin:$(cat VERSION)
 ```
 
 
@@ -126,11 +131,13 @@ CSI_NODE_NAME=test
 CSI_USE_ANVIL_FOR_DATA=true
 SANITY_PARAMS_FILE=/tmp/csi_sanity_params.yaml
  " >  ~/csi-env
+ 
 echo "
 blockBackingShareName: test-csi-block
 deleteDelay: 0
 objectives: "test-objective"
 " > ~/csi_sanity_params.yaml
+
 docker run --privileged=true \
 -v /tmp/:/tmp/:shared \
 -v /dev/:/dev/ \
@@ -171,6 +178,7 @@ Uses the [CSI sanity package](https://github.com/kubernetes-csi/csi-test/tree/ma
 Make a parameters
 ```bash
 echo "
+fsType: nfs
 blockBackingShareName: test-csi-block
 deleteDelay: 0
 objectives: "test-objective"

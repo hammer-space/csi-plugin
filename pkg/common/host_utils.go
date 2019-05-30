@@ -82,6 +82,33 @@ func EnsureFreeLoopbackDeviceFile() (uint64, error) {
     return uint64(dev), nil
 }
 
+
+func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) error {
+    mounter := mount.New("")
+    if exists, _ := mounter.ExistsPath(destfile); !exists {
+        err := os.MkdirAll(filepath.Dir(destfile), os.FileMode(0644))
+        if err == nil {
+            err = mounter.MakeFile(destfile)
+        }
+        if err != nil {
+            log.Errorf("could not make destination path for mount, %v", err)
+            return status.Error(codes.Internal, err.Error())
+        }
+    }
+
+    err := mounter.Mount(sourcefile, destfile, fsType, mountFlags)
+    if err != nil {
+        if os.IsPermission(err) {
+            return status.Error(codes.PermissionDenied, err.Error())
+        }
+        if strings.Contains(err.Error(), "invalid argument") {
+            return status.Error(codes.InvalidArgument, err.Error())
+        }
+        return status.Error(codes.Internal, err.Error())
+    }
+    return nil
+}
+
 func BindMountDevice(sourcefile, destfile string) error {
     mounter := mount.New("")
     if exists, _ := mounter.ExistsPath(destfile); !exists {
@@ -90,7 +117,7 @@ func BindMountDevice(sourcefile, destfile string) error {
             err = mounter.MakeFile(destfile)
         }
         if err != nil {
-            log.Errorf("could not make destination path for bind mound, %v", err)
+            log.Errorf("could not make destination path for bind mount, %v", err)
             return status.Error(codes.Internal, err.Error())
         }
     }
@@ -127,6 +154,21 @@ func MakeEmptyRawFile(pathname string, size int64) error {
         return err
     }
 
+    return nil
+}
+
+func FormatDevice(device, fsType string) error {
+    log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
+    output, err := execCommand(fmt.Sprintf("mkfs.%s", fsType), device)
+    if err != nil {
+        log.Info(err)
+        if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
+            log.Warningf("Device %s is already mounted", device)
+            return err
+        }
+        log.Errorf("Could not format device %s: %s", device, err.Error())
+        return err
+    }
     return nil
 }
 
@@ -222,12 +264,12 @@ func IsShareMounted(targetPath string) (bool, error) {
         }
     }
     if notMnt {
-        return false, status.Error(codes.NotFound, ShareNotMounted)
+        return false, nil
     }
     return true, nil
 }
 
-func UnmountShare(targetPath string) error {
+func UnmountFilesystem(targetPath string) error {
     mounter := mount.New("")
 
     isMounted, err := IsShareMounted(targetPath)
@@ -237,7 +279,7 @@ func UnmountShare(targetPath string) error {
         return status.Error(codes.Internal, err.Error())
     }
     if !isMounted {
-        return status.Error(codes.NotFound, ShareNotMounted)
+        return nil
     }
 
     err = mounter.Unmount(targetPath)

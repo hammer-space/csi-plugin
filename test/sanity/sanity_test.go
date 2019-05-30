@@ -20,16 +20,28 @@ import (
 	"os"
 	"testing"
 
+	log "github.com/sirupsen/logrus"
+
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 )
+
+func mkdir(targetPath string) (string, error) {
+	os.Mkdir(targetPath, 0755)
+	return targetPath, nil
+}
 
 func TestSanity(t *testing.T) {
 
 	defer os.Remove(os.Getenv("CSI_ENDPOINT"))
 	os.Remove(os.Getenv("CSI_ENDPOINT"))
+
+	// Set up logging
+	log.SetLevel(log.DebugLevel)
+	log.SetReportCaller(true)
+
 	// Set up variables
-	mountPath := "/tmp/sanity-mounts/"
-	stagePath := "/tmp/sanity-stage/"
+	mountPath := "/tmp/sanity-mounts"
+	stagePath := "/tmp/sanity-stage"
 	// Set up driver and env
 	d := driver.NewCSIDriver(
 		os.Getenv("HS_ENDPOINT"),
@@ -44,6 +56,9 @@ func TestSanity(t *testing.T) {
 
 	// Run test
 	config := &sanity.Config{
+		CreateTargetDir:          mkdir, //Work around for sanity trying to recreate existing directories and failing
+		CreateStagingDir:	      mkdir,
+		CreatePathCmdTimeout:     30,
 		TargetPath:               mountPath,
 		StagingPath:              stagePath,
 		Address:                  os.Getenv("CSI_ENDPOINT"),

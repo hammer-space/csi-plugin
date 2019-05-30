@@ -179,9 +179,10 @@ func (client *HammerspaceClient) doRequest(req http.Request) (int, string, map[s
     body, err := ioutil.ReadAll(resp.Body)
     bodyString := string(body)
     responseLog := log.WithFields(log.Fields{
-        "statusCode": resp.StatusCode,
-        "body":       bodyString,
-        "headers":    resp.Header,
+        "statusCode":  resp.StatusCode,
+        "body":        bodyString,
+        "headers":     resp.Header,
+        "request_url": req.URL,
     })
     if resp.StatusCode >= 500 {
         responseLog.Error("received error response")
@@ -293,7 +294,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
     if err != nil {
         log.Error("Error parsing JSON response: " + err.Error())
     }
-    return &share, nil
+    return &share, err
 }
 
 func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
@@ -564,8 +565,13 @@ func (client *HammerspaceClient) GetFileSnapshots(filePath string) ([]common.Fil
 }
 
 func (client *HammerspaceClient) DeleteFileSnapshot(filePath, snapshotName string) error {
+    // Get only the timestamp from the snapshot path
+    snapshotTime := strings.Join(strings.SplitN(url.PathEscape(path.Base(snapshotName)),
+                                           "-", 6)[0:5],
+                            "-")
+
     req, _ := client.generateRequest("POST",
-        fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotName)), "")
+        fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
     if err != nil {
