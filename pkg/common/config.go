@@ -45,17 +45,6 @@ var (
     CommandExecTimeout = 300 * time.Second  // Seconds
 )
 
-// Metadata to be set on every share and file created by the driver
-func GetCommonMetadataTags() (map[string]string) {
-    tags := map[string]string{
-        "csi_created_by_plugin_name":    CsiPluginName,
-        "csi_created_by_plugin_version": Version,
-        "csi_created_by_plugin_git_hash": Githash,
-        "csi_created_by_csi_version": CsiVersion,
-    }
-    return tags
-}
-
 // Extended info to be set on every share created by the driver
 func GetCommonExtendedInfo() (map[string]string) {
     extendedInfo := map[string]string{

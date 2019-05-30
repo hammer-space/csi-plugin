@@ -398,10 +398,6 @@ func (client *HammerspaceClient) CreateShare(name string,
         return err
     }
 
-    standardTags := common.GetCommonMetadataTags()
-    for k, v := range standardTags {
-        tags[k] = v
-    }
     err = client.SetMetadataTagsOnShare(name, tags)
     if err != nil {
         log.Warnf("failed to set additional metadata on share %v", err)
@@ -480,10 +476,6 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         return err
     }
 
-    standardTags := common.GetCommonMetadataTags()
-    for k, v := range standardTags {
-        tags[k] = v
-    }
     err = client.SetMetadataTagsOnShare(name, tags)
     if err != nil {
         log.Warnf("failed to set additional metadata on share %v", err)
@@ -749,6 +741,10 @@ func (client *HammerspaceClient) SetMetadataTagsOnFile(filepath string, tags map
 }
 
 func (client *HammerspaceClient) SetMetadataTagsOnShare(shareName string, tags map[string]string) (error) {
-    // TODO
+    // TODO hs attribute set csi_details -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
+    //"csi_created_by_plugin_name":    CsiPluginName,
+    //        "csi_created_by_plugin_version": Version,
+    //        "csi_created_by_plugin_git_hash": Githash,
+    //        "csi_created_by_csi_version": CsiVersion,
     return nil
 }

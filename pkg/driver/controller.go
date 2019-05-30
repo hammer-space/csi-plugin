@@ -333,10 +333,6 @@ func (d *CSIDriver) ensureDeviceFileExists(
     }
 
     // Set additional metadata on file
-    standardTags := common.GetCommonMetadataTags()
-    for k, v := range standardTags {
-        hsVolume.AdditionalMetadataTags[k] = v
-    }
     err = d.hsclient.SetMetadataTagsOnFile(hsVolume.Path, hsVolume.AdditionalMetadataTags)
     if err != nil {
         log.Warnf("failed to set additional metadata on backing file for volume %v", err)
