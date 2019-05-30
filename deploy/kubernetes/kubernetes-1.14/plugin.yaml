@@ -39,7 +39,7 @@ spec:
           image: quay.io/k8scsi/csi-provisioner:v1.1.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
-            - "--timeout=60"  # Recommended as shares may take some time to create
+            - "--timeout=60s"  # Recommended as shares may take some time to create
             - "--v=5"
           env:
             - name: CSI_ENDPOINT
