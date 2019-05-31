@@ -337,8 +337,7 @@ func (client *HammerspaceClient) CreateShare(name string,
     size int64, //size in bytes
     objectives []string,
     exportOptions []common.ShareExportOptions,
-    deleteDelay int64,
-    tags map[string]string) error {
+    deleteDelay int64) error {
 
     log.Debug("Creating share: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
@@ -398,11 +397,6 @@ func (client *HammerspaceClient) CreateShare(name string,
         return err
     }
 
-    err = client.SetMetadataTagsOnShare(name, tags)
-    if err != nil {
-        log.Warnf("failed to set additional metadata on share %v", err)
-    }
-
     return nil
 }
 
@@ -412,8 +406,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     objectives []string,
     exportOptions []common.ShareExportOptions,
     deleteDelay int64,
-    snapshotPath string,
-    tags map[string]string) error {
+    snapshotPath string) error {
     log.Debug("Creating share from snapshot: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
     if deleteDelay >= 0 {
@@ -474,11 +467,6 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         log.Errorf("Failed to set objectives %s, %v", objectives, err)
         defer client.DeleteShare(share.Name, 0)
         return err
-    }
-
-    err = client.SetMetadataTagsOnShare(name, tags)
-    if err != nil {
-        log.Warnf("failed to set additional metadata on share %v", err)
     }
 
     return nil
@@ -732,19 +720,4 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
     free, _ := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
 
     return free, nil
-}
-
-
-func (client *HammerspaceClient) SetMetadataTagsOnFile(filepath string, tags map[string]string) (error) {
-    // TODO
-    return nil
-}
-
-func (client *HammerspaceClient) SetMetadataTagsOnShare(shareName string, tags map[string]string) (error) {
-    // TODO hs attribute set csi_details -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
-    //"csi_created_by_plugin_name":    CsiPluginName,
-    //        "csi_created_by_plugin_version": Version,
-    //        "csi_created_by_plugin_git_hash": Githash,
-    //        "csi_created_by_csi_version": CsiVersion,
-    return nil
 }

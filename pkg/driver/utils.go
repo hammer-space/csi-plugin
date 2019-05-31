@@ -65,7 +65,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
     if err != nil {
         return status.Errorf(codes.Internal, err.Error())
     }
-    backingDir := common.BackingShareProvisioningDir + backingShare.ExportPath
+    backingDir := common.ShareStagingDir + backingShare.ExportPath
     // Mount backing share
     if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
         mo := []string{"sync"}
@@ -84,7 +84,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
 
 func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, error) {
     backingShare, err := d.hsclient.GetShare(backingShareName)
-    mountPath := common.BackingShareProvisioningDir + backingShare.ExportPath
+    mountPath := common.ShareStagingDir + backingShare.ExportPath
     if isMounted, _ := common.IsShareMounted(mountPath); !isMounted {
         return true, nil
     }
@@ -120,7 +120,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
     var err error
 
     log.Infof("Finding best host exporting %s", shareExportPath)
-    if d.UseAnvil {
+    if common.UseAnvil {
         dataPortal, _ := d.hsclient.GetAnvilPortal()
         source := fmt.Sprintf("%s:%s", dataPortal, shareExportPath)
         mo := append(mountFlags, "nfsvers=4.2")

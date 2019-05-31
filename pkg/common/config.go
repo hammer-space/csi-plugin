@@ -23,7 +23,7 @@ const (
 
     // Directory on hosts where backing shares for file-backed volumes will be mounted
     // Must end with a "/"
-    BackingShareProvisioningDir = "/tmp/"
+    ShareStagingDir             = "/tmp/"
     SharePathPrefix             = "/"
     DefaultBackingFileSizeBytes = 1073741824
     DefaultVolumeNameFormat     = "%s"
@@ -43,6 +43,9 @@ var (
     DefaultDataPortalMountPrefixes = [...]string{"/mnt/data-portal", "/"}
     DataPortalMountPrefix = ""
     CommandExecTimeout = 300 * time.Second  // Seconds
+
+
+    UseAnvil      bool
 )
 
 // Extended info to be set on every share created by the driver

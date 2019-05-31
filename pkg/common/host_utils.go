@@ -64,7 +64,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
     return b.Bytes(), nil
 }
 
-var execCommand = execCommandHelper
+var ExecCommand = execCommandHelper
 // EnsureFreeLoopbackDeviceFile finds the next available loop device under /dev/loop*
 // If no free loop devices exist, a new one is created
 func EnsureFreeLoopbackDeviceFile() (uint64, error) {
@@ -148,7 +148,7 @@ func GetDeviceMinorNumber(device string) (uint32, error) {
 func MakeEmptyRawFile(pathname string, size int64) error {
     log.Infof("creating file '%s'", pathname)
     sizeStr := strconv.FormatInt(size, 10)
-    output, err := execCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
+    output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
     if err != nil {
         log.Errorf("%s, %v", output, err.Error())
         return err
@@ -159,7 +159,7 @@ func MakeEmptyRawFile(pathname string, size int64) error {
 
 func FormatDevice(device, fsType string) error {
     log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
-    output, err := execCommand(fmt.Sprintf("mkfs.%s", fsType), device)
+    output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), device)
     if err != nil {
         log.Info(err)
         if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
@@ -218,7 +218,7 @@ func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 }
 
 func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
-    output, err := execCommand("losetup", "-a")
+    output, err := ExecCommand("losetup", "-a")
     if err != nil {
         return "", status.Errorf(codes.Internal,
             "could not determine backing file for loop device, %v", err)
@@ -237,7 +237,7 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
 }
 
 func GetNFSExports(address string) ([]string, error) {
-    output, err := execCommand("showmount", "--no-headers", "-e", address)
+    output, err := ExecCommand("showmount", "--no-headers", "-e", address)
     if err != nil {
         return nil, status.Errorf(codes.Internal,
             "could not determine nfs exports, %v: %s", err, output)
@@ -294,4 +294,30 @@ func UnmountFilesystem(targetPath string) error {
         return status.Error(codes.Internal, err.Error())
     }
     return nil
+}
+
+func SetMetadataTags(localPath string, tags map[string]string) (error) {
+    // hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
+    // TODO: test this
+    _, err := ExecCommand("hs",
+        "attribute",
+        "set", localPath,
+        fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash))
+    if err != nil{
+        log.Warn("Failed to set CSI_DETAILS metadata " + err.Error())
+    }
+
+    for tag_key, tag_value := range tags {
+        _, err := ExecCommand("hs",
+            "attribute",
+            "add", tag_key, "-e", tag_value, localPath,
+        )
+        if err != nil{
+            log.Error("Failed to set tag " + err.Error())
+            break
+        }
+    }
+
+
+    return err
 }

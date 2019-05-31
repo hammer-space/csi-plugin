@@ -187,7 +187,6 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
             hsVolume.SourceSnapPath,
-            hsVolume.AdditionalMetadataTags,
         )
 
         if err != nil {
@@ -202,12 +201,19 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.Objectives,
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
-            hsVolume.AdditionalMetadataTags,
         )
 
         if err != nil {
             return status.Errorf(codes.Internal, err.Error())
         }
+    }
+    // generate unique target path on host
+    targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
+    defer common.UnmountFilesystem(targetPath)
+    err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false)
+    err = common.SetMetadataTags(targetPath, hsVolume.AdditionalMetadataTags)
+    if err != nil {
+        log.Warnf("failed to set additional metadata on share %v", err)
     }
     return nil
 }
@@ -225,7 +231,6 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
             []string{},
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
-            hsVolume.AdditionalMetadataTags,
         )
         if err != nil {
             return share, status.Errorf(codes.Internal, err.Error())
@@ -233,6 +238,14 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
         share, err = d.hsclient.GetShare(backingShareName)
         if err != nil {
             return share, status.Errorf(codes.Internal, err.Error())
+        }
+        // generate unique target path on host
+        targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
+        defer common.UnmountFilesystem(targetPath)
+        err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false)
+        err = common.SetMetadataTags(targetPath, hsVolume.AdditionalMetadataTags)
+        if err != nil {
+            log.Warnf("failed to set additional metadata on share %v", err)
         }
     }
 
@@ -269,6 +282,9 @@ func (d *CSIDriver) ensureDeviceFileExists(
         return status.Errorf(codes.OutOfRange, common.OutOfCapacity, hsVolume.Size, available)
     }
 
+    backingDir := common.ShareStagingDir + backingShare.ExportPath
+    deviceFile := backingDir+"/"+hsVolume.Name
+
     if hsVolume.SourceSnapPath != "" {
         // Create from snapshot
         err := d.hsclient.RestoreFileSnapToDestination(hsVolume.SourceSnapPath, hsVolume.Path)
@@ -283,8 +299,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
         defer d.UnmountBackingShareIfUnused(backingShare.Name)
         d.EnsureBackingShareMounted(backingShare.Name)
         //// Create an empty file of the correct size
-        backingDir := common.BackingShareProvisioningDir + backingShare.ExportPath
-        deviceFile := backingDir+"/"+hsVolume.Name
+
         err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
         if err != nil {
             log.Errorf("failed to create backing file for volume, %v", err)
@@ -333,7 +348,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
     }
 
     // Set additional metadata on file
-    err = d.hsclient.SetMetadataTagsOnFile(hsVolume.Path, hsVolume.AdditionalMetadataTags)
+    err = common.SetMetadataTags(deviceFile, hsVolume.AdditionalMetadataTags)
     if err != nil {
         log.Warnf("failed to set additional metadata on backing file for volume %v", err)
     }
@@ -568,7 +583,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 
     if exists {
         // mount share and delete file
-        destination := common.BackingShareProvisioningDir + path.Dir(filepath)
+        destination := common.ShareStagingDir + path.Dir(filepath)
         // grab and defer a lock here for the backing share
         defer d.releaseVolumeLock(residingShareName)
         d.getVolumeLock(residingShareName)

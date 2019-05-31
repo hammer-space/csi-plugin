@@ -131,7 +131,7 @@ func (d *CSIDriver) publishFileBackedVolume(
 
     // Mount the file
     log.Infof("Mounting file-backed volume at %s", targetPath)
-    filePath := common.BackingShareProvisioningDir + volumePath
+    filePath := common.ShareStagingDir + volumePath
 
     // If no fsType specified, mount as a device
     if fsType == "" {
@@ -413,14 +413,14 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 
     // Check if volume is on a backing share
     isFileBacked := false
-    _, err = os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
+    _, err = os.Stat(common.ShareStagingDir + req.GetVolumeId())
     if err == nil {
         isFileBacked = true
     }
 
     if isFileBacked {
         // we must stat the actual file, not the dev files, to get the size
-        fileInfo, err := os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
+        fileInfo, err := os.Stat(common.ShareStagingDir + req.GetVolumeId())
         if err != nil {
             return nil, status.Error(codes.NotFound, common.VolumeNotFound)
         }

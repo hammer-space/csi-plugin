@@ -6,7 +6,7 @@ import (
 )
 
 func TestGetNFSExports(t *testing.T) {
-    execCommand = func(command string, args...string) ([]byte, error) {
+    ExecCommand = func(command string, args...string) ([]byte, error) {
         return []byte(""), nil
     }
     expected := []string{}
@@ -21,7 +21,7 @@ func TestGetNFSExports(t *testing.T) {
         t.FailNow()
     }
 
-    execCommand = func(command string, args...string) ([]byte, error) {
+    ExecCommand = func(command string, args...string) ([]byte, error) {
         return []byte(`
 
 
@@ -39,7 +39,7 @@ func TestGetNFSExports(t *testing.T) {
         t.FailNow()
     }
 
-    execCommand = func(command string, args...string) ([]byte, error) {
+    ExecCommand = func(command string, args...string) ([]byte, error) {
         return []byte(`/test    *
 /mnt/data-portal/test        *
 /hs/test				*
@@ -60,7 +60,7 @@ func TestGetNFSExports(t *testing.T) {
 
 
 func TestDetermineBackingFileFromLoopDevice(t *testing.T) {
-    execCommand = func(command string, args ...string) ([]byte, error) {
+    ExecCommand = func(command string, args ...string) ([]byte, error) {
         return []byte(`
 /dev/loop0: 0 /tmp/test
 /dev/loop1: 0 /tmp/test
