@@ -26,7 +26,7 @@ Block Volume
 
 File-backed Mounted (filesystem) volume
 - Storage is exposed to the container as a directory
-- Exists as a special device file on a Hammerspace share (backing share) which contains a file-system
+- Exists as a special device file on a Hammerspace share (backing share) which contains a filesystem
 
 Mounted (shared filesystem) volume
 - Storage is exposed to the container as a directory
@@ -60,12 +60,12 @@ Variable                       |     Default           | Description
 ----------------               |     ------------      | -----
 *``CSI_ENDPOINT``              |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
 *``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
-``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS. If false, data-portals are used.
+``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS (NFS v4.2). If false, data portals are used.
 *``HS_ENDPOINT``               |                       | Hammerspace API gateway
 *``HS_USERNAME``               |                       | Hammerspace username
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
-``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data-portal mounts. Ex "/hs"
+``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex "/hs"
 ``CSI_MAJOR_VERSION``          |     ``"1"``           | The major version of the CSI interface used to communicate with the plugin. Valid values are "1" and "0"
 
 ## Usage
