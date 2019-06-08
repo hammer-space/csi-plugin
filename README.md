@@ -1,6 +1,6 @@
 # Hammerspace CSI Volume Plugin
 
-This plugin uses Hammerspace storage backend as distributed data storage for containers.
+This plugin uses Hammerspace backend as distributed data storage for containers.
 
 Supports [CSI Spec 1.1.0](https://github.com/container-storage-interface/spec/blob/master/spec.md) 
  
