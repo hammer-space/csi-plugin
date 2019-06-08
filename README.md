@@ -41,7 +41,7 @@ Ubuntu
 $ apt install nfs-common
 ```
 
-Centos
+CentOS
 ```bash
 $ yum install nfs-utils
 ```
