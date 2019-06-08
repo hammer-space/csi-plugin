@@ -52,7 +52,7 @@ The plugin container(s) must run as privileged containers
 Kubernetes specific deployment instructions are located at [here](https://github.com/hammer-space/csi-plugin/blob/master/deploy/kubernetes/README.md)
 
 ### Configuration
-Configuration parameters for the driver (Passed as environment variables to plugin container):
+Configuration parameters for the driver (passed as environment variables to plugin container):
 
 ``*`` Required
 
@@ -74,7 +74,7 @@ Supported volume parameters for CreateVolume requests (maps to Kubernetes storag
 Name                     |     Default            | Description
 ----------------         |     ------------       | -----
 ``exportOptions``        |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of subnet,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
-``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults
+``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to Hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults
 ``volumeNameFormat``     |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
 ``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares in addition to default objectives.
 ``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
