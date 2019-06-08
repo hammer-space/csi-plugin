@@ -6,7 +6,7 @@ Supports [CSI Spec 1.1.0](https://github.com/container-storage-interface/spec/bl
  
 Implements the Identity, Node, and Controller interfaces as single Golang binary.
  
-#### Supported Capabilities:
+#### Supported Capabilities
 * CREATE_DELETE_VOLUME
 * GET_CAPACITY
 * CREATE_DELETE_SNAPSHOT
