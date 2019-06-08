@@ -34,7 +34,7 @@ Mounted (shared filesystem) volume
 
 ## Plugin Dependencies
 
-Ensure that nfs-utils is installed on the hosts
+Ensure that nfs-utils is installed on the Kubernetes hosts
 
 Ubuntu
 ```bash
@@ -62,7 +62,7 @@ Variable                       |     Default           | Description
 *``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
 ``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS (NFS v4.2). If false, data portals are used.
 *``HS_ENDPOINT``               |                       | Hammerspace API gateway
-*``HS_USERNAME``               |                       | Hammerspace username
+*``HS_USERNAME``               |                       | Hammerspace username (admin role credentials)
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
 ``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex "/hs"
