@@ -175,7 +175,7 @@ These tests are functional and will create and delete volumes on the backend.
 Must have connections from the host to the HS_ENDPOINT. This can be run from within the Dev image.
 Uses the [CSI sanity package](https://github.com/kubernetes-csi/csi-test/tree/master/cmd/csi-sanity)
 
-Make a parameters
+Make parameters
 ```bash
 echo "
 fsType: nfs
