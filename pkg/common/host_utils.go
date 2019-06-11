@@ -298,27 +298,25 @@ func UnmountFilesystem(targetPath string) error {
 
 func SetMetadataTags(localPath string, tags map[string]string) (error) {
     // hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
-    // TODO: test this
     _, err := ExecCommand("hs",
         "attribute",
-        "set", localPath,
-        fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash))
+        "set", "CSI_DETAILS",
+        fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash),
+        localPath)
     if err != nil{
         log.Warn("Failed to set CSI_DETAILS metadata " + err.Error())
     }
 
     for tag_key, tag_value := range tags {
-        //TODO: Test for putting things like shell expansions in the tag_value or key
         _, err := ExecCommand("hs",
-            "attribute",
-            "add", tag_key, "-e", tag_value, localPath,
+            "tag",
+            "set", tag_key, "-r", "-e", fmt.Sprintf("'%s'", tag_value), localPath,
         )
         if err != nil{
             log.Error("Failed to set tag " + err.Error())
             break
         }
     }
-
 
     return err
 }
