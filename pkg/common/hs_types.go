@@ -116,7 +116,7 @@ type DataPortal struct {
 }
 
 type DataPortalNodeAddress struct {
-    Address      string `json:"address""`
+    Address      string `json:"address"`
     PrefixLength int    `json:"prefixLength"`
 }
 

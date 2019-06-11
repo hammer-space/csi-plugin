@@ -36,6 +36,7 @@ import (
 
 func execCommandHelper(command string, args...string) ([]byte, error) {
     cmd := exec.Command(command, args...)
+    log.Debugf("Executing command: %s %v", cmd, args)
     var b bytes.Buffer
     cmd.Stdout = &b
     cmd.Stderr = &b
@@ -308,14 +309,17 @@ func SetMetadataTags(localPath string, tags map[string]string) (error) {
     }
 
     for tag_key, tag_value := range tags {
-        _, err := ExecCommand("hs",
+        output, err := ExecCommand("hs",
             "tag",
-            "set", tag_key, "-r", "-e", fmt.Sprintf("'%s'", tag_value), localPath,
+            "add", tag_key, "-r", "-e", fmt.Sprintf("'%s'", tag_value), localPath,
         )
+
+        // FIXME: The HS client returns exit code 0 even on failure
         if err != nil{
             log.Error("Failed to set tag " + err.Error())
             break
         }
+        log.Debugf("HS command output: %s", output)
     }
 
     return err

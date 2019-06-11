@@ -495,6 +495,7 @@ func (d *CSIDriver) CreateVolume(
         Name:                  volumeName,
         VolumeMode:            volumeMode,
         FSType:                fsType,
+        AdditionalMetadataTags: vParams.AdditionalMetadataTags,
     }
     if snap != nil {
         sourceSnapName, err := GetSnapshotNameFromSnapshotId(snap.GetSnapshotId())
