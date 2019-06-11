@@ -308,6 +308,7 @@ func SetMetadataTags(localPath string, tags map[string]string) (error) {
     }
 
     for tag_key, tag_value := range tags {
+        //TODO: Test for putting things like shell expansions in the tag_value or key
         _, err := ExecCommand("hs",
             "attribute",
             "add", tag_key, "-e", tag_value, localPath,

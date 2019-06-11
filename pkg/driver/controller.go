@@ -413,14 +413,10 @@ func (d *CSIDriver) CreateVolume(
             fileBacked = true
         case *csi.VolumeCapability_Mount:
             filesystemRequested = true
-            fsType = cap.GetMount().GetFsType()
-            if fsType == "" {
-                fsType = vParams.FSType
-            }
+            fsType = vParams.FSType
             if fsType == "" {
                 fsType = "nfs"
-            }
-            if fsType != "nfs" {
+            } else if fsType != "nfs" {
                 fileBacked = true
             }
         }
