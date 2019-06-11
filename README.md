@@ -1,12 +1,12 @@
 # Hammerspace CSI Volume Plugin
 
-This plugin uses Hammerspace storage backend as distributed data storage for containers.
+This plugin uses Hammerspace backend as distributed data storage for containers.
 
 Supports [CSI Spec 1.1.0](https://github.com/container-storage-interface/spec/blob/master/spec.md) 
  
 Implements the Identity, Node, and Controller interfaces as single Golang binary.
  
-#### Supported Capabilities:
+#### Supported Capabilities
 * CREATE_DELETE_VOLUME
 * GET_CAPACITY
 * CREATE_DELETE_SNAPSHOT
@@ -26,7 +26,7 @@ Block Volume
 
 File-backed Mounted (filesystem) volume
 - Storage is exposed to the container as a directory
-- Exists as a special device file on a Hammerspace share (backing share) which contains a file-system
+- Exists as a special device file on a Hammerspace share (backing share) which contains a filesystem
 
 Mounted (shared filesystem) volume
 - Storage is exposed to the container as a directory
@@ -34,14 +34,14 @@ Mounted (shared filesystem) volume
 
 ## Plugin Dependencies
 
-Ensure that nfs-utils is installed on the hosts
+Ensure that nfs-utils is installed on the Kubernetes hosts
 
 Ubuntu
 ```bash
 $ apt install nfs-common
 ```
 
-Centos
+CentOS
 ```bash
 $ yum install nfs-utils
 ```
@@ -52,7 +52,7 @@ The plugin container(s) must run as privileged containers
 Kubernetes specific deployment instructions are located at [here](https://github.com/hammer-space/csi-plugin/blob/master/deploy/kubernetes/README.md)
 
 ### Configuration
-Configuration parameters for the driver (Passed as environment variables to plugin container):
+Configuration parameters for the driver (passed as environment variables to plugin container):
 
 ``*`` Required
 
@@ -60,12 +60,12 @@ Variable                       |     Default           | Description
 ----------------               |     ------------      | -----
 *``CSI_ENDPOINT``              |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
 *``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
-``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS. If false, data-portals are used.
+``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS (NFS v4.2). If false, data portals are used.
 *``HS_ENDPOINT``               |                       | Hammerspace API gateway
-*``HS_USERNAME``               |                       | Hammerspace username
+*``HS_USERNAME``               |                       | Hammerspace username (admin role credentials)
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
-``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data-portal mounts. Ex "/hs"
+``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex "/hs"
 ``CSI_MAJOR_VERSION``          |     ``"1"``           | The major version of the CSI interface used to communicate with the plugin. Valid values are "1" and "0"
 
 ## Usage
@@ -74,9 +74,9 @@ Supported volume parameters for CreateVolume requests (maps to Kubernetes storag
 Name                     |     Default            | Description
 ----------------         |     ------------       | -----
 ``exportOptions``        |                        | Export options applied to shares created by plugin. Format is  ';' seperated list of subnet,access,rootSquash. Ex ``*,RW,false; 172.168.0.0/20,RO,true``
-``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults
+``deleteDelay``          |     ``-1``             | The value of the delete delay parameter passed to Hammerspace when the share is deleted. '-1' implies Hammerspace cluster defaults.
 ``volumeNameFormat``     |     ``%s``             | The name format to use when creating shares or files on the backend. Must contain a single '%s' that will be replaced with unique volume id information. Ex: ``csi-volume-%s-us-east``
-``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares in addition to default objectives.
+``objectives``           |     ``""``             | Comma separated list of objectives to set on created shares and files in addition to default objectives.
 ``blockBackingShareName``|                        | The share in which to store Block Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Block Volumes.
 ``mountBackingShareName``|                        | The share in which to store File-backed Mount Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Filesystem Volumes other than 'nfs'.
 ``fsType``               |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
@@ -175,7 +175,7 @@ These tests are functional and will create and delete volumes on the backend.
 Must have connections from the host to the HS_ENDPOINT. This can be run from within the Dev image.
 Uses the [CSI sanity package](https://github.com/kubernetes-csi/csi-test/tree/master/cmd/csi-sanity)
 
-Make a parameters
+Make parameters
 ```bash
 echo "
 fsType: nfs
