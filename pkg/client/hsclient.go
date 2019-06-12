@@ -393,7 +393,6 @@ func (client *HammerspaceClient) CreateShare(name string,
     err = client.SetObjectives(name, "/", objectives, true)
     if err != nil {
         log.Errorf("Failed to set objectives %s, %v", objectives, err)
-        defer client.DeleteShare(share.Name, 0)
         return err
     }
 
@@ -465,7 +464,6 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     err = client.SetObjectives(name, "/", objectives, true)
     if err != nil {
         log.Errorf("Failed to set objectives %s, %v", objectives, err)
-        defer client.DeleteShare(share.Name, 0)
         return err
     }
 
@@ -717,7 +715,10 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
     if err != nil {
         log.Error("Error parsing JSON response: " + err.Error())
     }
-    free, _ := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
+    free, err := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
+    if err != nil {
+        log.Error("Error parsing free cluster capacity: " + err.Error())
+    }
 
     return free, nil
 }
