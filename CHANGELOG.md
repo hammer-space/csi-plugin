@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Topology key ``topology.csi.hammerspace.com/is-data-portal``
 - Ability to set additional metadata tags on plugin created shares and files
 
+
+### Changed
+- Golang version 1.10 -> 1.12
+
 ## 0.1.3
 ### Added
 - Default size (1GB) for file-backed volumes

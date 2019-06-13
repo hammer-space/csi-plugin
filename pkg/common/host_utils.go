@@ -311,7 +311,7 @@ func SetMetadataTags(localPath string, tags map[string]string) (error) {
     for tag_key, tag_value := range tags {
         output, err := ExecCommand("hs",
             "-v", "tag",
-            "set", "-r", "-e", fmt.Sprintf("'%s'", tag_value), tag_key, localPath,
+            "set", "-e", fmt.Sprintf("'%s'", tag_value), tag_key, localPath,
         )
 
         // FIXME: The HS client returns exit code 0 even on failure, so we can't detect errors

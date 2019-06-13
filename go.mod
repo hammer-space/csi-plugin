@@ -6,7 +6,7 @@ require (
 	github.com/golang/protobuf v1.2.0 // - BSD 3-Clause "New" or "Revised" License
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7 // - MIT license
 	github.com/kr/pretty v0.1.0 // indirect - MIT license
-	github.com/kubernetes-csi/csi-test v2.0.0+incompatible
+	github.com/kubernetes-csi/csi-test v2.0.1+incompatible
 	github.com/onsi/ginkgo v1.7.0 // - MIT license
 	github.com/onsi/gomega v1.4.3 //  - MIT license
 	github.com/sirupsen/logrus v1.3.0 // - MIT license

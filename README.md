@@ -89,15 +89,8 @@ Currently, only the ``topology.csi.hammerspace.com/is-data-portal`` key is suppo
 ## Development
 ### Requirements
 * Docker
-* Golang 1.10+
+* Golang 1.12+
 * nfs-utils
-* vgo - `go get -u golang.org/x/vgo`
-
-**NOTE** Workaround for [go issue #24773](https://github.com/golang/go/issues/24773)
-```bash
-sudo mkdir /usr/lib/go-1.10/api
-sudo touch /usr/lib/go-1.10/api/go1.10.txt
-```
 
 ### Building
 ##### Build a new docker image from local source:

@@ -4,21 +4,21 @@ NAME=bin/hs-csi-plugin
 
 compile:
 	@echo "==> Building the Hammerspace CSI Driver Version ${VERSION}"
-	@env vgo get -d ./
-	@env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 vgo build -ldflags "-X 'github.com/hammer-space/csi-plugin/pkg/common.Version=${VERSION}' -X 'github.com/hammer-space/csi-plugin/pkg/common.Githash=${GITHASH}'" -o ${NAME} ./
+	@env GO111MODULE=on go get -d ./
+	@env GO111MODULE=on GO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X 'github.com/hammer-space/csi-plugin/pkg/common.Version=${VERSION}' -X 'github.com/hammer-space/csi-plugin/pkg/common.Githash=${GITHASH}'" -o ${NAME} ./
 
 clean:
 	@echo "==> Cleaning"
-	@env vgo clean
+	@env go clean
 	rm -rf bin go.sum
 
 unittest:
 	@echo "==> Running tests"
-	@env vgo test -v -count 1 -run="[^TestSanity]" ./...
+	@env go test -v -count 1 -run="[^TestSanity]" ./...
 
 sanity:
 	@echo "==> Running sanity functional tests"
-	@env vgo test -timeout=0 -v -run="TestSanity" ./...
+	@env go test -timeout=0 -v -run="TestSanity" ./...
 
 build-dev:
 	@echo "==> Building Docker Image for Dev Image"
