@@ -87,6 +87,9 @@ type ShareExportOptions struct {
     AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
     RootSquash        bool   `json:"rootSquash"`
 }
+type ObjectiveResponse struct {
+    Name          string               `json:"name"`
+}
 
 type Task struct {
     Uuid      string `json:"uuid"`

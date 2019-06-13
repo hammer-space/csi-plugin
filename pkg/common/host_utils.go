@@ -36,7 +36,7 @@ import (
 
 func execCommandHelper(command string, args...string) ([]byte, error) {
     cmd := exec.Command(command, args...)
-    log.Debugf("Executing command: %s %v", cmd, args)
+    log.Debugf("Executing command: %v %v", cmd, args)
     var b bytes.Buffer
     cmd.Stdout = &b
     cmd.Stderr = &b

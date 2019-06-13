@@ -153,6 +153,9 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
                 share.Size,
                 hsVolume.Size)
         }
+        if share.ShareState == "REMOVED" {
+            return status.Errorf(codes.Aborted, common.VolumeBeingDeleted)
+        }
         // FIXME: Check that it's objectives, export options, deleteDelay(extended info),
         //  etc match (optional functionality with CSI 1.0)
 
@@ -478,6 +481,18 @@ func (d *CSIDriver) CreateVolume(
         }
         if available < requestedSize {
             return nil, status.Errorf(codes.OutOfRange, common.OutOfCapacity, requestedSize, available)
+        }
+    }
+
+    //// Check if objectives exist on the cluster
+    clusterObjectiveNames, err := d.hsclient.ListObjectiveNames()
+    if err != nil {
+        return nil, status.Error(codes.Internal, err.Error())
+    }
+
+    for _, o := range vParams.Objectives {
+        if !IsValueInList(o, clusterObjectiveNames) {
+            return nil, status.Errorf(codes.InvalidArgument, common.InvalidObjectiveNameDoesNotExist, o)
         }
     }
 

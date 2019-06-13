@@ -31,6 +31,15 @@ import (
     common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
+func IsValueInList(value string, list []string) bool {
+    for _, v := range list {
+        if v == value {
+            return true
+        }
+    }
+    return false
+}
+
 func GetVolumeNameFromPath(path string) string {
     return filepath.Base(path)
 }

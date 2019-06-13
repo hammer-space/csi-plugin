@@ -274,6 +274,43 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
     return shares, nil
 }
 
+
+func (client *HammerspaceClient) ListObjectives() ([]common.ObjectiveResponse, error) {
+    req, err := client.generateRequest("GET", "/objectives", "")
+    statusCode, respBody, _, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return nil, err
+    }
+    if statusCode != 200 {
+        return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+    }
+
+    var objs []common.ObjectiveResponse
+    err = json.Unmarshal([]byte(respBody), &objs)
+    if err != nil {
+        log.Error("Error parsing JSON response: " + err.Error())
+    }
+    log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
+
+    return objs, nil
+}
+
+func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
+    objectives, err := client.ListObjectives()
+    if err != nil {
+        return nil, err
+    }
+
+    objectiveNames := make([]string, len(objectives))
+    for i, o := range objectives {
+        objectiveNames[i] = o.Name
+    }
+
+    return objectiveNames, nil
+}
+
 func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, error) {
     req, err := client.generateRequest("GET", "/shares/"+name, "")
     statusCode, respBody, _, err := client.doRequest(*req)
