@@ -211,10 +211,14 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
         }
     }
     // generate unique target path on host
-    targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
+    targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
     defer common.UnmountFilesystem(targetPath)
     err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false)
-    err = common.SetMetadataTags(targetPath, hsVolume.AdditionalMetadataTags)
+    if err != nil {
+        log.Warnf("failed to set additional metadata on share %v", err)
+    }
+    // The hs client expects a trailing slash for directories
+    err = common.SetMetadataTags(targetPath + "/", hsVolume.AdditionalMetadataTags)
     if err != nil {
         log.Warnf("failed to set additional metadata on share %v", err)
     }
@@ -243,10 +247,10 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
             return share, status.Errorf(codes.Internal, err.Error())
         }
         // generate unique target path on host
-        targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
+        targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
         defer common.UnmountFilesystem(targetPath)
         err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false)
-        err = common.SetMetadataTags(targetPath, hsVolume.AdditionalMetadataTags)
+        err = common.SetMetadataTags(targetPath + "/", hsVolume.AdditionalMetadataTags)
         if err != nil {
             log.Warnf("failed to set additional metadata on share %v", err)
         }
