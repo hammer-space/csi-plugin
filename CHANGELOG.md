@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Topology key ``topology.csi.hammerspace.com/is-data-portal``
 - Ability to set additional metadata tags on plugin created shares and files
+- Kubernetes 1.14 deployment manifests
 
 
 ### Changed
