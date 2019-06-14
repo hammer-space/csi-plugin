@@ -15,6 +15,7 @@ limitations under the License.
 package sanitytest
 
 import (
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"net"
 	"os"
@@ -24,6 +25,11 @@ import (
 
 	sanity "github.com/kubernetes-csi/csi-test/pkg/sanity"
 )
+
+var (
+	HSClient *client.HammerspaceClient
+)
+
 
 func mkdir(targetPath string) (string, error) {
 	os.Mkdir(targetPath, 0755)
@@ -49,6 +55,7 @@ func TestSanity(t *testing.T) {
 		os.Getenv("HS_PASSWORD"),
 		os.Getenv("HS_TLS_VERIFY"),
 		os.Getenv("CSI_USE_ANVIL_FOR_DATA"))
+
 	go func() {
 		l, _ := net.Listen("unix", os.Getenv("CSI_ENDPOINT"))
 		d.Start(l)

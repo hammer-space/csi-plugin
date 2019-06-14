@@ -168,6 +168,10 @@ func (c *CSIDriver) IsRunning() bool {
     return c.running
 }
 
+func (c *CSIDriver) GetHammerspaceClient() *client.HammerspaceClient {
+    return c.hsclient
+}
+
 func (c *CSIDriver) callInterceptor(
     ctx context.Context,
     req interface{},

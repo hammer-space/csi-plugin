@@ -275,7 +275,7 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 }
 
 
-func (client *HammerspaceClient) ListObjectives() ([]common.ObjectiveResponse, error) {
+func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResponse, error) {
     req, err := client.generateRequest("GET", "/objectives", "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
@@ -287,7 +287,7 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ObjectiveResponse, e
         return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
     }
 
-    var objs []common.ObjectiveResponse
+    var objs []common.ClusterObjectiveResponse
     err = json.Unmarshal([]byte(respBody), &objs)
     if err != nil {
         log.Error("Error parsing JSON response: " + err.Error())

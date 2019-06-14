@@ -73,6 +73,7 @@ type ShareResponse struct {
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
     Space         ShareSpaceResponse   `json:"space"`
+    Objectives    ObjectivesResponse  `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {
@@ -87,7 +88,13 @@ type ShareExportOptions struct {
     AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
     RootSquash        bool   `json:"rootSquash"`
 }
-type ObjectiveResponse struct {
+type ObjectivesResponse struct {
+    Applied          []AppliedObjectiveResponse               `json:"appliedObjectives"`
+}
+type AppliedObjectiveResponse struct {
+    Name          string               `json:"name"`
+}
+type ClusterObjectiveResponse struct {
     Name          string               `json:"name"`
 }
 

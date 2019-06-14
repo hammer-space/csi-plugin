@@ -33,13 +33,15 @@ import (
 	. "github.com/onsi/gomega"
 )
 
-var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.SanityContext) {
+
+var _ = sanity.DescribeSanity("Hammerspace - File Backed Mount Volumes", func(sc *sanity.SanityContext) {
 	var (
 		cl *sanity.Cleanup
 		c  csi.NodeClient
 		s  csi.ControllerClient
 
 		controllerPublishSupported bool
+		nodeStageSupported         bool
 	)
 
 	BeforeEach(func() {
@@ -49,11 +51,17 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 		controllerPublishSupported = isControllerCapabilitySupported(
 			s,
 			csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME)
+		nodeStageSupported = isNodeCapabilitySupported(c, csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME)
+		if nodeStageSupported {
+			err := createMountTargetLocation(sc.Config.StagingPath)
+			Expect(err).NotTo(HaveOccurred())
+		}
 		cl = &sanity.Cleanup{
 			Context:                    sc,
 			NodeClient:                 c,
 			ControllerClient:           s,
 			ControllerPublishSupported: controllerPublishSupported,
+			NodeStageSupported:         nodeStageSupported,
 		}
 	})
 
@@ -67,7 +75,9 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			name := uniqueString("sanity-node-full")
 
 			// Create Volume First
-			By("creating a single node writer volume")
+			By("creating a multi node writer volume")
+			params := copyStringMap(sc.Config.TestVolumeParameters)
+			params["fsType"] = "ext4"
 			vol, err := s.CreateVolume(
 				context.Background(),
 				&csi.CreateVolumeRequest{
@@ -77,16 +87,18 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 					},
 					VolumeCapabilities: []*csi.VolumeCapability{
 						{
-							AccessType: &csi.VolumeCapability_Block{
-								Block: &csi.VolumeCapability_BlockVolume{},
+							AccessType: &csi.VolumeCapability_Mount{
+								Mount: &csi.VolumeCapability_MountVolume{
+									FsType: "ext4",
+								},
 							},
 							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 							},
 						},
 					},
 					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: sc.Config.TestVolumeParameters,
+					Parameters: params,
 				},
 			)
 			Expect(err).NotTo(HaveOccurred())
@@ -95,19 +107,20 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			Expect(vol.GetVolume().GetVolumeId()).NotTo(BeEmpty())
 			cl.RegisterVolume(name, sanity.VolumeInfo{VolumeID: vol.GetVolume().GetVolumeId()})
 
-			By("Publishing Volume")
 			nodepubvol, err := c.NodePublishVolume(
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
 					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath+"/dev",
-					StagingTargetPath: sc.Config.StagingPath+"/dev",
+					TargetPath:        sc.Config.TargetPath,
+					StagingTargetPath: sc.Config.StagingPath,
 					VolumeCapability: &csi.VolumeCapability{
-						AccessType: &csi.VolumeCapability_Block{
-							Block: &csi.VolumeCapability_BlockVolume{},
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "ext4",
+							},
 						},
 						AccessMode: &csi.VolumeCapability_AccessMode{
-							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 						},
 					},
 					VolumeContext: vol.GetVolume().GetVolumeContext(),
@@ -118,37 +131,23 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			Expect(nodepubvol).NotTo(BeNil())
 
 			//Check that HS metadata is set
-			log.Infof("Checking Metadata")
 			additionalMetadataTags := map[string]string{}
 			if tags, exists := sc.Config.TestVolumeParameters["additionalMetadataTags"]; exists {
 				additionalMetadataTags = parseMetadataTagsParam(tags)
 			}
 			for key, value := range additionalMetadataTags {
-                // Check the file exists
-                output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir + vol.GetVolume().GetVolumeId()))
-                if err != nil {
-                    Expect(err).NotTo(HaveOccurred())
-                }
-                log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir + vol.GetVolume().GetVolumeId(), key))
+				// Check the file exists
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", sc.Config.TargetPath + "/"))
+				if err != nil {
+					Expect(err).NotTo(HaveOccurred())
+				}
+				log.Infof(string(output))
+				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", sc.Config.TargetPath + "/", key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				Expect(strings.TrimSpace(string(output))).To(Equal(fmt.Sprintf("\"%s\"", value)))
 			}
-
-			//// NodeUnpublishVolume
-			By("cleaning up calling nodeunpublish")
-			nodeunpubvol, err := c.NodeUnpublishVolume(
-				context.Background(),
-				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:   vol.GetVolume().GetVolumeId(),
-					TargetPath: sc.Config.TargetPath + "/dev",
-				})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nodeunpubvol).NotTo(BeNil())
-
-
 		})
 	})
 })
