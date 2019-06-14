@@ -262,8 +262,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(
     log.Infof("found device %s for mount %s", lodevice, targetPath)
 
     // Remove bind mount
-    command := exec.Command("umount", "-f", targetPath)
-    output, err := command.CombinedOutput()
+    output, err := common.ExecCommand("umount", "-f", targetPath)
     if err != nil {
         log.Errorf("could not remove bind mount, %s", err)
         return status.Error(codes.Internal, err.Error())

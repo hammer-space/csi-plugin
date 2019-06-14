@@ -31,7 +31,7 @@ var (
 )
 
 
-func mkdir(targetPath string) (string, error) {
+func Mkdir(targetPath string) (string, error) {
 	os.Mkdir(targetPath, 0755)
 	return targetPath, nil
 }
@@ -63,8 +63,8 @@ func TestSanity(t *testing.T) {
 
 	// Run test
 	config := &sanity.Config{
-		CreateTargetDir:          mkdir, //Work around for sanity trying to recreate existing directories and failing
-		CreateStagingDir:	      mkdir,
+		CreateTargetDir:          Mkdir, //Work around for sanity trying to recreate existing directories and failing
+		CreateStagingDir:         Mkdir,
 		CreatePathCmdTimeout:     30,
 		TargetPath:               mountPath,
 		StagingPath:              stagePath,

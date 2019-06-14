@@ -23,7 +23,10 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
+	"io"
+	"io/ioutil"
 	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
+	"os"
 	"strings"
 )
 
@@ -137,17 +140,75 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 				Expect(strings.TrimSpace(string(output))).To(Equal(fmt.Sprintf("\"%s\"", value)))
 			}
 
-			//// NodeUnpublishVolume
-			By("cleaning up calling nodeunpublish")
-			nodeunpubvol, err := c.NodeUnpublishVolume(
+			By("Write data to volume")
+			//sc.Config.TargetPath
+			testData := []byte("test_data")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/dev", testData, 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("unpublish the volume")
+			_, err = c.NodeUnpublishVolume(
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:   vol.GetVolume().GetVolumeId(),
-					TargetPath: sc.Config.TargetPath + "/dev",
-				})
-			Expect(err).NotTo(HaveOccurred())
-			Expect(nodeunpubvol).NotTo(BeNil())
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath + "/dev",
+				},
+			)
 
+			Expect(err).NotTo(HaveOccurred())
+
+			By("publish the volume to alternative location as read-only")
+			nodepubvol, err = c.NodePublishVolume(
+				context.Background(),
+				&csi.NodePublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath+ "/dev",
+					StagingTargetPath: sc.Config.StagingPath+ "/dev",
+					Readonly: true,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Block{
+							Block: &csi.VolumeCapability_BlockVolume{},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+
+						},
+					},
+					VolumeContext: vol.GetVolume().GetVolumeContext(),
+					Secrets:       sc.Secrets.NodePublishVolumeSecret,
+				},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nodepubvol).NotTo(BeNil())
+
+			By("Read data from volume")
+			r, err := os.Open(sc.Config.TargetPath + "/dev")
+			if err != nil {
+				Expect(err).NotTo(HaveOccurred())
+			}
+
+			output := make([]byte, len(testData))
+			_, err = io.ReadFull(r, output[:])
+			r.Close()
+			if err != nil {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			Expect(output).To(Equal(testData))
+
+			By("Ensure write data to volume fails")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/dev", testData, 0644)
+			Expect(err).To(HaveOccurred())
+
+			By("unpublish the volume from alt location")
+			_, err = c.NodeUnpublishVolume(
+				context.Background(),
+				&csi.NodeUnpublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath + "/dev",
+				},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
 
 		})
 	})

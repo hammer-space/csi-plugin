@@ -68,7 +68,7 @@ func pseudoUUID() string {
 // number. In case of an error, just the prefix is returned, so it
 // alone should already be fairly unique.
 func uniqueString(prefix string) string {
-	return prefix + uniqueSuffix
+	return prefix + "-" + pseudoUUID()
 }
 
 func GetHammerspaceClient() (*client.HammerspaceClient){

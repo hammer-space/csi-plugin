@@ -23,6 +23,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
+	"io/ioutil"
 	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
 	"strings"
 )
@@ -120,7 +121,7 @@ var _ = sanity.DescribeSanity("Hammerspace - File Backed Mount Volumes", func(sc
 							},
 						},
 						AccessMode: &csi.VolumeCapability_AccessMode{
-							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
 						},
 					},
 					VolumeContext: vol.GetVolume().GetVolumeContext(),
@@ -137,17 +138,81 @@ var _ = sanity.DescribeSanity("Hammerspace - File Backed Mount Volumes", func(sc
 			}
 			for key, value := range additionalMetadataTags {
 				// Check the file exists
-				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", sc.Config.TargetPath + "/"))
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir + vol.GetVolume().GetVolumeId()))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", sc.Config.TargetPath + "/", key))
+				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")",common.ShareStagingDir + vol.GetVolume().GetVolumeId(), key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				Expect(strings.TrimSpace(string(output))).To(Equal(fmt.Sprintf("\"%s\"", value)))
 			}
+
+			By("Write data to volume")
+			//sc.Config.TargetPath
+			testData := []byte("test_data")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
+			Expect(err).NotTo(HaveOccurred())
+
+			By("unpublish the volume")
+			_, err = c.NodeUnpublishVolume(
+				context.Background(),
+				&csi.NodeUnpublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
+				},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+
+			By("publish the volume as read-only")
+			nodepubvol, err = c.NodePublishVolume(
+				context.Background(),
+				&csi.NodePublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
+					StagingTargetPath: sc.Config.StagingPath,
+					Readonly: true,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "ext4",
+							},
+						},
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
+
+						},
+					},
+					VolumeContext: vol.GetVolume().GetVolumeContext(),
+					Secrets:       sc.Secrets.NodePublishVolumeSecret,
+				},
+			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nodepubvol).NotTo(BeNil())
+
+			By("Read data from volume")
+			output, err := ioutil.ReadFile(sc.Config.TargetPath + "/testfile")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal(testData))
+
+			By("Ensure write data to volume fails")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
+			Expect(err).To(HaveOccurred())
+
+			By("unpublish the volume")
+			_, err = c.NodeUnpublishVolume(
+				context.Background(),
+				&csi.NodeUnpublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
+				},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+
 		})
 	})
 })

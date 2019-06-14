@@ -24,6 +24,7 @@ import (
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
+	"io/ioutil"
 	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
 	"strings"
 )
@@ -69,7 +70,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 		cl.DeleteVolumes()
 	})
 
-	Describe("CreateVolume", func() {
+	Describe("NFS Volume Scenario", func() {
 
 		It("should work", func() {
 			name := uniqueString("sanity-node-full")
@@ -107,6 +108,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 			Expect(vol.GetVolume().GetVolumeId()).NotTo(BeEmpty())
 			cl.RegisterVolume(name, sanity.VolumeInfo{VolumeID: vol.GetVolume().GetVolumeId()})
 
+			By("publish the volume")
 			nodepubvol, err := c.NodePublishVolume(
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
@@ -130,6 +132,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 			Expect(err).NotTo(HaveOccurred())
 			Expect(nodepubvol).NotTo(BeNil())
 
+			By("Check that HS metadata is set")
 			//Check that HS metadata is set
 			additionalMetadataTags := map[string]string{}
 			if tags, exists := sc.Config.TestVolumeParameters["additionalMetadataTags"]; exists {
@@ -149,6 +152,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 				Expect(strings.TrimSpace(string(output))).To(Equal(fmt.Sprintf("\"%s\"", value)))
 			}
 
+			By("Check that HS objectives are set")
 			//Check that HS objectives are set
 			if objectivesString, exists := sc.Config.TestVolumeParameters["objectives"]; exists {
 				objectives := strings.Split(objectivesString, ",")
@@ -165,294 +169,70 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 					}
 				}
 			}
-		})
-	})
-})
 
-
-
-
-var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes Negative Tests", func(sc *sanity.SanityContext) {
-	var (
-		cl *sanity.Cleanup
-		c  csi.NodeClient
-		s  csi.ControllerClient
-
-		controllerPublishSupported bool
-		nodeStageSupported         bool
-	)
-
-	BeforeEach(func() {
-		c = csi.NewNodeClient(sc.Conn)
-		s = csi.NewControllerClient(sc.Conn)
-
-		controllerPublishSupported = isControllerCapabilitySupported(
-			s,
-			csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME)
-		nodeStageSupported = isNodeCapabilitySupported(c, csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME)
-		if nodeStageSupported {
-			err := createMountTargetLocation(sc.Config.StagingPath)
+			By("Write data to volume")
+			//sc.Config.TargetPath
+			testData := []byte("test_data")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
 			Expect(err).NotTo(HaveOccurred())
-		}
-		cl = &sanity.Cleanup{
-			Context:                    sc,
-			NodeClient:                 c,
-			ControllerClient:           s,
-			ControllerPublishSupported: controllerPublishSupported,
-			NodeStageSupported:         nodeStageSupported,
-		}
-	})
 
-	AfterEach(func() {
-		cl.DeleteVolumes()
-	})
-
-	Describe("CreateVolume", func() {
-
-		It("should fail with invalid fstype", func() {
-			name := uniqueString("sanity-node-full")
-
-			// Create Volume  with invalid FS type
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "notafs"
-			_, err := s.CreateVolume(
+			By("unpublish the volume")
+			_, err = c.NodeUnpublishVolume(
 				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "notafs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
-						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
+				&csi.NodeUnpublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
 				},
 			)
-			Expect(err).To(HaveOccurred())
 
-		})
+			Expect(err).NotTo(HaveOccurred())
 
-
-		// Create Volume  with invalid metadata tags field
-		It("should fail with invalid metadata", func() {
-			name := uniqueString("sanity-node-full")
-
-			// Create Volume  with invalid FS type
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["additionalMetadataTags"] = "invalid=format,,for,metadata"
-			_, err := s.CreateVolume(
+			By("publish the volume as read-only")
+			nodepubvol, err = c.NodePublishVolume(
 				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
+				&csi.NodePublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
+					StagingTargetPath: sc.Config.StagingPath,
+					Readonly: true,
+					VolumeCapability: &csi.VolumeCapability{
+						AccessType: &csi.VolumeCapability_Mount{
+							Mount: &csi.VolumeCapability_MountVolume{
+								FsType: "nfs",
 							},
 						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
-				},
-			)
-			Expect(err).To(HaveOccurred())
+						AccessMode: &csi.VolumeCapability_AccessMode{
+							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
 
-		})
-
-
-		// Create Volume  with invalid objectives field
-		It("should fail with invalid objectives", func() {
-			name := uniqueString("sanity-node-full")
-
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["objectives"] = "invalid=format,,for,objectives"
-			_, err := s.CreateVolume(
-				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
 						},
 					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
+					VolumeContext: vol.GetVolume().GetVolumeContext(),
+					Secrets:       sc.Secrets.NodePublishVolumeSecret,
 				},
 			)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(nodepubvol).NotTo(BeNil())
+
+			By("Read data from volume")
+			output, err := ioutil.ReadFile(sc.Config.TargetPath + "/testfile")
+			Expect(err).NotTo(HaveOccurred())
+			Expect(output).To(Equal(testData))
+
+			By("Ensure write data to volume fails")
+			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
 			Expect(err).To(HaveOccurred())
 
-		})
-
-		// Create Volume  with non-existent objective
-		It("should fail with non-existent objective", func() {
-			name := uniqueString("sanity-node-full")
-
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["objectives"] = "idonotexist"
-			_, err := s.CreateVolume(
+			By("unpublish the volume")
+			_, err = c.NodeUnpublishVolume(
 				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
-						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
+				&csi.NodeUnpublishVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					TargetPath:        sc.Config.TargetPath,
 				},
 			)
-			Expect(err).To(HaveOccurred())
-		})
 
-
-		// Create Volume  with invalid export options
-		It("should fail with invalid objectives", func() {
-			name := uniqueString("sanity-node-full")
-
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["exportOptions"] = "invalid=format,,for,exportOptions"
-			_, err := s.CreateVolume(
-				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
-						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
-				},
-			)
-			Expect(err).To(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
 
 		})
-
-		// Create Volume  with invalid delete delay
-		It("should fail with invalid deleteDelay", func() {
-			name := uniqueString("sanity-node-full")
-
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["deleteDelay"] = "not a number"
-			_, err := s.CreateVolume(
-				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
-						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
-				},
-			)
-			Expect(err).To(HaveOccurred())
-
-		})
-		// Create Volume  with invalid volume name format
-		It("should fail with invalid volumeNameFormat", func() {
-			name := uniqueString("sanity-node-full")
-
-			By("creating a multi node writer volume")
-			params := copyStringMap(sc.Config.TestVolumeParameters)
-			params["fsType"] = "nfs"
-			params["volumeNameFormat"] = "invalid=format"
-			_, err := s.CreateVolume(
-				context.Background(),
-				&csi.CreateVolumeRequest{
-					Name: name,
-					CapacityRange: &csi.CapacityRange{
-						RequiredBytes: TestVolumeSize(sc),
-					},
-					VolumeCapabilities: []*csi.VolumeCapability{
-						{
-							AccessType: &csi.VolumeCapability_Mount{
-								Mount: &csi.VolumeCapability_MountVolume{
-									FsType: "nfs",
-								},
-							},
-							AccessMode: &csi.VolumeCapability_AccessMode{
-								Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-							},
-						},
-					},
-					Secrets:    sc.Secrets.CreateVolumeSecret,
-					Parameters: params,
-				},
-			)
-			Expect(err).To(HaveOccurred())
-
-		})
-	})
+	}) // End Describe
 })
