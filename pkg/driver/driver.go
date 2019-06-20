@@ -20,6 +20,7 @@ import (
     "context"
     "encoding/json"
     "fmt"
+    "github.com/hammer-space/csi-plugin/pkg/common"
     "net"
     "os"
     "strconv"
@@ -43,7 +44,6 @@ type CSIDriver struct {
     snapshotLocks map[string]*sync.Mutex
     hsclient      *client.HammerspaceClient
     NodeID        string
-    UseAnvil      bool
 }
 
 func NewCSIDriver(endpoint, username, password, tlsVerifyStr, useAnvilStr string) *CSIDriver {
@@ -64,13 +64,13 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr, useAnvilStr string
     } else {
         useAnvil = true
     }
+    common.UseAnvil = useAnvil
 
     return &CSIDriver{
         hsclient:      client,
         volumeLocks:   make(map[string]*sync.Mutex),
         snapshotLocks: make(map[string]*sync.Mutex),
         NodeID:        os.Getenv("CSI_NODE_NAME"),
-        UseAnvil:      useAnvil,
     }
 
 }
@@ -166,6 +166,10 @@ func (c *CSIDriver) IsRunning() bool {
     defer c.lock.Unlock()
 
     return c.running
+}
+
+func (c *CSIDriver) GetHammerspaceClient() *client.HammerspaceClient {
+    return c.hsclient
 }
 
 func (c *CSIDriver) callInterceptor(

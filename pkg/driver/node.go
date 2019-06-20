@@ -131,7 +131,7 @@ func (d *CSIDriver) publishFileBackedVolume(
 
     // Mount the file
     log.Infof("Mounting file-backed volume at %s", targetPath)
-    filePath := common.BackingShareProvisioningDir + volumePath
+    filePath := common.ShareStagingDir + volumePath
 
     // If no fsType specified, mount as a device
     if fsType == "" {
@@ -262,8 +262,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(
     log.Infof("found device %s for mount %s", lodevice, targetPath)
 
     // Remove bind mount
-    command := exec.Command("umount", "-f", targetPath)
-    output, err := command.CombinedOutput()
+    output, err := common.ExecCommand("umount", "-f", targetPath)
     if err != nil {
         log.Errorf("could not remove bind mount, %s", err)
         return status.Error(codes.Internal, err.Error())
@@ -370,8 +369,26 @@ func (d *CSIDriver) NodeGetCapabilities(
 
 func (d *CSIDriver) NodeGetInfo(ctx context.Context,
     req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+
+    // Determine if this node is a data portal
+    dataPortals, err := d.hsclient.GetDataPortals(d.NodeID)
+    if err != nil {
+        log.Errorf("Could not list data-portals, %s", err.Error())
+    }
+    var isDataPortal bool
+    for _, p := range dataPortals {
+        if p.Node.Name == d.NodeID {
+            isDataPortal = true
+        }
+    }
+
     csiNodeResponse := &csi.NodeGetInfoResponse{
         NodeId: d.NodeID,
+        AccessibleTopology: &csi.Topology{
+            Segments: map[string]string{
+                common.TopologyKeyDataPortal: strconv.FormatBool(isDataPortal),
+            },
+        },
     }
     return csiNodeResponse, nil
 }
@@ -395,14 +412,14 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 
     // Check if volume is on a backing share
     isFileBacked := false
-    _, err = os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
+    _, err = os.Stat(common.ShareStagingDir + req.GetVolumeId())
     if err == nil {
         isFileBacked = true
     }
 
     if isFileBacked {
         // we must stat the actual file, not the dev files, to get the size
-        fileInfo, err := os.Stat(common.BackingShareProvisioningDir + req.GetVolumeId())
+        fileInfo, err := os.Stat(common.ShareStagingDir + req.GetVolumeId())
         if err != nil {
             return nil, status.Error(codes.NotFound, common.VolumeNotFound)
         }

@@ -23,9 +23,13 @@ const (
 
     // Directory on hosts where backing shares for file-backed volumes will be mounted
     // Must end with a "/"
-    BackingShareProvisioningDir = "/tmp/"
+    ShareStagingDir             = "/tmp/"
     SharePathPrefix             = "/"
     DefaultBackingFileSizeBytes = 1073741824
+    DefaultVolumeNameFormat     = "%s"
+
+    // Topology keys
+    TopologyKeyDataPortal       = "topology.csi.hammerspace.com/is-data-portal"
 )
 
 var (
@@ -39,4 +43,18 @@ var (
     DefaultDataPortalMountPrefixes = [...]string{"/mnt/data-portal", "/"}
     DataPortalMountPrefix = ""
     CommandExecTimeout = 300 * time.Second  // Seconds
+
+
+    UseAnvil      bool
 )
+
+// Extended info to be set on every share created by the driver
+func GetCommonExtendedInfo() (map[string]string) {
+    extendedInfo := map[string]string{
+        "csi_created_by_plugin_name":    CsiPluginName,
+        "csi_created_by_plugin_version": Version,
+        "csi_created_by_plugin_git_hash": Githash,
+        "csi_created_by_csi_version": CsiVersion,
+    }
+    return extendedInfo
+}

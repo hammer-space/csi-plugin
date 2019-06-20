@@ -274,6 +274,43 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
     return shares, nil
 }
 
+
+func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResponse, error) {
+    req, err := client.generateRequest("GET", "/objectives", "")
+    statusCode, respBody, _, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return nil, err
+    }
+    if statusCode != 200 {
+        return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+    }
+
+    var objs []common.ClusterObjectiveResponse
+    err = json.Unmarshal([]byte(respBody), &objs)
+    if err != nil {
+        log.Error("Error parsing JSON response: " + err.Error())
+    }
+    log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
+
+    return objs, nil
+}
+
+func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
+    objectives, err := client.ListObjectives()
+    if err != nil {
+        return nil, err
+    }
+
+    objectiveNames := make([]string, len(objectives))
+    for i, o := range objectives {
+        objectiveNames[i] = o.Name
+    }
+
+    return objectiveNames, nil
+}
+
 func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, error) {
     req, err := client.generateRequest("GET", "/shares/"+name, "")
     statusCode, respBody, _, err := client.doRequest(*req)
@@ -329,22 +366,22 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
     return file != nil, err
 }
 
+
+
+
 func (client *HammerspaceClient) CreateShare(name string,
     exportPath string,
     size int64, //size in bytes
     objectives []string,
     exportOptions []common.ShareExportOptions,
     deleteDelay int64) error {
+
     log.Debug("Creating share: " + name)
-    extendedInfo := map[string]string{
-        "csi_created_by_plugin_name":    common.CsiPluginName,
-        "csi_created_by_plugin_version": common.Version,
-        "csi_created_by_plugin_git_hash": common.Githash,
-        "csi_created_by_csi_version": common.CsiVersion,
-    }
+    extendedInfo := common.GetCommonExtendedInfo()
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
+
     share := common.ShareRequest{
         Name:          name,
         ExportPath:    exportPath,
@@ -393,7 +430,77 @@ func (client *HammerspaceClient) CreateShare(name string,
     err = client.SetObjectives(name, "/", objectives, true)
     if err != nil {
         log.Errorf("Failed to set objectives %s, %v", objectives, err)
-        defer client.DeleteShare(share.Name, 0)
+        return err
+    }
+
+    return nil
+}
+
+func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
+    exportPath string,
+    size int64, //size in bytes
+    objectives []string,
+    exportOptions []common.ShareExportOptions,
+    deleteDelay int64,
+    snapshotPath string) error {
+    log.Debug("Creating share from snapshot: " + name)
+    extendedInfo := common.GetCommonExtendedInfo()
+    if deleteDelay >= 0 {
+        extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+    }
+
+    ////// FIXME: Replace with new api to clone a snapshot to a new share
+    share := common.ShareRequest{
+        Name:          name,
+        ExportPath:    exportPath,
+        ExportOptions: exportOptions,
+        ExtendedInfo:  extendedInfo,
+    }
+    if size > 0 {
+        share.Size = size
+    }
+
+    shareString := new(bytes.Buffer)
+    json.NewEncoder(shareString).Encode(share)
+
+
+    req, err := client.generateRequest("POST", "/shares", shareString.String())
+    statusCode, _, respHeaders, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return err
+    }
+    if statusCode == 400 {
+        // FIXME: We get a 400 if there is already a share-create task for a share with this name
+        // can we check if a task exists somehow?
+    }
+    if statusCode != 202 {
+        return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+    }
+
+    // ensure the location header is set and also make sure length >= 1
+    if locs, exists := respHeaders["Location"]; exists {
+        success, err := client.WaitForTaskCompletion(locs[0])
+        if err != nil {
+            log.Error(err)
+            return err
+        }
+        if !success {
+            return errors.New("Share failed to create")
+            defer client.DeleteShare(share.Name, 0)
+        }
+
+    } else {
+        log.Errorf("No task returned to monitor")
+    }
+
+    ////// End FIXME
+
+    // Set objectives on share
+    err = client.SetObjectives(name, "/", objectives, true)
+    if err != nil {
+        log.Errorf("Failed to set objectives %s, %v", objectives, err)
         return err
     }
 
@@ -645,7 +752,10 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
     if err != nil {
         log.Error("Error parsing JSON response: " + err.Error())
     }
-    free, _ := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
+    free, err := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
+    if err != nil {
+        log.Error("Error parsing free cluster capacity: " + err.Error())
+    }
 
     return free, nil
 }

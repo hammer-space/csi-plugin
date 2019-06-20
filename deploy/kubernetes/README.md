@@ -30,7 +30,22 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
       VolumeSnapshotDataSource: true
     ...
     ```
-* VolumeSnapshot support requires the VolumeSnapshotDataSource feature flag
+* Topology support requires v1.14+ ``Topology`` and ``CSINodeInfo``
+    Example in /var/lib/kubelet/config.yaml
+    ```yaml
+    ...
+    featureGates:
+      CSINodeInfo: true  # On by default in kubernetes 1.14+
+      Topology: true
+    ...
+    ```
+* VolumeSnapshot support requires the ``VolumeSnapshotDataSource`` feature flag
+    Example in /var/lib/kubelet/config.yaml
+    ```yaml
+    ...
+    featureGates:
+      VolumeSnapshotDataSource: true
+    ...
 * Each host should have support for NFS v4.2 or v3 with the relevant network ports open between the host and storage
 
 ### NOTE on Google Kubernetes Engine
@@ -134,4 +149,73 @@ spec:
   source:
     name: mydevice
     kind: PersistentVolumeClaim
+```
+## Example Topology Usage
+
+### Create an Application Using the Filesystem Volume, only schedule to nodes that are data-portals
+Example Pod
+```yaml
+kind: Pod
+apiVersion: v1
+metadata:
+  name: my-app
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.csi.hammerspace.com/is-data-portal
+            operator: In
+            values:
+            - "true"
+  containers:
+    - name: my-app
+      image: alpine
+      volumeMounts:
+      - mountPath: "/data"
+        name: data-dir
+      command: [ "ls", "-al", "/data" ]
+  volumes:
+    - name: data-dir
+      persistentVolumeClaim:
+        claimName: myfilesystem
+```
+### Create an Application Using the Filesystem Volume, *prefer* scheduling to nodes that are data-portals
+Example Pod
+```yaml
+kind: Pod
+apiVersion: v1
+metadata:
+  name: my-app
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: topology.csi.hammerspace.com/is-data-portal
+            operator: In
+            values:
+            - "true"
+            - "false"
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+            - key: topology.csi.hammerspace.com/is-data-portal
+              operator: In
+              values:
+              - "true"
+        weight: 1
+  containers:
+    - name: my-app
+      image: alpine
+      volumeMounts:
+      - mountPath: "/data"
+        name: data-dir
+      command: [ "ls", "-al", "/data" ]
+  volumes:
+    - name: data-dir
+      persistentVolumeClaim:
+        claimName: myfilesystem
 ```

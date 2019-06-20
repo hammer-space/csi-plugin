@@ -3,11 +3,23 @@ package sanitytest
 import (
 	"crypto/rand"
 	"fmt"
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	yaml "gopkg.in/yaml.v2"
+	"gopkg.in/yaml.v2"
 	"io/ioutil"
 	"os"
+	"strconv"
+	"strings"
 )
+
+
+func copyStringMap(originalMap map[string]string) map[string]string {
+	newMap := make(map[string]string)
+	for key, value := range originalMap {
+		newMap[key] = value
+	}
+	return newMap
+}
 
 func createMountTargetLocation(targetPath string) error {
 	fileInfo, err := os.Stat(targetPath)
@@ -56,5 +68,35 @@ func pseudoUUID() string {
 // number. In case of an error, just the prefix is returned, so it
 // alone should already be fairly unique.
 func uniqueString(prefix string) string {
-	return prefix + uniqueSuffix
+	return prefix + "-" + pseudoUUID()
+}
+
+func GetHammerspaceClient() (*client.HammerspaceClient){
+	tlsVerify, _ := strconv.ParseBool(os.Getenv("HS_TLS_VERIFY"))
+
+	client, err := client.NewHammerspaceClient(
+		os.Getenv("HS_ENDPOINT"),
+		os.Getenv("HS_USERNAME"),
+		os.Getenv("HS_PASSWORD"),
+		tlsVerify)
+	if err != nil {
+		os.Exit(1)
+	}
+	return client
+}
+
+func parseMetadataTagsParam(additionalMetadataTagsString string) (map[string]string){
+
+	additionalMetadataTags := map[string]string{}
+	tagsList := strings.Split(additionalMetadataTagsString, ",")
+	for _, m := range tagsList {
+		extendedInfo := strings.Split(m, "=")
+		//assert options is len 2
+		key := strings.TrimSpace(extendedInfo[0])
+		value := strings.TrimSpace(extendedInfo[1])
+
+		additionalMetadataTags[key] = value
+	}
+
+	return additionalMetadataTags
 }

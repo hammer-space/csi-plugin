@@ -7,11 +7,11 @@ import (
     common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
-func TestListShares(t *testing.T) {
+func TestParseParams(t *testing.T) {
 
     // Test defaults
-    expectedParams := HSVolumeParameters{
-        VolumeNameFormat: DefaultVolumeNameFormat,
+    expectedParams := common.HSVolumeParameters{
+        VolumeNameFormat: common.DefaultVolumeNameFormat,
         DeleteDelay:      -1,
     }
     stringParams := map[string]string{}
@@ -24,7 +24,7 @@ func TestListShares(t *testing.T) {
     }
 
     // Test valid name format
-    expectedParams = HSVolumeParameters{
+    expectedParams = common.HSVolumeParameters{
         VolumeNameFormat: "my-csi-volume-%s-hammerspace",
         DeleteDelay:      -1,
     }
@@ -40,7 +40,7 @@ func TestListShares(t *testing.T) {
     }
 
     // Test invalid name format
-    expectedParams = HSVolumeParameters{
+    expectedParams = common.HSVolumeParameters{
         DeleteDelay: -1,
     }
     stringParams = map[string]string{
@@ -61,9 +61,9 @@ func TestListShares(t *testing.T) {
     }
 
     // Test delete delay
-    expectedParams = HSVolumeParameters{
+    expectedParams = common.HSVolumeParameters{
         DeleteDelay:      30,
-        VolumeNameFormat: DefaultVolumeNameFormat,
+        VolumeNameFormat: common.DefaultVolumeNameFormat,
     }
     stringParams = map[string]string{
         "deleteDelay": "30",
@@ -152,4 +152,33 @@ func TestListShares(t *testing.T) {
         t.Logf("expected error")
         t.FailNow()
     }
+
+    // Test extended info
+    expectedParams = common.HSVolumeParameters{
+        AdditionalMetadataTags: map[string]string{
+            "test_key": "test_value",
+            "test_quote": "\"test\"",
+        },
+    }
+    stringParams = map[string]string{
+        "additionalMetadataTags": "test_key=test_value,test_quote=\"test\"",
+    }
+    actualParams, err = parseVolParams(stringParams)
+    if !reflect.DeepEqual(actualParams.AdditionalMetadataTags, expectedParams.AdditionalMetadataTags) {
+        t.Logf("Params not equal")
+        t.Logf("Expected: %v", expectedParams.AdditionalMetadataTags)
+        t.Logf("Actual: %v", actualParams.AdditionalMetadataTags)
+        t.FailNow()
+    }
+
+    // Test invalid
+    stringParams = map[string]string{
+        "additionalMetadataTags": "test_keyest_value,test_quote=\"test\"",
+    }
+    actualParams, err = parseVolParams(stringParams)
+    if err == nil {
+        t.Logf("expected error")
+        t.FailNow()
+    }
+
 }

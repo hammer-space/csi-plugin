@@ -16,12 +16,42 @@ limitations under the License.
 
 package common
 
-type ClusterResponse struct {
-    Capacity map[string]string `json:"capacity"`
+
+// Structures to hold information about a plugin created volume
+type HSVolumeParameters struct {
+    DeleteDelay             int64
+    ExportOptions           []ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    VolumeNameFormat        string
+    FSType                  string
+    AdditionalMetadataTags  map[string]string
 }
+
+type HSVolume struct {
+    DeleteDelay             int64
+    ExportOptions           []ShareExportOptions
+    Objectives              []string
+    BlockBackingShareName   string
+    MountBackingShareName   string
+    Size                    int64
+    Name                    string
+    Path                    string
+    VolumeMode              string
+    SourceSnapPath          string
+    FSType                  string
+    SourceSnapShareName     string
+    AdditionalMetadataTags  map[string]string
+}
+
+///// Request and Response objects for interacting with the HS API
 
 // We must create separate req and response objects since the API does not allow
 // specifying unused fields
+type ClusterResponse struct {
+    Capacity map[string]string `json:"capacity"`
+}
 type ShareRequest struct {
     Name          string               `json:"name"`
     ExportPath    string               `json:"path"`
@@ -42,7 +72,8 @@ type ShareResponse struct {
     ShareState    string               `json:"shareState"`
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
-    Space         ShareSpaceResponse   `json:"space"'`
+    Space         ShareSpaceResponse   `json:"space"`
+    Objectives    ObjectivesResponse  `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {
@@ -56,6 +87,15 @@ type ShareExportOptions struct {
     Subnet            string `json:"subnet"`
     AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
     RootSquash        bool   `json:"rootSquash"`
+}
+type ObjectivesResponse struct {
+    Applied          []AppliedObjectiveResponse               `json:"appliedObjectives"`
+}
+type AppliedObjectiveResponse struct {
+    Name          string               `json:"name"`
+}
+type ClusterObjectiveResponse struct {
+    Name          string               `json:"name"`
 }
 
 type Task struct {
@@ -86,7 +126,7 @@ type DataPortal struct {
 }
 
 type DataPortalNodeAddress struct {
-    Address      string `json:"address""`
+    Address      string `json:"address"`
     PrefixLength int    `json:"prefixLength"`
 }
 

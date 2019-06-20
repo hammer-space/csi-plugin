@@ -38,10 +38,13 @@ const (
 
     InvalidExportOptions = "export options must consist of 3 values. Value received '%s'"
     InvalidRootSquash    = "rootSquash must be a bool. Value received '%s'"
+    InvalidAdditionalMetadataTags   = "Extended Info must be of format key=value, received '%s'"
+    InvalidObjectiveNameDoesNotExist = "cannot find objective with the name %s"
 
     VolumeExistsSizeMismatch = "requested volume exists, but has a different size. Existing: %d, Requested: %d"
 
     VolumeDeleteHasSnapshots = "volumes with snapshots cannot be deleted, delete snapshots first"
+    VolumeBeingDeleted      = "the specified volume is currently being deleted"
 
     // Not Found errors
     VolumeNotFound       = "volume does not exist"
