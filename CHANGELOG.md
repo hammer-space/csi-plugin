@@ -5,11 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## 1.0.0
 ### Added
 - Topology key ``topology.csi.hammerspace.com/is-data-portal``
 - Ability to set additional metadata tags on plugin created shares and files
 - Kubernetes 1.14 deployment manifests
-
 
 ### Changed
 - Golang version 1.10 -> 1.12
