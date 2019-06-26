@@ -262,9 +262,9 @@ spec:
             path: /var/lib/kubelet/plugins/com.hammerspace.csi
             type: DirectoryOrCreate
         - name: mountpoint-dir
-          type: Directory
           hostPath:
             path: /var/lib/kubelet
+            type: Directory
         - name: registration-dir
           hostPath:
             path: /var/lib/kubelet/plugins/
