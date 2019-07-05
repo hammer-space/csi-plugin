@@ -11,6 +11,6 @@ parameters:
   # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
   blockBackingShareName: k8s-block-storage
   # Objectives to set on shares in addition to HS cluster defaults
-  objectives: "place-on-all,optimize-for-capacity"
+  objectives: "optimize-for-capacity"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
