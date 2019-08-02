@@ -1,0 +1,229 @@
+#### Controller Service
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: com.hammerspace.csi.credentials
+type: Opaque
+stringData:
+  username: "$hsAdminUser"
+  password: "$hsPassword"
+  endpoint: "https://$hsClusterIp:8443"
+---
+# needed for StatefulSet
+kind: Service
+apiVersion: v1
+metadata:
+  name: $name-csi-provisioner
+  labels:
+    app: csi-provisioner
+    app.kubernetes.io/name: "$name"
+    app.kubernetes.io/component: csi-provisioner
+spec:
+  selector:
+    app: csi-provisioner
+  ports:
+    - name: dummy
+      port: 12345
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: $name-csi-provisioner
+  labels:
+    app.kubernetes.io/name: "$name"
+    app.kubernetes.io/component: csi-provisioner
+spec:
+  selector:
+    matchLabels:
+      app: csi-provisioner
+  serviceName: "csi-provisioner"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: csi-provisioner
+    spec:
+      serviceAccountName: "$serviceAcc"
+      hostNetwork: true
+      containers:
+        - name: csi-provisioner
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-provisioner:v0.4.2
+          args:
+            - "--provisioner=com.hammerspace.csi"
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+        - name: csi-attacher
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-attacher:v0.4.2
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy/
+        - name: hs-csi-plugin-controller
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: $imageHammerspaceCsiRepo:$imageHammerspaceCsiTag
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/sockets/pluginproxy/hs-csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: CSI_USE_ANVIL_FOR_DATA
+              value: "true"
+            - name: HS_TLS_VERIFY
+              value: "false"
+            - name: CSI_MAJOR_VERSION
+              value: "0"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/sockets/pluginproxy
+            - name: staging-dir
+              mountPath: /tmp/
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+        - name: staging-dir
+          hostPath:
+            path: /tmp/
+
+#### Node service
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: $name-csi-node
+  labels:
+    app.kubernetes.io/name: "$name"
+    app.kubernetes.io/component: csi-provisioner
+spec:
+  selector:
+    matchLabels:
+      app: csi-node
+  template:
+    metadata:
+      labels:
+        app: csi-node
+    spec:
+      serviceAccountName: "$serviceAcc"
+      hostNetwork: true
+      containers:
+        - name: driver-registrar
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/driver-registrar:v0.4.2
+          args:
+            - "--v=5"
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--kubelet-registration-path=$(REG_SOCKET)"
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: REG_SOCKET
+              value: /var/lib/kubelet/plugins/com.hammerspace.csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: hs-csi-plugin-node
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: $imageHammerspaceCsiRepo:$imageHammerspaceCsiTag
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: CSI_USE_ANVIL_FOR_DATA
+              value: "true"
+            - name: HS_TLS_VERIFY
+              value: "false"
+            - name: CSI_MAJOR_VERSION
+              value: "0"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+              mountPropagation: Bidirectional
+            - name: mountpoint-dir
+              mountPath: /var/lib/kubelet
+              mountPropagation: Bidirectional
+            - name: dev-dir
+              mountPath: /dev
+            - name: staging-dir
+              mountPath: /tmp/
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/com.hammerspace.csi
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet
+            type: Directory
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins/
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: staging-dir
+          hostPath:
+            path: /tmp/
