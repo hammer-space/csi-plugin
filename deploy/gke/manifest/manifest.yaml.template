@@ -1,15 +1,5 @@
 #### Controller Service
 ---
-apiVersion: v1
-kind: Secret
-metadata:
-  name: com.hammerspace.csi.credentials
-type: Opaque
-stringData:
-  username: "$hsAdminUser"
-  password: "$hsPassword"
-  endpoint: "https://$hsClusterIp:8443"
----
 # needed for StatefulSet
 kind: Service
 apiVersion: v1
@@ -86,17 +76,17 @@ spec:
             - name: HS_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: username
             - name: HS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: password
             - name: HS_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: endpoint
             - name: CSI_USE_ANVIL_FOR_DATA
               value: "true"
@@ -173,17 +163,17 @@ spec:
             - name: HS_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: username
             - name: HS_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: password
             - name: HS_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: com.hammerspace.csi.credentials
+                  name: "$anvilSecret"
                   key: endpoint
             - name: CSI_NODE_NAME
               valueFrom:
