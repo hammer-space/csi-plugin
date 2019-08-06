@@ -13,7 +13,7 @@ spec:
     volumeMounts:
     - name: config-volume
       mountPath: /tester
-    command: ["bash"]
+    command: ["sh"]
     args: ["/tester/run.sh"]
   restartPolicy: Never
   volumes:
