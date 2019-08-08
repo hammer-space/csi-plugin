@@ -23,13 +23,92 @@ spec:
     - description: Getting Started
       url: http://hammerspace.com
     notes: |-
-      Hammerspace notes
+      # Create a storage class
+
+      Create a file sc.yaml that describes the storage class:
+      ```
+      kind: StorageClass
+      apiVersion: storage.k8s.io/v1
+      metadata:
+        name: hs-storageclass
+        annotations:
+          storageclass.kubernetes.io/is-default-class: "true"
+      provisioner: com.hammerspace.csi
+
+      parameters:
+        fsType: nfs
+        # Objectives to set on shares in addition to HS cluster defaults
+        objectives: "optimize-for-capacity"
+        # ';' seperated list of <subnet>,access,rootSquash
+        exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
+        # One should be careful to set this if shares are used outside of the cluster. -1 means do not delete the shares at all
+        deleteDelay: "0"
+        # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
+        volumeNameFormat: "csi-%s"
+      ```
+
+      Apply the file to your namespace:
+      ```
+      kubectl apply --namespace $namespace -f sc.yaml
+      ```
+
+      # Create a filesystem persistent volume claim
+
+      Create a file pvc.yaml that describes the persistent volume claim:
+      ```
+      apiVersion: v1
+      kind: PersistentVolumeClaim
+      metadata:
+        name: myfilesystem
+      spec:
+        accessModes:
+        - ReadWriteMany
+        resources:
+          requests:
+            storage: 50Gi
+        storageClassName: hs-storageclass
+      ```
+
+      Apply the file to your namespace:
+      ```
+      kubectl apply --namespace $namespace -f pvc.yaml
+      ```
+
+      # Deploy a container that writes to the PVC
+
+      Create a file pod.yaml that describes a pod and container that writes the filesystem:
+      ```
+      kind: Pod
+      apiVersion: v1
+      metadata:
+        name: my-app
+      spec:
+        containers:
+          - name: my-app
+            image: alpine
+            volumeMounts:
+            - mountPath: "/data"
+              name: data-dir
+            command: ["/bin/sh"]
+            args: ["-c", "echo data > /data/datafile.txt" ]
+        volumes:
+          - name: data-dir
+            persistentVolumeClaim:
+              claimName: myfilesystem
+
+      Apply the file to your namespace:
+      ```
+      kubectl apply --namespace $namespace -f pod.yaml
+      ```
+
+  info:
+  - name: Provisioner
+    type: String
+    value: com.hammerspace.csi
   selector:
     matchLabels:
       app.kubernetes.io/name: "$name"
   componentKinds:
-  - group: v1
-    kind: Secret
   - group: v1
     kind: Service
   - group: apps/v1

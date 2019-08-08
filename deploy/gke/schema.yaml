@@ -24,6 +24,7 @@ properties:
             after: imageHammerspaceCsiTag
   serviceAcc:
     type: string
+    title: Service account
     x-google-marketplace:
       type: SERVICE_ACCOUNT
       serviceAccount:
@@ -73,26 +74,14 @@ properties:
             - apiGroups: ["storage.k8s.io"]
               resources: ["storageclasses"]
               verbs: ["get", "list", "watch", "update"]
-  hsClusterIp:
+  anvilSecret:
     type: string
-    title: Hammerspace Anvil Internal IP
-    description: Internal IP of deployed Hammerspace Anvil
-    placeholder: '192.169.0.2'
-  hsAdminUser:
-    type: string
-    title: Hammerspace Anvil Administrator Username
-    description: User with administrator privelages of deployed Hammerspace Anvil
-    default: admin
-  hsPassword:
-    type: string
-    title: Hammerspace Anvil Admin Password
-    description: Administrator password of deployed Hammerspace Anvil
+    title: Hammerspace Anvil Secret
+    description: The resource name of a secret containing the IP, admin user, and password of a deployed Hammerspace Anvil
 required:
 - name
 - namespace
 - deployerImage
 - imageHammerspaceCsi
 - serviceAcc
-- hsClusterIp
-- hsAdminUser
-- hsPassword
+- anvilSecret
