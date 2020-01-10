@@ -632,7 +632,7 @@ func (client *HammerspaceClient) GetShareSnapshots(shareName string) ([]string, 
 // Needs to work for a slice with only current as an entry as well as when there are many snapshots and current is somewhere in the list
    for i, v := range snapshotNames {
         if v == "current" {
-            snapshotNames = append(s[:i], s[i+1:]...)
+            snapshotNames = append(snapshotNames[:i], snapshotNames[i+1:]...)
             break
         }
    }
