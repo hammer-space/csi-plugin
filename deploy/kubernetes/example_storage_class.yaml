@@ -19,7 +19,7 @@ parameters:
   objectives: "optimize-for-capacity"
   # ';' seperated list of <subnet>,access,rootSquash
   exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
-  # One should be careful to set this if shares are used outside of the cluster. -1 means do not delete the shares at all
+  # One should be careful to set this if shares are used outside of the cluster. -1 means Hammerspace defalt which is to delete the share in 24 hours
   deleteDelay: "0"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
