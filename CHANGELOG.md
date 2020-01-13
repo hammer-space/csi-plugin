@@ -6,6 +6,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.0.1
+### Added
+- Support for Hammerspace 4.3.0
+- Tested with Kubernetes 1.16, 1.17
+
 ## 1.0.0
 ### Added
 - Topology key ``topology.csi.hammerspace.com/is-data-portal``
