@@ -138,7 +138,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
             log.Infof("Mounted via Anvil portal")
             return nil
         } else {
-            log.Infof("Could not mount via Anvil portal, falling back to data-portals. Error: %v", err)
+            log.Infof("Could not mount via NFS 4.2, falling back to data-portals. Error: %v", err)
         }
     }
 
