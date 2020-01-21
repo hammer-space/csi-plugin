@@ -78,7 +78,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v0.1.3
+          image: hammerspaceinc/csi-plugin:v1.0.1
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock
@@ -225,7 +225,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v0.1.3
+          image: hammerspaceinc/csi-plugin:v1.0.1
           env:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock

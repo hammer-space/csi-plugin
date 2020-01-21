@@ -8,7 +8,7 @@ metadata:
 provisioner: com.hammerspace.csi
 volumeBindingMode: WaitForFirstConsumer
 parameters:
-  # The filesystem to format onto the backing file
+  # The filesystem to format onto the backing file. Supported filesystems depends on the file systems being available on the node
   fsType: "ext4"
   # Optional, for use if we are supporting file-backed Mount volumes. Auto-created if it does not exist. Never deleted by the driver
   mountBackingShareName: k8s-file-storage
