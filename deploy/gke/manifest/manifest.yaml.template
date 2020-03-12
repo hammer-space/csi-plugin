@@ -88,8 +88,6 @@ spec:
                 secretKeyRef:
                   name: "$anvilSecret"
                   key: endpoint
-            - name: CSI_USE_ANVIL_FOR_DATA
-              value: "true"
             - name: HS_TLS_VERIFY
               value: "false"
             - name: CSI_MAJOR_VERSION
@@ -179,8 +177,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-            - name: CSI_USE_ANVIL_FOR_DATA
-              value: "true"
             - name: HS_TLS_VERIFY
               value: "false"
             - name: CSI_MAJOR_VERSION

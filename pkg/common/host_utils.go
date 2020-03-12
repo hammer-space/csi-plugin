@@ -102,7 +102,7 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
         if os.IsPermission(err) {
             return status.Error(codes.PermissionDenied, err.Error())
         }
-        if strings.Contains(err.Error(), "invalid argument") {
+        if strings.Contains(err.Error(), "Invalid argument") {
             return status.Error(codes.InvalidArgument, err.Error())
         }
         return status.Error(codes.Internal, err.Error())

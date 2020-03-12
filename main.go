@@ -72,13 +72,6 @@ func validateEnvironmentVars() {
         log.Error("HS_PASSWORD must be defined")
         os.Exit(1)
     }
-    if os.Getenv("CSI_USE_ANVIL_FOR_DATA") != "" {
-        _, err = strconv.ParseBool(os.Getenv("CSI_USE_ANVIL_FOR_DATA"))
-        if err != nil {
-            log.Error("CSI_USE_ANVIL_FOR_DATA must be a bool")
-            os.Exit(1)
-        }
-    }
     if os.Getenv("HS_TLS_VERIFY") != "" {
         _, err = strconv.ParseBool(os.Getenv("HS_TLS_VERIFY"))
         if err != nil {
@@ -114,7 +107,6 @@ func main() {
         os.Getenv("HS_USERNAME"),
         os.Getenv("HS_PASSWORD"),
         os.Getenv("HS_TLS_VERIFY"),
-        os.Getenv("CSI_USE_ANVIL_FOR_DATA"),
     )
 
     if CSI_version == "0" {

@@ -129,27 +129,14 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
     var err error
 
     log.Infof("Finding best host exporting %s", shareExportPath)
-    if common.UseAnvil {
-        dataPortal, _ := d.hsclient.GetAnvilPortal()
-        source := fmt.Sprintf("%s:%s", dataPortal, shareExportPath)
-        mo := append(mountFlags, "nfsvers=4.2")
-        err = common.MountShare(source, targetPath, mo)
-        if err == nil {
-            log.Infof("Mounted via Anvil portal")
-            return nil
-        } else {
-            log.Infof("Could not mount via NFS 4.2, falling back to data-portals. Error: %v", err)
-        }
-    }
 
-    //Try data portals
     portals, err := d.hsclient.GetDataPortals(d.NodeID)
     if err != nil {
         log.Errorf("Could not create list of data-portals, %v", err)
     }
 
-    for _, p := range portals {
-        addr := p.Node.MgmtIpAddress.Address
+    MountToDataPortal := func(portal common.DataPortal, mount_options []string) (bool){
+        addr := portal.Node.MgmtIpAddress.Address
         export := ""
         // Use configured prefix if specified
         if common.DataPortalMountPrefix != "" {
@@ -158,8 +145,8 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
             // grab exports with showmount
             exports, err := common.GetNFSExports(addr)
             if err != nil {
-                log.Infof("Could not get exports for data-portal, %s. Error: %v", p.Uoid["uuid"], err)
-                continue
+                log.Infof("Could not get exports for data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
+                return false
             }
             log.Infof("Found exports for data-portal %s, %v", addr, exports)
 
@@ -178,18 +165,39 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
                 }
             }
             if export == "" {
-                continue
+                return false
             }
         }
-        mo := append(mountFlags, "nfsvers=3")
+        mo := append(mountFlags, mount_options...)
         err = common.MountShare(export, targetPath, mo)
         if err != nil {
-            log.Infof("Could not mount via data-portal, %s. Error: %v", p.Uoid["uuid"], err)
+            log.Infof("Could not mount via data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
         } else {
-            log.Infof("Mounted via data-portal, %s.", p.Uoid["uuid"])
-            return nil
+            log.Infof("Mounted via data-portal, %s.", portal.Uoid["uuid"])
+            return true
         }
+        return false
     }
 
+    log.Infof("Attempting to mount via NFS 4.2.")
+    mounted := false
+    for _, p := range portals {
+        mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.2"))
+        if mounted {
+            break
+        }
+    }
+    if !mounted {
+        log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
+        for _, p := range portals {
+            mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=3"))
+            if mounted {
+                break
+            }
+        }
+    }
+    if mounted {
+        return nil
+    }
     return errors.New("could not mount to any data-portals")
 }
