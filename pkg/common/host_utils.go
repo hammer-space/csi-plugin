@@ -59,7 +59,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
         return nil, fmt.Errorf("process killed as timeout reached")
     case err := <-done:
         if err != nil {
-            log.Errorf("process finished with error = %v", err)
+            log.Errorf("process finished with error = '%v', output = '%s'", err, b.Bytes())
         }
     }
     return b.Bytes(), nil
@@ -250,6 +250,10 @@ func GetNFSExports(address string) ([]string, error) {
         if len(exportTokens) > 0 {
             toReturn = append(toReturn, exportTokens[0])
         }
+    }
+    if (len(toReturn) == 0) {
+        return nil, status.Errorf(codes.Internal,
+            "could not determine nfs exports, command output: %s", output)
     }
     return toReturn, nil
 }

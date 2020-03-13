@@ -165,6 +165,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
                 }
             }
             if export == "" {
+                log.Infof("Could not find any matching export on data-portal, %s.", portal.Uoid["uuid"])
                 return false
             }
         }
