@@ -334,6 +334,29 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
     return &share, err
 }
 
+func (client *HammerspaceClient) GetShareRawFields(name string) (map[string]interface{}, error) {
+    req, err := client.generateRequest("GET", "/shares/"+name, "")
+    statusCode, respBody, _, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return nil, err
+    }
+    if statusCode == 404 {
+        return nil, nil
+    }
+    if statusCode != 200 {
+        return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+    }
+
+    var share map[string]interface{}
+    err = json.Unmarshal([]byte(respBody), &share)
+    if err != nil {
+        log.Error("Error parsing JSON response: " + err.Error())
+    }
+    return share, err
+}
+
 func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
     req, err := client.generateRequest("GET", "/files?path="+path, "")
     statusCode, respBody, _, err := client.doRequest(*req)
@@ -541,6 +564,51 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
                 objectiveName, shareName, path, err)
             return errors.New(fmt.Sprint("failed to set objective"))
         }
+    }
+
+    return nil
+}
+
+
+func (client *HammerspaceClient) UpdateShareSize(name string,
+    size int64, //size in bytes
+    ) error {
+
+    log.Debugf("Update share size : %s to %v", name, size)
+
+    share, err := client.GetShareRawFields(name)
+
+    share["shareSizeLimit"] = size
+    shareString := new(bytes.Buffer)
+    json.NewEncoder(shareString).Encode(share)
+
+    req, err := client.generateRequest("PUT", "/shares/" + name, shareString.String())
+    statusCode, _, respHeaders, err := client.doRequest(*req)
+
+    if err != nil {
+        log.Error(err)
+        return err
+    }
+    if statusCode == 400 {
+        //
+    }
+    if statusCode != 202 {
+        return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+    }
+
+    // ensure the location header is set and also make sure length >= 1
+    if locs, exists := respHeaders["Location"]; exists {
+        success, err := client.WaitForTaskCompletion(locs[0])
+        if err != nil {
+            log.Error(err)
+            return err
+        }
+        if !success {
+            return errors.New("Share failed to update")
+        }
+
+    } else {
+        log.Errorf("No task returned to monitor")
     }
 
     return nil

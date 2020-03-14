@@ -73,7 +73,9 @@ type ShareResponse struct {
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
     Space         ShareSpaceResponse   `json:"space"`
-    Objectives    ObjectivesResponse  `json:"objectives"`
+    Objectives    ObjectivesResponse   `json:"objectives"`
+    Modified      int64                `json:"modified"`
+    Uoid          map[string]string    `json:"uoid"`
 }
 
 type ShareSpaceResponse struct {

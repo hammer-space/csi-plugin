@@ -363,6 +363,13 @@ func (d *CSIDriver) NodeGetCapabilities(
                     },
                 },
             },
+            {
+                Type: &csi.NodeServiceCapability_Rpc{
+                    Rpc: &csi.NodeServiceCapability_RPC{
+                        Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+                    },
+                },
+            },
         },
     }, nil
 }
@@ -460,5 +467,50 @@ func (d *CSIDriver) NodeExpandVolume(
     ctx context.Context,
     req *csi.NodeExpandVolumeRequest) (
     *csi.NodeExpandVolumeResponse, error) {
+
+
+    // Find Share
+    typeMount := false
+    fileBacked := false
+
+    volumeName := GetVolumeNameFromPath(req.GetVolumeId())
+    share, _ := d.hsclient.GetShare(volumeName)
+    if share != nil {
+        typeMount = true
+    } else {
+        fileBacked = true
+    }
+
+    //  Check if the specified backing share or file exists
+    if share == nil {
+        backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
+        if err != nil {
+            log.Error(err)
+        }
+        if !backingFileExists{
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        } else {
+            fileBacked = true
+        }
+    }
+    switch req.VolumeCapability.AccessType.(type) {
+    case *csi.VolumeCapability_Block:
+        typeMount = false
+    case *csi.VolumeCapability_Mount:
+        typeMount = true
+    }
+
+    if fileBacked{
+        // Ensure it's file-backed, otherwise no-op
+        // Resize device
+        if typeMount {
+
+        }
+    } else {
+        return nil, nil
+    }
+
+
+    // if mount volume, expand fs
     return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not supported")
 }

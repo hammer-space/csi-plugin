@@ -3,7 +3,7 @@ module github.com/hammer-space/csi-plugin
 require (
 	github.com/ameade/spec v0.3.0 // - Apache 2.0 license
 	github.com/container-storage-interface/spec v1.2.0 // - Apache 2.0 license
-	github.com/golang/protobuf v1.2.0 // - BSD 3-Clause "New" or "Revised" License
+	github.com/golang/protobuf v1.3.0 // - BSD 3-Clause "New" or "Revised" License
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7 // - MIT license
 	github.com/kr/pretty v0.1.0 // indirect - MIT license
 	github.com/kubernetes-csi/csi-test v2.0.1+incompatible

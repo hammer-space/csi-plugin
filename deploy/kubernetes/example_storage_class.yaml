@@ -25,3 +25,4 @@ parameters:
   volumeNameFormat: "csi-%s"
   # Metadata to set on files and shares created by the plugin.
   additionalMetadataTags: "storageClassName=hs-storage,fsType=nfs"
+allowVolumeExpansion: true

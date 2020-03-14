@@ -71,6 +71,18 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/
+        - name: csi-resizer
+            imagePullPolicy: Always
+            image: quay.io/k8scsi/csi-resizer:v0.3.0
+            args:
+              - "--csi-address=$(CSI_ENDPOINT)"
+              - "--v=5"
+            env:
+              - name: CSI_ENDPOINT
+                value: /var/lib/csi/hs-csi.sock
+            volumeMounts:
+              - name: socket-dir
+                mountPath: /var/lib/csi/
         - name: hs-csi-plugin-controller
           securityContext:
             privileged: true
@@ -129,10 +141,10 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["persistentvolumes"]
-    verbs: ["get", "list", "watch", "create", "delete", "update"]
+    verbs: ["get", "patch", "list", "watch", "create", "delete", "update"]
   - apiGroups: [""]
-    resources: ["persistentvolumeclaims"]
-    verbs: ["get", "list", "watch", "update"]
+    resources: ["persistentvolumeclaims", "persistentvolumeclaims/status"]
+    verbs: ["get", "patch", "list", "watch", "update"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch"]
