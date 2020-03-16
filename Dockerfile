@@ -9,7 +9,7 @@ RUN make clean compile
 
 FROM alpine:3.9
 # Install required packages
-RUN apk add --no-cache nfs-utils qemu-img ca-certificates xfsprogs e2fsprogs zfs btrfs-progs py-pip
+RUN apk add --no-cache nfs-utils qemu-img ca-certificates xfsprogs e2fsprogs e2fsprogs-extra xfsprogs-extra zfs btrfs-progs py-pip
 RUN pip install hstk
 WORKDIR /hs-csi-plugin/
 # Copy plugin binary from first stage
