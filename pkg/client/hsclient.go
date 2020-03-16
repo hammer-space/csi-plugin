@@ -577,6 +577,9 @@ func (client *HammerspaceClient) UpdateShareSize(name string,
     log.Debugf("Update share size : %s to %v", name, size)
 
     share, err := client.GetShareRawFields(name)
+    if err != nil {
+        return errors.New(common.ShareNotFound)
+    }
 
     share["shareSizeLimit"] = size
     shareString := new(bytes.Buffer)

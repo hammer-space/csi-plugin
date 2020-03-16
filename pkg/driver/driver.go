@@ -25,12 +25,14 @@ import (
     "os"
     "strconv"
     "sync"
+    "time"
 
     log "github.com/sirupsen/logrus"
 
     "github.com/container-storage-interface/spec/lib/go/csi"
     client "github.com/hammer-space/csi-plugin/pkg/client"
     "google.golang.org/grpc"
+    "google.golang.org/grpc/keepalive"
     "google.golang.org/grpc/reflection"
 )
 
@@ -130,6 +132,9 @@ func (c *CSIDriver) Start(l net.Listener) error {
     // Create a new grpc server
     c.server = grpc.NewServer(
         grpc.UnaryInterceptor(c.callInterceptor),
+        grpc.KeepaliveParams(keepalive.ServerParameters{
+            MaxConnectionIdle: 5 * time.Minute,
+        }),
     )
 
     csi.RegisterControllerServer(c.server, c)

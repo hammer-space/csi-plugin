@@ -693,16 +693,20 @@ func (d *CSIDriver) ControllerExpandVolume(
     req *csi.ControllerExpandVolumeRequest) (
     *csi.ControllerExpandVolumeResponse, error) {
     var requestedSize int64
-    if req.CapacityRange.LimitBytes != 0 {
-        requestedSize = req.CapacityRange.LimitBytes
+    if req.GetCapacityRange().GetLimitBytes() != 0 {
+        requestedSize = req.GetCapacityRange().GetLimitBytes()
     } else {
-        requestedSize = req.CapacityRange.RequiredBytes
+        requestedSize = req.GetCapacityRange().GetRequiredBytes()
     }
 
     // Find Share
     //typeBlock := false
     //typeMount := false
     fileBacked := false
+
+    if req.GetVolumeId() == "" {
+        return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
+    }
 
     volumeName := GetVolumeNameFromPath(req.GetVolumeId())
     share, _ := d.hsclient.GetShare(volumeName)
@@ -722,14 +726,6 @@ func (d *CSIDriver) ControllerExpandVolume(
             fileBacked = true
         }
     }
-    //switch req.VolumeCapability.AccessType.(type) {
-    //case *csi.VolumeCapability_Block:
-    //    typeMount = false
-    //    typeBlock = true
-    //case *csi.VolumeCapability_Mount:
-    //    typeMount = true
-    //    typeBlock = false
-    //}
 
     if fileBacked {
         file, err := d.hsclient.GetFile(req.GetVolumeId())
@@ -742,8 +738,8 @@ func (d *CSIDriver) ControllerExpandVolume(
             // if we are good, then return saying we need a resize on next mount
             if (file.Size >= requestedSize) {
                 return &csi.ControllerExpandVolumeResponse{
-                    CapacityBytes: 1,
-                    NodeExpansionRequired: true,
+                    CapacityBytes: file.Size,
+                    NodeExpansionRequired: false,
                 }, nil
             } else{
                 // if required - current > available on backend share
@@ -762,8 +758,8 @@ func (d *CSIDriver) ControllerExpandVolume(
                 }
 
                 return &csi.ControllerExpandVolumeResponse{
-                    CapacityBytes: 1,
-                    NodeExpansionRequired: false,
+                    CapacityBytes: requestedSize,
+                    NodeExpansionRequired: true,
                 }, nil
             }
 
@@ -775,7 +771,13 @@ func (d *CSIDriver) ControllerExpandVolume(
         //Check size: only resize if requested is larger than what we have
 
         shareName := GetVolumeNameFromPath(req.GetVolumeId())
+        if shareName == "" {
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        }
         share, err := d.hsclient.GetShare(shareName)
+        if share == nil {
+            return nil, status.Error(codes.NotFound, common.ShareNotFound)
+        }
         var currentSize int64
         if err != nil {
             currentSize = 0
@@ -788,17 +790,15 @@ func (d *CSIDriver) ControllerExpandVolume(
             if err != nil {
                 return nil, status.Error(codes.Internal, common.UnknownError)
             }
-
-            return &csi.ControllerExpandVolumeResponse{
-                CapacityBytes: 1,
-                NodeExpansionRequired: false,
-            }, nil
         }
+
+        return &csi.ControllerExpandVolumeResponse{
+            CapacityBytes: requestedSize,
+            NodeExpansionRequired: false,
+        }, nil
     }
 
 
-
-    return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume not supported")
 }
 
 func (d *CSIDriver) ValidateVolumeCapabilities(

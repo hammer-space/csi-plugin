@@ -468,6 +468,12 @@ func (d *CSIDriver) NodeExpandVolume(
     req *csi.NodeExpandVolumeRequest) (
     *csi.NodeExpandVolumeResponse, error) {
 
+    var requestedSize int64
+    if req.GetCapacityRange().GetLimitBytes() != 0 {
+        requestedSize = req.GetCapacityRange().GetLimitBytes()
+    } else {
+        requestedSize = req.GetCapacityRange().GetRequiredBytes()
+    }
 
     // Find Share
     typeMount := false
@@ -488,12 +494,12 @@ func (d *CSIDriver) NodeExpandVolume(
             log.Error(err)
         }
         if !backingFileExists{
-            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+            return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
         } else {
             fileBacked = true
         }
     }
-    switch req.VolumeCapability.AccessType.(type) {
+    switch req.GetVolumeCapability().GetAccessType().(type) {
     case *csi.VolumeCapability_Block:
         typeMount = false
     case *csi.VolumeCapability_Mount:
@@ -503,14 +509,20 @@ func (d *CSIDriver) NodeExpandVolume(
     if fileBacked{
         // Ensure it's file-backed, otherwise no-op
         // Resize device
-        if typeMount {
-
+        err := common.ExpandDeviceFileSize(common.ShareStagingDir +req.GetVolumeId(), requestedSize)
+        if err != nil {
+            return nil, err
         }
+        if typeMount {
+            err = common.ExpandFilesystem(common.ShareStagingDir +req.GetVolumeId(), req.VolumeCapability.GetMount().FsType)
+            if err != nil {
+                return nil, err
+            }
+        }
+        return &csi.NodeExpandVolumeResponse{
+            CapacityBytes: requestedSize,
+            }, nil
     } else {
         return nil, nil
     }
-
-
-    // if mount volume, expand fs
-    return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not supported")
 }

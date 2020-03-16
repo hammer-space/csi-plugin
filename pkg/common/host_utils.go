@@ -60,6 +60,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
     case err := <-done:
         if err != nil {
             log.Errorf("process finished with error = %v", err)
+            return nil, err
         }
     }
     return b.Bytes(), nil
@@ -110,6 +111,23 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
     return nil
 }
 
+func ExpandFilesystem(device, fsType string) error {
+    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem", device, fsType)
+
+    var command string
+    if fsType == "xfs" {
+        command = "xfs_growfs"
+    } else {
+        command = "resize2fs"
+    }
+    output, err := ExecCommand(command, device)
+    if err != nil {
+        log.Errorf("Could not expand filesystem on device %s: %s: %s", device, err.Error(), output)
+        return err
+    }
+    return nil
+}
+
 func BindMountDevice(sourcefile, destfile string) error {
     mounter := mount.New("")
     if exists, _ := mounter.ExistsPath(destfile); !exists {
@@ -150,6 +168,18 @@ func MakeEmptyRawFile(pathname string, size int64) error {
     log.Infof("creating file '%s'", pathname)
     sizeStr := strconv.FormatInt(size, 10)
     output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
+    if err != nil {
+        log.Errorf("%s, %v", output, err.Error())
+        return err
+    }
+
+    return nil
+}
+
+func ExpandDeviceFileSize(pathname string, size int64) error {
+    log.Infof("resizing file '%s'", pathname)
+    sizeStr := strconv.FormatInt(size, 10)
+    output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
     if err != nil {
         log.Errorf("%s, %v", output, err.Error())
         return err
