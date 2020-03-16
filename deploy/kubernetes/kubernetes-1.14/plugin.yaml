@@ -209,6 +209,18 @@ spec:
       serviceAccount: csi-node
       hostNetwork: true
       containers:
+        - name: csi-resizer
+              imagePullPolicy: Always
+              image: quay.io/k8scsi/csi-resizer:v0.3.0
+              args:
+                - "--csi-address=$(CSI_ENDPOINT)"
+                - "--v=5"
+              env:
+                - name: CSI_ENDPOINT
+                  value: /csi/csi.sock
+              volumeMounts:
+                - name: socket-dir
+                  mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
           image: quay.io/k8scsi/csi-node-driver-registrar:v1.1.0
@@ -327,8 +339,8 @@ rules:
     resources: ["namespaces"]
     verbs: ["get", "list"]
   - apiGroups: [""]
-    resources: ["persistentvolumes"]
-    verbs: ["get", "list", "watch", "update"]
+    resources: ["persistentvolumes", "persistentvolumeclaims", "persistentvolumeclaims/status", "events"]
+    verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments"]
     verbs: ["get", "list", "watch", "update"]

@@ -39,6 +39,15 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
       Topology: true
     ...
     ```
+* Voluem expansion support requires v1.14+ ``ExpandCSIVolumes`` and ``ExpandInUsePersistentVolumes``
+    Example in /var/lib/kubelet/config.yaml
+    ```yaml
+    ...
+    featureGates:
+      ExpandCSIVolumes: true
+      ExpandInUsePersistentVolumes: true
+    ...
+    ```
 * VolumeSnapshot support requires the ``VolumeSnapshotDataSource`` feature flag
     Example in /var/lib/kubelet/config.yaml
     ```yaml
