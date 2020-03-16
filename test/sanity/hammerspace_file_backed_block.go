@@ -27,6 +27,7 @@ import (
 	"io/ioutil"
 	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
 	"os"
+	"strconv"
 	"strings"
 )
 
@@ -146,6 +147,26 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			err = ioutil.WriteFile(sc.Config.TargetPath + "/dev", testData, 0644)
 			Expect(err).NotTo(HaveOccurred())
 
+			By("expand the volume")
+			_, err = c.NodeExpandVolume(
+				context.Background(),
+				&csi.NodeExpandVolumeRequest{
+					VolumeId:          vol.GetVolume().GetVolumeId(),
+					VolumePath:        sc.Config.TargetPath + "/dev",
+					CapacityRange: &csi.CapacityRange{
+						RequiredBytes: TestVolumeSize(sc) * 2,
+					},
+				},
+			)
+
+			Expect(err).NotTo(HaveOccurred())
+
+			output, err := common.ExecCommand("blockdev", "--getsize64", sc.Config.TargetPath + "/dev")
+			if err != nil {
+				Expect(err).NotTo(HaveOccurred())
+			}
+			Expect(strconv.Atoi(strings.TrimSpace(string(output)))).To(Equal(TestVolumeSize(sc) * 2))
+
 			By("unpublish the volume")
 			_, err = c.NodeUnpublishVolume(
 				context.Background(),
@@ -187,7 +208,7 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 				Expect(err).NotTo(HaveOccurred())
 			}
 
-			output := make([]byte, len(testData))
+			output = make([]byte, len(testData))
 			_, err = io.ReadFull(r, output[:])
 			r.Close()
 			if err != nil {
