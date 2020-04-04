@@ -363,6 +363,13 @@ func (d *CSIDriver) NodeGetCapabilities(
                     },
                 },
             },
+            {
+                Type: &csi.NodeServiceCapability_Rpc{
+                    Rpc: &csi.NodeServiceCapability_RPC{
+                        Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+                    },
+                },
+            },
         },
     }, nil
 }
@@ -460,5 +467,62 @@ func (d *CSIDriver) NodeExpandVolume(
     ctx context.Context,
     req *csi.NodeExpandVolumeRequest) (
     *csi.NodeExpandVolumeResponse, error) {
-    return nil, status.Error(codes.Unimplemented, "NodeExpandVolume not supported")
+
+    var requestedSize int64
+    if req.GetCapacityRange().GetLimitBytes() != 0 {
+        requestedSize = req.GetCapacityRange().GetLimitBytes()
+    } else {
+        requestedSize = req.GetCapacityRange().GetRequiredBytes()
+    }
+
+    // Find Share
+    typeMount := false
+    fileBacked := false
+
+    volumeName := GetVolumeNameFromPath(req.GetVolumeId())
+    share, _ := d.hsclient.GetShare(volumeName)
+    if share != nil {
+        typeMount = true
+    } else {
+        fileBacked = true
+    }
+
+    //  Check if the specified backing share or file exists
+    if share == nil {
+        backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
+        if err != nil {
+            log.Error(err)
+        }
+        if !backingFileExists{
+            return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
+        } else {
+            fileBacked = true
+        }
+    }
+    switch req.GetVolumeCapability().GetAccessType().(type) {
+    case *csi.VolumeCapability_Block:
+        typeMount = false
+    case *csi.VolumeCapability_Mount:
+        typeMount = true
+    }
+
+    if fileBacked{
+        // Ensure it's file-backed, otherwise no-op
+        // Resize device
+        err := common.ExpandDeviceFileSize(common.ShareStagingDir +req.GetVolumeId(), requestedSize)
+        if err != nil {
+            return nil, err
+        }
+        if typeMount {
+            err = common.ExpandFilesystem(common.ShareStagingDir +req.GetVolumeId(), req.VolumeCapability.GetMount().FsType)
+            if err != nil {
+                return nil, err
+            }
+        }
+        return &csi.NodeExpandVolumeResponse{
+            CapacityBytes: requestedSize,
+            }, nil
+    } else {
+        return nil, nil
+    }
 }

@@ -692,7 +692,113 @@ func (d *CSIDriver) ControllerExpandVolume(
     ctx context.Context,
     req *csi.ControllerExpandVolumeRequest) (
     *csi.ControllerExpandVolumeResponse, error) {
-    return nil, status.Error(codes.Unimplemented, "ControllerExpandVolume not supported")
+    var requestedSize int64
+    if req.GetCapacityRange().GetLimitBytes() != 0 {
+        requestedSize = req.GetCapacityRange().GetLimitBytes()
+    } else {
+        requestedSize = req.GetCapacityRange().GetRequiredBytes()
+    }
+
+    // Find Share
+    //typeBlock := false
+    //typeMount := false
+    fileBacked := false
+
+    if req.GetVolumeId() == "" {
+        return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
+    }
+
+    volumeName := GetVolumeNameFromPath(req.GetVolumeId())
+    share, _ := d.hsclient.GetShare(volumeName)
+    if share == nil {
+        fileBacked = true
+    }
+
+    //  Check if the specified backing share or file exists
+    if share == nil {
+        backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
+        if err != nil {
+            log.Error(err)
+        }
+        if !backingFileExists{
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        } else {
+            fileBacked = true
+        }
+    }
+
+    if fileBacked {
+        file, err := d.hsclient.GetFile(req.GetVolumeId())
+        if file == nil || err != nil{
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        } else {
+            log.Debugf("found file-backed volume to resize, %s", req.GetVolumeId())
+            // Check backing share size to determine if we can handle new size (look at create volume for how we do this)
+            // && check teh size of the file only resize if requested is larger than what we have
+            // if we are good, then return saying we need a resize on next mount
+            if (file.Size >= requestedSize) {
+                return &csi.ControllerExpandVolumeResponse{
+                    CapacityBytes: file.Size,
+                    NodeExpansionRequired: false,
+                }, nil
+            } else{
+                // if required - current > available on backend share
+                sizeDiff := requestedSize - file.Size
+                backingShareName := path.Base(path.Dir(req.GetVolumeId()))
+                backingShare, err := d.hsclient.GetShare(backingShareName)
+                var available int64
+                if err != nil {
+                    available = 0
+                } else {
+                    available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+                }
+
+                if (available - sizeDiff < 0) {
+                    return nil, status.Error(codes.OutOfRange, common.OutOfCapacity)
+                }
+
+                return &csi.ControllerExpandVolumeResponse{
+                    CapacityBytes: requestedSize,
+                    NodeExpansionRequired: true,
+                }, nil
+            }
+
+
+
+        }
+
+    } else {
+        //Check size: only resize if requested is larger than what we have
+
+        shareName := GetVolumeNameFromPath(req.GetVolumeId())
+        if shareName == "" {
+            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+        }
+        share, err := d.hsclient.GetShare(shareName)
+        if share == nil {
+            return nil, status.Error(codes.NotFound, common.ShareNotFound)
+        }
+        var currentSize int64
+        if err != nil {
+            currentSize = 0
+        } else {
+            currentSize, _ = strconv.ParseInt(share.Space.Available, 10, 64)
+        }
+
+        if (currentSize < requestedSize) {
+            err = d.hsclient.UpdateShareSize(shareName, requestedSize)
+            if err != nil {
+                return nil, status.Error(codes.Internal, common.UnknownError)
+            }
+        }
+
+        return &csi.ControllerExpandVolumeResponse{
+            CapacityBytes: requestedSize,
+            NodeExpansionRequired: false,
+        }, nil
+    }
+
+
 }
 
 func (d *CSIDriver) ValidateVolumeCapabilities(
@@ -889,6 +995,13 @@ func (d *CSIDriver) ControllerGetCapabilities(
             Type: &csi.ControllerServiceCapability_Rpc{
                 Rpc: &csi.ControllerServiceCapability_RPC{
                     Type: csi.ControllerServiceCapability_RPC_CREATE_DELETE_SNAPSHOT,
+                },
+            },
+        },
+        {
+            Type: &csi.ControllerServiceCapability_Rpc{
+                Rpc: &csi.ControllerServiceCapability_RPC{
+                    Type: csi.ControllerServiceCapability_RPC_EXPAND_VOLUME,
                 },
             },
         },
