@@ -46,7 +46,7 @@ type CSIDriver struct {
     NodeID        string
 }
 
-func NewCSIDriver(endpoint, username, password, tlsVerifyStr, useAnvilStr string) *CSIDriver {
+func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver {
     tlsVerify := false
     if os.Getenv("HS_TLS_VERIFY") != "" {
         tlsVerify, _ = strconv.ParseBool(tlsVerifyStr)
@@ -58,13 +58,8 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr, useAnvilStr string
         log.Error(err)
         os.Exit(1)
     }
-    var useAnvil bool
-    if os.Getenv("CSI_USE_ANVIL_FOR_DATA") != "" {
-        useAnvil, _ = strconv.ParseBool(useAnvilStr)
-    } else {
-        useAnvil = true
-    }
-    common.UseAnvil = useAnvil
+    // We now require mounting through a DSX server
+    common.UseAnvil = false
 
     return &CSIDriver{
         hsclient:      client,

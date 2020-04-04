@@ -61,7 +61,6 @@ Variable                       |     Default           | Description
 ----------------               |     ------------      | -----
 *``CSI_ENDPOINT``              |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
 *``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
-``CSI_USE_ANVIL_FOR_DATA``     |     ``true``          | Whether to try mount shares as connections to the Anvil server over pNFS (NFS v4.2). If false, data portals are used.
 *``HS_ENDPOINT``               |                       | Hammerspace API gateway
 *``HS_USERNAME``               |                       | Hammerspace username (admin role credentials)
 *``HS_PASSWORD``               |                       | Hammerspace password
@@ -128,7 +127,6 @@ HS_USERNAME=admin
 HS_PASSWORD=admin
 HS_TLS_VERIFY=false
 CSI_NODE_NAME=test
-CSI_USE_ANVIL_FOR_DATA=true
 SANITY_PARAMS_FILE=/tmp/csi_sanity_params.yaml
  " >  ~/csi-env
  ```
@@ -145,6 +143,8 @@ SANITY_PARAMS_FILE=/tmp/csi_sanity_params.yaml
 Running the image - 
 ```bash
 docker run --privileged=true \
+--cap-add ALL \
+--cap-add CAP_SYS_ADMIN \
 -v /tmp/:/tmp/:shared \
 -v /dev/:/dev/ \
 --env-file ~/csi-env \
@@ -208,7 +208,6 @@ export HS_ENDPOINT="https://anvil.example.com"
 export HS_USERNAME=admin
 export HS_PASSWORD=admin
 export HS_TLS_VERIFY=false
-export CSI_USE_ANVIL_FOR_DATA=true
 export CSI_NODE_NAME=test
 export SANITY_PARAMS_FILE=~/csi_sanity_params.yaml
 make sanity

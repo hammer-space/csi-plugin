@@ -59,7 +59,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
         return nil, fmt.Errorf("process killed as timeout reached")
     case err := <-done:
         if err != nil {
-            log.Errorf("process finished with error = %v", err)
+            log.Errorf("process finished with error = '%v', output = '%s'", err, b.Bytes())
         }
     }
     return b.Bytes(), nil
@@ -102,7 +102,7 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
         if os.IsPermission(err) {
             return status.Error(codes.PermissionDenied, err.Error())
         }
-        if strings.Contains(err.Error(), "invalid argument") {
+        if strings.Contains(err.Error(), "Invalid argument") {
             return status.Error(codes.InvalidArgument, err.Error())
         }
         return status.Error(codes.Internal, err.Error())
@@ -250,6 +250,10 @@ func GetNFSExports(address string) ([]string, error) {
         if len(exportTokens) > 0 {
             toReturn = append(toReturn, exportTokens[0])
         }
+    }
+    if (len(toReturn) == 0) {
+        return nil, status.Errorf(codes.Internal,
+            "could not determine nfs exports, command output: %s", output)
     }
     return toReturn, nil
 }

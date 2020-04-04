@@ -53,8 +53,7 @@ func TestSanity(t *testing.T) {
 		os.Getenv("HS_ENDPOINT"),
 		os.Getenv("HS_USERNAME"),
 		os.Getenv("HS_PASSWORD"),
-		os.Getenv("HS_TLS_VERIFY"),
-		os.Getenv("CSI_USE_ANVIL_FOR_DATA"))
+		os.Getenv("HS_TLS_VERIFY"))
 
 	go func() {
 		l, _ := net.Listen("unix", os.Getenv("CSI_ENDPOINT"))
