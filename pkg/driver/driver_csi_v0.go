@@ -23,11 +23,13 @@ import (
     "github.com/hammer-space/csi-plugin/pkg/common"
     "google.golang.org/grpc"
     "google.golang.org/grpc/codes"
+    "google.golang.org/grpc/keepalive"
     "google.golang.org/grpc/reflection"
     "google.golang.org/grpc/status"
     "k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
     "net"
     "sync"
+    "time"
 )
 
 type CSIDriver_v0Support struct {
@@ -73,6 +75,9 @@ func (c *CSIDriver_v0Support) Start(l net.Listener) error {
     // Create a new grpc server
     c.server = grpc.NewServer(
         grpc.UnaryInterceptor(c.callInterceptor),
+        grpc.KeepaliveParams(keepalive.ServerParameters{
+            MaxConnectionIdle: 5 * time.Minute,
+        }),
     )
 
     csi_v0.RegisterControllerServer(c.server, c)

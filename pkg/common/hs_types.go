@@ -73,7 +73,7 @@ type ShareResponse struct {
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
     Space         ShareSpaceResponse   `json:"space"`
-    Objectives    ObjectivesResponse  `json:"objectives"`
+    Objectives    ObjectivesResponse   `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {

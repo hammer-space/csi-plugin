@@ -22,11 +22,11 @@ sanity:
 
 build-dev:
 	@echo "==> Building Docker Image for Dev Image"
-	@docker build -t "hammerspaceinc/csi-plugin-dev:latest" . -f Dockerfile_dev
+	@docker build -t "hammerspaceinc/csi-plugin-dev:latest" . -f Dockerfile_dev --no-cache
 
 build:
 	@echo "==> Building Docker Image Latest"
-	@docker build -t "hammerspaceinc/csi-plugin:latest" . -f Dockerfile
+	@docker build -t "hammerspaceinc/csi-plugin:latest" . -f Dockerfile --no-cache
 
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"

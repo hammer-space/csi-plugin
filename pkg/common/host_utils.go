@@ -60,6 +60,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
     case err := <-done:
         if err != nil {
             log.Errorf("process finished with error = %v", err)
+            return nil, err
         }
     }
     return b.Bytes(), nil
@@ -102,10 +103,27 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
         if os.IsPermission(err) {
             return status.Error(codes.PermissionDenied, err.Error())
         }
-        if strings.Contains(err.Error(), "invalid argument") {
+        if strings.Contains(err.Error(), "Invalid argument") {
             return status.Error(codes.InvalidArgument, err.Error())
         }
         return status.Error(codes.Internal, err.Error())
+    }
+    return nil
+}
+
+func ExpandFilesystem(device, fsType string) error {
+    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem", device, fsType)
+
+    var command string
+    if fsType == "xfs" {
+        command = "xfs_growfs"
+    } else {
+        command = "resize2fs"
+    }
+    output, err := ExecCommand(command, device)
+    if err != nil {
+        log.Errorf("Could not expand filesystem on device %s: %s: %s", device, err.Error(), output)
+        return err
     }
     return nil
 }
@@ -150,6 +168,18 @@ func MakeEmptyRawFile(pathname string, size int64) error {
     log.Infof("creating file '%s'", pathname)
     sizeStr := strconv.FormatInt(size, 10)
     output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
+    if err != nil {
+        log.Errorf("%s, %v", output, err.Error())
+        return err
+    }
+
+    return nil
+}
+
+func ExpandDeviceFileSize(pathname string, size int64) error {
+    log.Infof("resizing file '%s'", pathname)
+    sizeStr := strconv.FormatInt(size, 10)
+    output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
     if err != nil {
         log.Errorf("%s, %v", output, err.Error())
         return err
@@ -250,6 +280,10 @@ func GetNFSExports(address string) ([]string, error) {
         if len(exportTokens) > 0 {
             toReturn = append(toReturn, exportTokens[0])
         }
+    }
+    if (len(toReturn) == 0) {
+        return nil, status.Errorf(codes.Internal,
+            "could not determine nfs exports, command output: %s", output)
     }
     return toReturn, nil
 }

@@ -81,6 +81,20 @@ func (d *CSIDriver) GetPluginCapabilities(
                     },
                 },
             },
+            {
+               Type: &csi.PluginCapability_VolumeExpansion_{
+                   VolumeExpansion: &csi.PluginCapability_VolumeExpansion{
+                       Type: csi.PluginCapability_VolumeExpansion_ONLINE,
+                   },
+               },
+            },
+            {
+                Type: &csi.PluginCapability_VolumeExpansion_{
+                    VolumeExpansion: &csi.PluginCapability_VolumeExpansion{
+                        Type: csi.PluginCapability_VolumeExpansion_OFFLINE,
+                    },
+                },
+            },
         },
     }, nil
 }
