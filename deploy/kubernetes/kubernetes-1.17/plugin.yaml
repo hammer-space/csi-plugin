@@ -221,7 +221,7 @@ spec:
               mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-node-driver-registrar:v1.1.0
+          image: quay.io/k8scsi/csi-node-driver-registrar:v1.2.0
           lifecycle:
             preStop:
               exec:
