@@ -7,7 +7,7 @@ WORKDIR /go/src/github.com/hammer-space/csi-plugin/
 ADD . ./
 RUN make clean compile
 
-FROM alpine:3.9
+FROM alpine:3.6
 # Install required packages
 RUN apk add --no-cache nfs-utils qemu-img ca-certificates xfsprogs e2fsprogs e2fsprogs-extra xfsprogs-extra zfs btrfs-progs py-pip
 RUN pip install hstk
