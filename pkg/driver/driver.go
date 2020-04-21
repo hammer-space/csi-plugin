@@ -128,7 +128,7 @@ func (c *CSIDriver) Start(l net.Listener) error {
     c.server = grpc.NewServer(
         grpc.UnaryInterceptor(c.callInterceptor),
         grpc.KeepaliveParams(keepalive.ServerParameters{
-            MaxConnectionIdle: 5 * time.Minute,
+            Time: 5 * time.Minute,
         }),
     )
 
