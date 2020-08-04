@@ -40,7 +40,7 @@ var (
     CsiVersion = "1"
 
     // The list of export path prefixes to try to use, in order, when mounting to a data portal
-    DefaultDataPortalMountPrefixes = [...]string{"/mnt/data-portal", "/", ""}
+    DefaultDataPortalMountPrefixes = [...]string{"/", "/mnt/data-portal", ""}
     DataPortalMountPrefix = ""
     CommandExecTimeout = 300 * time.Second  // Seconds
 
