@@ -20,9 +20,12 @@ parameters:
   # ';' seperated list of <subnet>,access,rootSquash
   exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
   # One should be careful to set this if shares are used outside of the cluster. -1 means Hammerspace defalt which is to delete the share in 24 hours
+  # Specified in nanoseconds
   deleteDelay: "0"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
   # Metadata to set on files and shares created by the plugin.
   additionalMetadataTags: "storageClassName=hs-storage,fsType=nfs"
+  # Ability to add a share description
+  comment: "My share description"
 allowVolumeExpansion: true

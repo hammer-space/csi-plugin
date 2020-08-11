@@ -26,6 +26,7 @@ type HSVolumeParameters struct {
     MountBackingShareName   string
     VolumeNameFormat        string
     FSType                  string
+    Comment                 string
     AdditionalMetadataTags  map[string]string
 }
 
@@ -41,6 +42,7 @@ type HSVolume struct {
     VolumeMode              string
     SourceSnapPath          string
     FSType                  string
+    Comment                 string
     SourceSnapShareName     string
     AdditionalMetadataTags  map[string]string
 }
@@ -52,9 +54,11 @@ type HSVolume struct {
 type ClusterResponse struct {
     Capacity map[string]string `json:"capacity"`
 }
+
 type ShareRequest struct {
     Name          string               `json:"name"`
     ExportPath    string               `json:"path"`
+    Comment       string               `json:"comment"`
     ExtendedInfo  map[string]string    `json:"extendedInfo"`
     Size          int64                `json:"shareSizeLimit,omitifempty"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
@@ -62,12 +66,14 @@ type ShareRequest struct {
 
 type ShareUpdateRequest struct {
     Name         string            `json:"name"`
+    Comment      string            `json:"comment"`
     ExtendedInfo map[string]string `json:"extendedInfo"`
 }
 
 type ShareResponse struct {
     Name          string               `json:"name"`
     ExportPath    string               `json:"path"`
+    Comment       string               `json:"comment"`
     ExtendedInfo  map[string]string    `json:"extendedInfo"`
     ShareState    string               `json:"shareState"`
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`

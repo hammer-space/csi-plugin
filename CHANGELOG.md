@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+## 1.0.3
+### Added
+- Support for share descriptions
+
+## 1.0.2
+### Added
+- Support for Hammerspace 4.4.0
+- Tested with Kubernetes up until 1.18
+- Support for resize for NFS (without remount) and file-backed (requires remount) volumes
 
 ## 1.0.1
 ### Added

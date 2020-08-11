@@ -397,7 +397,8 @@ func (client *HammerspaceClient) CreateShare(name string,
     size int64, //size in bytes
     objectives []string,
     exportOptions []common.ShareExportOptions,
-    deleteDelay int64) error {
+    deleteDelay int64,
+    comment string) error {
 
     log.Debug("Creating share: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
@@ -410,6 +411,7 @@ func (client *HammerspaceClient) CreateShare(name string,
         ExportPath:    exportPath,
         ExportOptions: exportOptions,
         ExtendedInfo:  extendedInfo,
+        Comment:       comment,
     }
     if size > 0 {
         share.Size = size
@@ -465,6 +467,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     objectives []string,
     exportOptions []common.ShareExportOptions,
     deleteDelay int64,
+    comment string,
     snapshotPath string) error {
     log.Debug("Creating share from snapshot: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
@@ -478,6 +481,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         ExportPath:    exportPath,
         ExportOptions: exportOptions,
         ExtendedInfo:  extendedInfo,
+        Comment:       comment,
     }
     if size > 0 {
         share.Size = size

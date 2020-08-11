@@ -30,7 +30,9 @@ const (
     NoCapabilitiesSupplied        = "No capabilities supplied for volume %s" // volume id
     ConflictingCapabilities       = "Cannot request a volume to be both raw and a filesystem"
     InvalidDeleteDelay            = "deleteDelay parameter must be an Integer. Value received '%s'"
-    EmptySnapshotId               = "Snapshot Id cannot be empty"
+    InvalidComment                = "Failed to set comment, invalid value"
+    InvalidCommentSize            = "Share comment cannot be longer than 255 characters"
+    EmptySnapshotId               = "Snapshot ID cannot be empty"
     MissingSnapshotSourceVolumeId = "Snapshot SourceVolumeId cannot be empty"
     MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
     MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"

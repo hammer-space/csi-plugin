@@ -57,6 +57,17 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
         vParams.DeleteDelay = -1
     }
 
+    if commentParam, exists := params["comment"]; exists {
+        // Max comment length in system manager is 255
+        if len(commentParam) > 255 {
+          return vParams, status.Errorf(codes.InvalidArgument, common.InvalidCommentSize, commentParam)
+        } else {
+          vParams.Comment = commentParam
+        }
+    } else {
+        vParams.Comment = "Created by CSI driver"
+    }
+
     if objectivesParam, exists := params["objectives"]; exists {
         if exists {
             splitObjectives := strings.Split(objectivesParam, ",")
@@ -189,6 +200,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.Objectives,
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
+            hsVolume.Comment,
             hsVolume.SourceSnapPath,
         )
 
@@ -204,6 +216,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
             hsVolume.Objectives,
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
+            hsVolume.Comment,
         )
 
         if err != nil {
@@ -238,6 +251,7 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
             []string{},
             hsVolume.ExportOptions,
             hsVolume.DeleteDelay,
+            hsVolume.Comment,
         )
         if err != nil {
             return share, status.Errorf(codes.Internal, err.Error())
@@ -516,6 +530,7 @@ func (d *CSIDriver) CreateVolume(
         VolumeMode:            volumeMode,
         FSType:                fsType,
         AdditionalMetadataTags: vParams.AdditionalMetadataTags,
+        Comment:               vParams.Comment,
     }
     if snap != nil {
         sourceSnapName, err := GetSnapshotNameFromSnapshotId(snap.GetSnapshotId())
@@ -554,6 +569,7 @@ func (d *CSIDriver) CreateVolume(
         // create new share (with weird path)
         // restore snap to weird path
         // move weird path to proper location
+        // NOTE: Expect this to change when we change restore from snapshot in the core product.
 
         hsVolume.Path = common.SharePathPrefix + volumeName
         err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
@@ -734,7 +750,7 @@ func (d *CSIDriver) ControllerExpandVolume(
         } else {
             log.Debugf("found file-backed volume to resize, %s", req.GetVolumeId())
             // Check backing share size to determine if we can handle new size (look at create volume for how we do this)
-            // && check teh size of the file only resize if requested is larger than what we have
+            // && check the size of the file only resize if requested is larger than what we have
             // if we are good, then return saying we need a resize on next mount
             if (file.Size >= requestedSize) {
                 return &csi.ControllerExpandVolumeResponse{
