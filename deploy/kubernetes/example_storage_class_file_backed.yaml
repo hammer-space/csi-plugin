@@ -16,4 +16,6 @@ parameters:
   objectives: "optimize-for-capacity"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
+  # Ability to add a share description
+  comment: "My share description"
 allowVolumeExpansion: true
