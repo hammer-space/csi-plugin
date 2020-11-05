@@ -8,7 +8,7 @@ metadata:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: com.hammerspace.csi
 mountOptions:
-  - debug
+#  - debug
 parameters:
   fsType: "nfs"
   # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
