@@ -134,9 +134,20 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
     if err != nil {
         log.Errorf("Could not create list of data-portals, %v", err)
     }
+    // Always look for floating data portal IPs
+    fipaddr, err := d.hsclient.GetPortalFloatingIp()
+    if err != nil {
+        log.Errorf("Could not contact Anvil for floating IPs, %v", err)
+    }
 
     MountToDataPortal := func(portal common.DataPortal, mount_options []string) (bool){
-        addr := portal.Node.MgmtIpAddress.Address
+        addr := ""
+        if len(fipaddr) > 0 {
+          addr = fipaddr
+          log.Infof("Floating IP address detected: %s", fipaddr)
+        } else {
+          addr = portal.Node.MgmtIpAddress.Address
+        }
         export := ""
         // Use configured prefix if specified
         if common.DataPortalMountPrefix != "" {

@@ -88,6 +88,48 @@ func (client *HammerspaceClient) GetAnvilPortal() (string, error) {
     return endpointUrl.Hostname(), nil
 }
 
+// Return a string with a floating data portal IP
+func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
+// Instead of using /cntl, use /cntl/state to simplify processing of the JSON
+// struct. If using /cntl, add [] before cluster struct
+  req, err := client.generateRequest("GET", "/cntl/state", "")
+  statusCode, respBody, _, err := client.doRequest(*req)
+
+  if err != nil {
+      return "", err
+  }
+  if statusCode != 200 {
+      return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+  }
+  var clusters common.Cluster
+  err = json.Unmarshal([]byte(respBody), &clusters)
+  if err != nil {
+      log.Error("Error parsing JSON response: " + err.Error())
+      return "", err
+  }
+  // Local random function
+  random_select := func () bool {
+    r := make(chan struct{})
+    close(r)
+    select {
+    case <-r:
+        return false
+    case <-r:
+        return true
+    }
+  }
+  floatingip := ""
+  for _, p := range clusters.PortalFloatingIps {
+    floatingip = p.Address
+    // If there are more than 1 floating IPs configured, randomly select one
+    rr := random_select()
+    if rr ==true {
+        break
+	  }
+  }
+  return floatingip, nil
+}
+
 // GetDataPortals returns a list of operational data-portals
 // those with a matching nodeID are put at the top of the list
 func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPortal, error) {
