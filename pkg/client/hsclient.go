@@ -125,7 +125,7 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
     rr := random_select()
     if rr == true {
       break
-	  }
+    }
   }
   return floatingip, nil
 }
