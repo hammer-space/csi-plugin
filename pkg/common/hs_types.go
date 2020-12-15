@@ -95,7 +95,7 @@ type ShareExportOptions struct {
     RootSquash        bool   `json:"rootSquash"`
 }
 type ObjectivesResponse struct {
-    Applied          []AppliedObjectiveResponse               `json:"appliedObjectives"`
+    Applied       []AppliedObjectiveResponse     `json:"appliedObjectives"`
 }
 type AppliedObjectiveResponse struct {
     Name          string               `json:"name"`
@@ -120,6 +120,16 @@ type File struct {
 type FileSnapshot struct {
     SourceFilename string `json:"sourceFilename"`
     Time           string `json:"time"`
+}
+
+type Cluster struct {
+	Name              string              `json:"name"`
+	PortalFloatingIps []PortalFloatingIps `json:"portalFloatingIps"`
+}
+// Portal Data Floating IPs are a cluster-wide resource
+type PortalFloatingIps struct {
+	Address      string `json:"address"`
+	PrefixLength int    `json:"prefixLength"`
 }
 
 type DataPortal struct {
