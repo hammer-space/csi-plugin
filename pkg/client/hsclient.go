@@ -123,8 +123,8 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
     floatingip = p.Address
     // If there are more than 1 floating IPs configured, randomly select one
     rr := random_select()
-    if rr ==true {
-        break
+    if rr == true {
+      break
 	  }
   }
   return floatingip, nil
