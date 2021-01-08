@@ -190,7 +190,11 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 
 func FormatDevice(device, fsType string) error {
     log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
-    output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), device)
+    args := []string{device}
+    if fsType == "xfs" {
+        args = []string{"-m", "reflink=0", device}
+    }
+    output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
     if err != nil {
         log.Info(err)
         if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
