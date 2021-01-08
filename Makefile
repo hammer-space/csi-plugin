@@ -31,3 +31,11 @@ build:
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
 	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
+
+build-ubi:
+	@echo "==> Building UBI Docker Image Latest"
+	@docker build -t "hammerspaceinc/csi-plugin-ubi" . -f Dockerfile_ubi --no-cache
+
+build-ubi-release:
+	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
+	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin-ubi:${VERSION}" . -f Dockerfile_ubi
