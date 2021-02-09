@@ -3,7 +3,7 @@
 kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
-  name: hs-storage-block-storage
+  name: hs-storage-block
   namespace: kube-system
 provisioner: com.hammerspace.csi
 volumeBindingMode: WaitForFirstConsumer
@@ -11,9 +11,12 @@ parameters:
   # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
   blockBackingShareName: k8s-block-storage
   # Objectives to set on shares in addition to HS cluster defaults
-  objectives: "optimize-for-capacity"
+  objectives: "keep-online"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
+  # Metadata to set on files and shares created by the plugin.
+  additionalMetadataTags: "storageClassName=hs-storage-block,fsType=block"
   # Ability to add a share description
   comment: "My share description"
+# Resize for File and Block volumes currently require a restart of the pod.
 allowVolumeExpansion: true

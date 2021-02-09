@@ -7,8 +7,8 @@ metadata:
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: com.hammerspace.csi
-mountOptions:
-#  - debug
+#mountOptions:
+# Only for debugging purposes
 parameters:
   fsType: "nfs"
   # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
@@ -16,10 +16,12 @@ parameters:
   # Optional, for use if we are supporting file-backed Mount volumes. Auto-created if it does not exist. Never deleted by the driver
   mountBackingShareName: k8s-file-storage
   # Objectives to set on shares in addition to HS cluster defaults
-  objectives: "optimize-for-capacity"
+  objectives: "keep-online"
   # ';' seperated list of <subnet>,access,rootSquash
   exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
-  # One should be careful to set this if shares are used outside of the cluster. -1 means Hammerspace defalt which is to delete the share in 24 hours
+  # One should be careful to set this if shares are used outside of the cluster. 
+  # -1 means Hammerspace defalt which is to delete the share in 24 hours
+  # 0 means now (5 minute delay)
   # Specified in nanoseconds
   deleteDelay: "0"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
