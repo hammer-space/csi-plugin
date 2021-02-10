@@ -156,7 +156,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
             // grab exports with showmount
             exports, err := common.GetNFSExports(addr)
             if err != nil {
-                log.Infof("Could not get exports for data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
+                log.Infof("Could not get exports for data-portal at %s, %s. Error: %v", addr, portal.Uoid["uuid"], err)
                 return false
             }
             log.Infof("Found exports for data-portal %s, %v", addr, exports)
