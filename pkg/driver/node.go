@@ -24,7 +24,7 @@ import (
     "os/exec"
     "path/filepath"
     "strconv"
-
+    "syscall"
     "github.com/container-storage-interface/spec/lib/go/csi"
     "github.com/hammer-space/csi-plugin/pkg/common"
     log "github.com/sirupsen/logrus"
@@ -423,18 +423,28 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
     if err == nil {
         isFileBacked = true
     }
-
+    // TODO: Add reporting for block only volumes
     if isFileBacked {
         // we must stat the actual file, not the dev files, to get the size
         fileInfo, err := os.Stat(common.ShareStagingDir + req.GetVolumeId())
         if err != nil {
             return nil, status.Error(codes.NotFound, common.VolumeNotFound)
         }
+        var st syscall.Stat_t
+        err = syscall.Stat(common.ShareStagingDir + req.GetVolumeId(), &st)
+        if err != nil {
+            return nil, status.Error(codes.NotFound, common.FileNotFound)
+        }
+        // Convert blocks to bytes
+        usedSize := 512 * st.Blocks
+        availableSize := st.Size - usedSize
         return &csi.NodeGetVolumeStatsResponse{
             Usage: []*csi.VolumeUsage{
                 &csi.VolumeUsage{
-                    Unit:  csi.VolumeUsage_BYTES,
-                    Total: fileInfo.Size(),
+                    Unit:      csi.VolumeUsage_BYTES,
+                    Available: availableSize,
+                    Total:     fileInfo.Size(),
+                    Used:      usedSize,
                 },
             },
         }, nil

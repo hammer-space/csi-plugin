@@ -11,6 +11,7 @@ require (
 	github.com/sirupsen/logrus v1.4.2 // - MIT license
 	github.com/spf13/afero v1.2.1 // indirect - Apache 2.0 license
 	github.com/stretchr/testify v1.3.0 // indirect - MIT license
+	github.com/BurntSushi/toml v0.3.1 // indirect
 	golang.org/x/lint v0.0.0-20190313153728-d0100b6bd8b3 // indirect
 	golang.org/x/net v0.0.0-20191112182307-2180aed22343
 	golang.org/x/sys v0.0.0-20191113165036-4c7a9d0fe056
