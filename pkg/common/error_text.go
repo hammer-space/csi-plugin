@@ -50,6 +50,7 @@ const (
 
     // Not Found errors
     VolumeNotFound       = "Volume does not exist"
+    FileNotFound         = "File does not exist"
     ShareNotFound        = "Share does not exist"
     BackingShareNotFound = "Could not find specified backing share"
     SourceSnapshotNotFound = "Could not find source snapshots"

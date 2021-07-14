@@ -24,7 +24,7 @@ import (
     "os/exec"
     "path/filepath"
     "strconv"
-
+    "syscall"
     "github.com/container-storage-interface/spec/lib/go/csi"
     "github.com/hammer-space/csi-plugin/pkg/common"
     log "github.com/sirupsen/logrus"
@@ -416,29 +416,50 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
     if err != nil {
         return nil, status.Error(codes.NotFound, common.VolumeNotFound)
     }
-
     // Check if volume is on a backing share
     isFileBacked := false
     _, err = os.Stat(common.ShareStagingDir + req.GetVolumeId())
     if err == nil {
         isFileBacked = true
     }
-
+    // TODO: Add reporting for block only volumes
     if isFileBacked {
-        // we must stat the actual file, not the dev files, to get the size
-        fileInfo, err := os.Stat(common.ShareStagingDir + req.GetVolumeId())
+        // Do statfs on the node of the mount point to get the actual usage. Executed automatically on the correct node
+        var st syscall.Statfs_t
+        err = syscall.Statfs(req.GetVolumePath(), &st)
         if err != nil {
-            return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+            return nil, status.Error(codes.NotFound, common.FileNotFound)
         }
+        // helpful to know the volume path on the nodes if troubleshooting is required
+        log.Infof("volume path is: %s", req.GetVolumePath())
+
+        // blocksize is typically 1024 - using st.Bsize in case it is not always true
+        // this math equals the df command output
+        total := st.Bsize * int64(st.Blocks)
+        available := st.Bsize * int64(st.Bavail)
+        used := st.Bsize * int64(st.Blocks - st.Bfree)
+        // report inodes
+        inodestotal := int64(st.Files)
+        inodesavail := int64(st.Ffree)
+        inodesused := int64(inodestotal - inodesavail)
         return &csi.NodeGetVolumeStatsResponse{
             Usage: []*csi.VolumeUsage{
-                &csi.VolumeUsage{
-                    Unit:  csi.VolumeUsage_BYTES,
-                    Total: fileInfo.Size(),
+                {
+                    Unit:      csi.VolumeUsage_BYTES,
+                    Available: available,
+                    Total:     total,
+                    Used:      used,
+                },
+                {
+                    Unit:      csi.VolumeUsage_INODES,
+                    Available: inodesavail,
+                    Total:     inodestotal,
+                    Used:      inodesused,
                 },
             },
         }, nil
     } else {
+        // NFS backend
         volumeName := GetVolumeNameFromPath(req.GetVolumeId())
         share, err := d.hsclient.GetShare(volumeName)
         if err != nil {
@@ -449,13 +470,23 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
         used, _ := strconv.ParseInt(share.Space.Used, 10, 64)
         total, _ := strconv.ParseInt(share.Space.Total, 10, 64)
 
+        inodes_available, _ := strconv.ParseInt(share.Inodes.Available, 10, 64)
+        inodes_used, _ := strconv.ParseInt(share.Inodes.Used, 10, 64)
+        inodes_total, _ := strconv.ParseInt(share.Inodes.Total, 10, 64)
+
         return &csi.NodeGetVolumeStatsResponse{
             Usage: []*csi.VolumeUsage{
-                &csi.VolumeUsage{
+                {
                     Unit:      csi.VolumeUsage_BYTES,
                     Available: available,
                     Total:     total,
                     Used:      used,
+                },
+                {
+                    Unit:      csi.VolumeUsage_INODES,
+                    Available: inodes_available,
+                    Total:     inodes_total,
+                    Used:      inodes_used,
                 },
             },
         }, nil

@@ -79,10 +79,18 @@ type ShareResponse struct {
     Size          int64                `json:"shareSizeLimit,omitifempty,string"`
     ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
     Space         ShareSpaceResponse   `json:"space"`
+    Inodes        ShareInodesResponse   `json:"inodes"`
     Objectives    ObjectivesResponse   `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {
+    Used      string `json:"used"`
+    Total     string `json:"total"`
+    Available string `json:"available"`
+    percent   int
+}
+
+type ShareInodesResponse struct {
     Used      string `json:"used"`
     Total     string `json:"total"`
     Available string `json:"available"`
