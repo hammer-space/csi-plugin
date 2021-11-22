@@ -23,7 +23,7 @@ const (
 
     // Directory on hosts where backing shares for file-backed volumes will be mounted
     // Must end with a "/"
-    ShareStagingDir             = "/tmp/"
+    ShareStagingDir             = "/tmp"
     SharePathPrefix             = "/"
     DefaultBackingFileSizeBytes = 1073741824
     DefaultVolumeNameFormat     = "%s"

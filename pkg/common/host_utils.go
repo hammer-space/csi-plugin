@@ -112,7 +112,7 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
 }
 
 func ExpandFilesystem(device, fsType string) error {
-    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem", device, fsType)
+    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem and loopback device '%s'", device, fsType)
 
     var command string
     if fsType == "xfs" {
@@ -159,7 +159,6 @@ func GetDeviceMinorNumber(device string) (uint32, error) {
     if err := unix.Stat(device, &s); err != nil {
         return 0, err
     }
-
     dev := uint64(s.Rdev)
     return unix.Minor(dev), nil
 }
@@ -172,19 +171,29 @@ func MakeEmptyRawFile(pathname string, size int64) error {
         log.Errorf("%s, %v", output, err.Error())
         return err
     }
-
     return nil
 }
 
 func ExpandDeviceFileSize(pathname string, size int64) error {
-    log.Infof("resizing file '%s'", pathname)
+    log.Infof("resizing device file '%s'", pathname)
     sizeStr := strconv.FormatInt(size, 10)
+    loopdev, err := determineLoopDeviceFromBackingFile(pathname)
+    if err != nil {
+//        log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
+        return err
+    }
+    // Refresh the loop device size with losetup -c
+    // Requires UBI image
+    loresize, err := ExecCommand("losetup", "-c", loopdev)
+    if err != nil {
+        log.Errorf("Resizing loop device '%s' failed with output '%s': '%v'", loopdev, loresize, err.Error())
+        return err
+    }
     output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
     if err != nil {
         log.Errorf("%s, %v", output, err.Error())
         return err
     }
-
     return nil
 }
 
@@ -269,6 +278,28 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
     }
     return "", status.Errorf(codes.Internal,
         "could not determine backing file for loop device")
+}
+// Note that this function does not work in Alpine image due to
+// losetup cutting the output off at 79 characters
+func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
+    log.Infof("determine loop device from backing file: '%s'", backingfile)
+    output, err := ExecCommand("losetup","-a")
+    if err != nil {
+        return "", status.Errorf(codes.Internal,
+            "could not determine loop device for backing file, %v", err)
+    }
+    devices := strings.Split(string(output), "\n")
+    for _, d := range devices {
+        if d != "" {
+            device := strings.Split(d, " ")
+            if backingfile == strings.Trim(device[2], ":()") {
+                log.Infof("matched loop dev: '%s'", strings.Trim(device[0], ":()"))
+                return strings.Trim(device[0], ":()"), nil
+            }
+        }
+    }
+    return "", status.Errorf(codes.Internal,
+        "could not determine loop device for backing file")
 }
 
 func GetNFSExports(address string) ([]string, error) {

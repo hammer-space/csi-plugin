@@ -305,8 +305,8 @@ func (d *CSIDriver) ensureDeviceFileExists(
     }
 
     backingDir := common.ShareStagingDir + backingShare.ExportPath
-    deviceFile := backingDir+"/"+hsVolume.Name
 
+    deviceFile := backingDir+"/"+hsVolume.Name
     if hsVolume.SourceSnapPath != "" {
         // Create from snapshot
         err := d.hsclient.RestoreFileSnapToDestination(hsVolume.SourceSnapPath, hsVolume.Path)
