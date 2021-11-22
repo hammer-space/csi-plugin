@@ -193,7 +193,6 @@ roleRef:
   kind: ClusterRole
   name: csi-provisioner
   apiGroup: rbac.authorization.k8s.io
-
 #### Node service
 ---
 kind: DaemonSet
@@ -283,7 +282,6 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
-
             - name: HS_TLS_VERIFY
               value: "false"
             - name: CSI_MAJOR_VERSION
