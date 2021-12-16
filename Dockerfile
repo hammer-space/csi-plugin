@@ -1,12 +1,14 @@
 # Copyright 2019 Hammerspace
 
 FROM registry.access.redhat.com/ubi8/ubi:8.4
-RUN yum --disableplugin=subscription-manager -y install python2-pip git golang make
+RUN dnf --disableplugin=subscription-manager -y install python2-pip git golang make
 
 RUN pip2 install hstk
 WORKDIR /go/src/github.com/hammer-space/csi-plugin/
 ADD . ./
-RUN make clean compile
+RUN make clean
+RUN go mod download github.com/ameade/spec
+RUN make compile
 
 FROM registry.access.redhat.com/ubi8/ubi:8.4
 # Install required packages
@@ -44,7 +46,7 @@ RUN dnf --disableplugin=subscription-manager -y install python2-pip libcom_err-d
 	#-1.2.5-7.el8.x86_64 \
 	xfsprogs-5.0.0-9.el8.x86_64
 	#-5.0.0-4.el8.x86_64 &&
-#yum clean all
+#dnf clean all
 
 # zfs btrfs-progs py-pip
 RUN pip2 install hstk
