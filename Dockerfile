@@ -6,8 +6,6 @@ RUN dnf --disableplugin=subscription-manager -y install python2-pip git golang m
 RUN pip2 install hstk
 WORKDIR /go/src/github.com/hammer-space/csi-plugin/
 ADD . ./
-RUN make clean
-RUN go mod download github.com/ameade/spec
 RUN make compile
 
 FROM registry.access.redhat.com/ubi8/ubi:8.4
