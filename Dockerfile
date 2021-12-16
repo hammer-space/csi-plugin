@@ -13,8 +13,8 @@ FROM registry.access.redhat.com/ubi8/ubi:8.4
 ADD ubi/CentOS-Base.repo /etc/yum.repos.d/CentOS-Base.repo
 ADD ubi/CentOS-AppStream.repo /etc/yum.repos.d/CentOS-AppStream.repo
 ADD ubi/RPM-GPG-KEY-centosofficial /etc/pki/rpm-gpg/RPM-GPG-KEY-centosofficial
-RUN yum --disableplugin=subscription-manager -y install python2-pip libcom_err-devel \
-	ca-certificates-2020.2.41-80.0.el8_2.noarch \
+RUN dnf --disableplugin=subscription-manager -y install python2-pip libcom_err-devel \
+	ca-certificates-2021.2.50-80.0.el8_4.noarch \
 	e2fsprogs-1.45.6-2.el8.x86_64 \
 	#-1.45.6-1.el8.x86_64 \
 	e2fsprogs-libs-1.45.6-2.el8.x86_64 \
