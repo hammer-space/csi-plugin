@@ -26,16 +26,16 @@ build-dev:
 
 build:
 	@echo "==> Building Docker Image Latest"
-	@docker build -t "hammerspaceinc/csi-plugin:latest" . -f Dockerfile --no-cache
+	@docker build -t "hammerspaceinc/csi-plugin-ubi:latest" . -f Dockerfile --no-cache
 
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
-	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
+	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin-ubi:${VERSION}" . -f Dockerfile
 
 build-alpine:
 	@echo "==> Building Alpine Docker Image Latest"
-	@docker build -t "hammerspaceinc/csi-plugin-ubi" . -f Dockerfile_alpine --no-cache
+	@docker build -t "hammerspaceinc/csi-plugin" . -f Dockerfile_alpine --no-cache
 
 build-alpine-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
-	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin-ubi:${VERSION}" . -f Dockerfile_alpine
+	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile_alpine
