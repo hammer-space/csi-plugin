@@ -447,7 +447,13 @@ func (client *HammerspaceClient) CreateShare(name string,
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
-
+	if len(exportOptions) == 0 { // add default export options to share create request
+			exportOptions = append(exportOptions, common.ShareExportOptions{
+			Subnet:            "*",
+			RootSquash:        true,
+			AccessPermissions: "RW",
+		})
+	}
     share := common.ShareRequest{
         Name:          name,
         ExportPath:    exportPath,
@@ -485,8 +491,8 @@ func (client *HammerspaceClient) CreateShare(name string,
             return err
         }
         if !success {
-            return errors.New("Share failed to create")
             defer client.DeleteShare(share.Name, 0)
+            return errors.New("Share failed to create")
         }
 
     } else {
@@ -517,6 +523,13 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
 
+    if len(exportOptions) == 0 { // add default export options to share create request
+			exportOptions = append(exportOptions, common.ShareExportOptions{
+			Subnet:            "*",
+			RootSquash:        true,
+			AccessPermissions: "RW",
+		})
+	}
     ////// FIXME: Replace with new api to clone a snapshot to a new share
     share := common.ShareRequest{
         Name:          name,
@@ -556,8 +569,8 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
             return err
         }
         if !success {
-            return errors.New("Share failed to create")
             defer client.DeleteShare(share.Name, 0)
+            return errors.New("Share failed to create")
         }
 
     } else {
