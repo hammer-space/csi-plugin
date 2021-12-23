@@ -450,7 +450,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 	if len(exportOptions) == 0 { // add default export options to share create request
 			exportOptions = append(exportOptions, common.ShareExportOptions{
 			Subnet:            "*",
-			RootSquash:        true,
+			RootSquash:        false,
 			AccessPermissions: "RW",
 		})
 	}
@@ -526,7 +526,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     if len(exportOptions) == 0 { // add default export options to share create request
 			exportOptions = append(exportOptions, common.ShareExportOptions{
 			Subnet:            "*",
-			RootSquash:        true,
+			RootSquash:        false,
 			AccessPermissions: "RW",
 		})
 	}
