@@ -18,32 +18,32 @@ package common
 
 // Structures to hold information about a plugin created volume
 type HSVolumeParameters struct {
-	DeleteDelay            int64
-	ExportOptions          []ShareExportOptions
-	Objectives             []string
-	BlockBackingShareName  string
-	MountBackingShareName  string
-	VolumeNameFormat       string
-	FSType                 string
-	Comment                string
-	AdditionalMetadataTags map[string]string
+    DeleteDelay            int64
+    ExportOptions          []ShareExportOptions
+    Objectives             []string
+    BlockBackingShareName  string
+    MountBackingShareName  string
+    VolumeNameFormat       string
+    FSType                 string
+    Comment                string
+    AdditionalMetadataTags map[string]string
 }
 
 type HSVolume struct {
-	DeleteDelay            int64
-	ExportOptions          []ShareExportOptions
-	Objectives             []string
-	BlockBackingShareName  string
-	MountBackingShareName  string
-	Size                   int64
-	Name                   string
-	Path                   string
-	VolumeMode             string
-	SourceSnapPath         string
-	FSType                 string
-	Comment                string
-	SourceSnapShareName    string
-	AdditionalMetadataTags map[string]string
+    DeleteDelay            int64
+    ExportOptions          []ShareExportOptions
+    Objectives             []string
+    BlockBackingShareName  string
+    MountBackingShareName  string
+    Size                   int64
+    Name                   string
+    Path                   string
+    VolumeMode             string
+    SourceSnapPath         string
+    FSType                 string
+    Comment                string
+    SourceSnapShareName    string
+    AdditionalMetadataTags map[string]string
 }
 
 ///// Request and Response objects for interacting with the HS API
@@ -51,119 +51,119 @@ type HSVolume struct {
 // We must create separate req and response objects since the API does not allow
 // specifying unused fields
 type ClusterResponse struct {
-	Capacity map[string]string `json:"capacity"`
+    Capacity map[string]string `json:"capacity"`
 }
 
 type ShareRequest struct {
-	Name          string               `json:"name"`
-	ExportPath    string               `json:"path"`
-	Comment       string               `json:"comment"`
-	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	Size          int64                `json:"shareSizeLimit,omitifempty"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+    Name          string               `json:"name"`
+    ExportPath    string               `json:"path"`
+    Comment       string               `json:"comment"`
+    ExtendedInfo  map[string]string    `json:"extendedInfo"`
+    Size          int64                `json:"shareSizeLimit,omitifempty"`
+    ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
 }
 
 type ShareUpdateRequest struct {
-	Name         string            `json:"name"`
-	Comment      string            `json:"comment"`
-	ExtendedInfo map[string]string `json:"extendedInfo"`
+    Name         string            `json:"name"`
+    Comment      string            `json:"comment"`
+    ExtendedInfo map[string]string `json:"extendedInfo"`
 }
 
 type ShareResponse struct {
-	Name          string               `json:"name"`
-	ExportPath    string               `json:"path"`
-	Comment       string               `json:"comment"`
-	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit,omitifempty,string"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
-	Space         ShareSpaceResponse   `json:"space"`
-	Inodes        ShareInodesResponse  `json:"inodes"`
-	Objectives    ObjectivesResponse   `json:"objectives"`
+    Name          string               `json:"name"`
+    ExportPath    string               `json:"path"`
+    Comment       string               `json:"comment"`
+    ExtendedInfo  map[string]string    `json:"extendedInfo"`
+    ShareState    string               `json:"shareState"`
+    Size          int64                `json:"shareSizeLimit,omitifempty,string"`
+    ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+    Space         ShareSpaceResponse   `json:"space"`
+    Inodes        ShareInodesResponse  `json:"inodes"`
+    Objectives    ObjectivesResponse   `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {
-	Used      string `json:"used"`
-	Total     string `json:"total"`
-	Available string `json:"available"`
-	percent   int
+    Used      string `json:"used"`
+    Total     string `json:"total"`
+    Available string `json:"available"`
+    percent   int
 }
 
 type ShareInodesResponse struct {
-	Used      string `json:"used"`
-	Total     string `json:"total"`
-	Available string `json:"available"`
-	percent   int
+    Used      string `json:"used"`
+    Total     string `json:"total"`
+    Available string `json:"available"`
+    percent   int
 }
 
 type ShareExportOptions struct {
-	Subnet            string `json:"subnet"`
-	AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
-	RootSquash        bool   `json:"rootSquash"`
+    Subnet            string `json:"subnet"`
+    AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
+    RootSquash        bool   `json:"rootSquash"`
 }
 type ObjectivesResponse struct {
-	Applied []AppliedObjectiveResponse `json:"appliedObjectives"`
+    Applied []AppliedObjectiveResponse `json:"appliedObjectives"`
 }
 type AppliedObjectiveResponse struct {
-	Name string `json:"name"`
+    Name string `json:"name"`
 }
 type ClusterObjectiveResponse struct {
-	Name string `json:"name"`
+    Name string `json:"name"`
 }
 
 type Task struct {
-	Uuid      string        `json:"uuid"`
-	Action    string        `json:"name"`
-	Status    string        `json:"status"`
-	ExitValue string        `json:"exitValue"`
-	ParamsMap TaskParamsMap `json:"paramsMap"`
+    Uuid      string        `json:"uuid"`
+    Action    string        `json:"name"`
+    Status    string        `json:"status"`
+    ExitValue string        `json:"exitValue"`
+    ParamsMap TaskParamsMap `json:"paramsMap"`
 }
 
 type TaskParamsMap struct {
-	CreatePath      string `json:"create-path"`
-	CreatedBy       string `json:"created-by"`
-	CreatedByName   string `json:"created-by-name"`
-	Name            string `json:"name"`
-	OverideMemCheck string `json:"override-mem-check"`
+    CreatePath      string `json:"create-path"`
+    CreatedBy       string `json:"created-by"`
+    CreatedByName   string `json:"created-by-name"`
+    Name            string `json:"name"`
+    OverideMemCheck string `json:"override-mem-check"`
 }
 
 type File struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-	Size int64  `json:"size,string"`
+    Name string `json:"name"`
+    Path string `json:"path"`
+    Size int64  `json:"size,string"`
 }
 
 type FileSnapshot struct {
-	SourceFilename string `json:"sourceFilename"`
-	Time           string `json:"time"`
+    SourceFilename string `json:"sourceFilename"`
+    Time           string `json:"time"`
 }
 
 type Cluster struct {
-	Name              string              `json:"name"`
-	PortalFloatingIps []PortalFloatingIps `json:"portalFloatingIps"`
+    Name              string              `json:"name"`
+    PortalFloatingIps []PortalFloatingIps `json:"portalFloatingIps"`
 }
 
 // Portal Data Floating IPs are a cluster-wide resource
 type PortalFloatingIps struct {
-	Address      string `json:"address"`
-	PrefixLength int    `json:"prefixLength"`
+    Address      string `json:"address"`
+    PrefixLength int    `json:"prefixLength"`
 }
 
 type DataPortal struct {
-	OperState      string            `json:"operState"`      // We want 'UP'
-	AdminState     string            `json:"adminState"`     // We want 'UP'
-	DataPortalType string            `json:"dataPortalType"` // We want NFS_V3
-	Exported       []string          `json:"exported"`
-	Node           DataPortalNode    `json:"node"`
-	Uoid           map[string]string `json:"uoid"`
+    OperState      string            `json:"operState"`      // We want 'UP'
+    AdminState     string            `json:"adminState"`     // We want 'UP'
+    DataPortalType string            `json:"dataPortalType"` // We want NFS_V3
+    Exported       []string          `json:"exported"`
+    Node           DataPortalNode    `json:"node"`
+    Uoid           map[string]string `json:"uoid"`
 }
 
 type DataPortalNodeAddress struct {
-	Address      string `json:"address"`
-	PrefixLength int    `json:"prefixLength"`
+    Address      string `json:"address"`
+    PrefixLength int    `json:"prefixLength"`
 }
 
 type DataPortalNode struct {
-	Name          string                `json:"name"`
-	MgmtIpAddress DataPortalNodeAddress `json:"mgmtIpAddress"` // do we want this or some data ip?
+    Name          string                `json:"name"`
+    MgmtIpAddress DataPortalNodeAddress `json:"mgmtIpAddress"` // do we want this or some data ip?
 }

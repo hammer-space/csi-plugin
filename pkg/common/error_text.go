@@ -19,50 +19,50 @@ package common
 // These are error messages that may be returned as responses via the gRPC API
 // Convention is to be lowercase with no ending punctuation
 const (
-	// Validation errors
-	EmptyVolumeId                 = "Volume ID cannot be empty"
-	VolumeIdTooLong               = "Volume ID cannot be longer than %d characters"
-	SnapshotIdTooLong             = "Shapshot ID cannot be longer than %d characters"
-	ImproperlyFormattedSnapshotId = "Shapshot ID should be of the format <datetime>|<share export path>, received %s"
-	EmptyTargetPath               = "Target path cannot be empty"
-	EmptyStagingTargetPath        = "Staging target path cannot be empty"
-	EmptyVolumePath               = "Volume Path cannot be empty"
-	NoCapabilitiesSupplied        = "No capabilities supplied for volume %s" // volume id
-	ConflictingCapabilities       = "Cannot request a volume to be both raw and a filesystem"
-	InvalidDeleteDelay            = "deleteDelay parameter must be an Integer. Value received '%s'"
-	InvalidComment                = "Failed to set comment, invalid value"
-	InvalidCommentSize            = "Share comment cannot be longer than 255 characters"
-	EmptySnapshotId               = "Snapshot ID cannot be empty"
-	MissingSnapshotSourceVolumeId = "Snapshot SourceVolumeId cannot be empty"
-	MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
-	MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
-	BlockVolumeSizeNotSpecified   = "Capacity must be specified for block volumes"
+    // Validation errors
+    EmptyVolumeId                 = "Volume ID cannot be empty"
+    VolumeIdTooLong               = "Volume ID cannot be longer than %d characters"
+    SnapshotIdTooLong             = "Shapshot ID cannot be longer than %d characters"
+    ImproperlyFormattedSnapshotId = "Shapshot ID should be of the format <datetime>|<share export path>, received %s"
+    EmptyTargetPath               = "Target path cannot be empty"
+    EmptyStagingTargetPath        = "Staging target path cannot be empty"
+    EmptyVolumePath               = "Volume Path cannot be empty"
+    NoCapabilitiesSupplied        = "No capabilities supplied for volume %s" // volume id
+    ConflictingCapabilities       = "Cannot request a volume to be both raw and a filesystem"
+    InvalidDeleteDelay            = "deleteDelay parameter must be an Integer. Value received '%s'"
+    InvalidComment                = "Failed to set comment, invalid value"
+    InvalidCommentSize            = "Share comment cannot be longer than 255 characters"
+    EmptySnapshotId               = "Snapshot ID cannot be empty"
+    MissingSnapshotSourceVolumeId = "Snapshot SourceVolumeId cannot be empty"
+    MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
+    MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
+    BlockVolumeSizeNotSpecified   = "Capacity must be specified for block volumes"
 
-	InvalidExportOptions             = "Export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
-	InvalidRootSquash                = "rootSquash must be a bool. Value received '%s'"
-	InvalidAdditionalMetadataTags    = "Extended Info must be of format key=value, received '%s'"
-	InvalidObjectiveNameDoesNotExist = "Cannot find objective with the name %s"
+    InvalidExportOptions             = "Export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
+    InvalidRootSquash                = "rootSquash must be a bool. Value received '%s'"
+    InvalidAdditionalMetadataTags    = "Extended Info must be of format key=value, received '%s'"
+    InvalidObjectiveNameDoesNotExist = "Cannot find objective with the name %s"
 
-	VolumeExistsSizeMismatch = "Requested volume exists, but has a different size. Existing: %d, Requested: %d"
+    VolumeExistsSizeMismatch = "Requested volume exists, but has a different size. Existing: %d, Requested: %d"
 
-	VolumeDeleteHasSnapshots = "Volumes with snapshots cannot be deleted, delete snapshots first"
-	VolumeBeingDeleted       = "The specified volume is currently being deleted"
+    VolumeDeleteHasSnapshots = "Volumes with snapshots cannot be deleted, delete snapshots first"
+    VolumeBeingDeleted       = "The specified volume is currently being deleted"
 
-	// Not Found errors
-	VolumeNotFound              = "Volume does not exist"
-	FileNotFound                = "File does not exist"
-	ShareNotFound               = "Share does not exist"
-	BackingShareNotFound        = "Could not find specified backing share"
-	SourceSnapshotNotFound      = "Could not find source snapshots"
-	SourceSnapshotShareNotFound = "Could not find the share for the source snapshot"
+    // Not Found errors
+    VolumeNotFound              = "Volume does not exist"
+    FileNotFound                = "File does not exist"
+    ShareNotFound               = "Share does not exist"
+    BackingShareNotFound        = "Could not find specified backing share"
+    SourceSnapshotNotFound      = "Could not find source snapshots"
+    SourceSnapshotShareNotFound = "Could not find the share for the source snapshot"
 
-	// Internal errors
-	UnexpectedHSStatusCode    = "Unexpected HTTP response from Hammerspace API: recieved status code %d, expected %d"
-	OutOfCapacity             = "Requested capacity %d exceeds available %d"
-	LoopDeviceAttachFailed    = "Failed setting up loop device: device=%s, filePath=%s"
-	TargetPathUnknownFiletype = "Target path exists but is not a block device nor directory"
-	UnknownError              = "Unknown internal error"
+    // Internal errors
+    UnexpectedHSStatusCode    = "Unexpected HTTP response from Hammerspace API: recieved status code %d, expected %d"
+    OutOfCapacity             = "Requested capacity %d exceeds available %d"
+    LoopDeviceAttachFailed    = "Failed setting up loop device: device=%s, filePath=%s"
+    TargetPathUnknownFiletype = "Target path exists but is not a block device nor directory"
+    UnknownError              = "Unknown internal error"
 
-	// CSI v0
-	BlockVolumesUnsupported = "Block volumes are unsupported in CSI v0.3"
+    // CSI v0
+    BlockVolumesUnsupported = "Block volumes are unsupported in CSI v0.3"
 )
