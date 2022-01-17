@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.1
+### Added
+- Removed unnecessary mount option
+
 ## 1.2.0
 ### Added
 - Supports online resize of file-backed devices
