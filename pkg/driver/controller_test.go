@@ -13,6 +13,7 @@ func TestParseParams(t *testing.T) {
     expectedParams := common.HSVolumeParameters{
         VolumeNameFormat: common.DefaultVolumeNameFormat,
         DeleteDelay:      -1,
+        Comment:          "Created by CSI driver",
     }
     stringParams := map[string]string{}
     actualParams, _ := parseVolParams(stringParams)
@@ -27,6 +28,7 @@ func TestParseParams(t *testing.T) {
     expectedParams = common.HSVolumeParameters{
         VolumeNameFormat: "my-csi-volume-%s-hammerspace",
         DeleteDelay:      -1,
+        Comment:          "Created by CSI driver",
     }
     stringParams = map[string]string{
         "volumeNameFormat": "my-csi-volume-%s-hammerspace",
@@ -64,6 +66,7 @@ func TestParseParams(t *testing.T) {
     expectedParams = common.HSVolumeParameters{
         DeleteDelay:      30,
         VolumeNameFormat: common.DefaultVolumeNameFormat,
+        Comment:          "Created by CSI driver",
     }
     stringParams = map[string]string{
         "deleteDelay": "30",
@@ -156,7 +159,7 @@ func TestParseParams(t *testing.T) {
     // Test extended info
     expectedParams = common.HSVolumeParameters{
         AdditionalMetadataTags: map[string]string{
-            "test_key": "test_value",
+            "test_key":   "test_value",
             "test_quote": "\"test\"",
         },
     }

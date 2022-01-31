@@ -106,11 +106,11 @@ func TestListShares(t *testing.T) {
             Name:       "test-client-code",
             ExportPath: "/test-client-code",
             ExtendedInfo: map[string]string{
-                "csi_created_by_plugin_version": "test_version",
-                "csi_created_by_plugin_name":    "test_plugin",
-                "csi_delayed_delete":            "0",
+                "csi_created_by_plugin_version":  "test_version",
+                "csi_created_by_plugin_name":     "test_plugin",
+                "csi_delayed_delete":             "0",
                 "csi_created_by_plugin_git_hash": "",
-                "csi_created_by_csi_version": "1",
+                "csi_created_by_csi_version":     "1",
             },
             Size:       1073741824,
             ShareState: "PUBLISHED",
@@ -188,7 +188,7 @@ func TestCreateShare(t *testing.T) {
     `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
     err := hsclient.CreateShare("test",
         "/test", -1,
-        []string{}, []common.ShareExportOptions{}, 0)
+        []string{}, []common.ShareExportOptions{}, 0, "")
     if err != nil {
         t.Error(err)
     }
@@ -212,7 +212,7 @@ func TestCreateShare(t *testing.T) {
         "/test",
         -1, []string{"test-obj", "test-obj2"},
         []common.ShareExportOptions{},
-        0)
+        0, "")
     if err != nil {
         t.Error(err)
     }
@@ -236,7 +236,7 @@ func TestCreateShare(t *testing.T) {
         100,
         []string{},
         []common.ShareExportOptions{},
-        -1)
+        -1, "")
     if err != nil {
         t.Error(err)
     }
@@ -284,7 +284,7 @@ func TestCreateShare(t *testing.T) {
         100,
         []string{},
         exportOptions,
-        0)
+        0, "")
     if err != nil {
         t.Error(err)
     }
@@ -305,7 +305,7 @@ func TestCreateShare(t *testing.T) {
          "shareSizeLimit":0,
          "exportOptions":[]}
     `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
-    err = hsclient.CreateShare("test", "/test", -1, []string{}, []common.ShareExportOptions{}, 0)
+    err = hsclient.CreateShare("test", "/test", -1, []string{}, []common.ShareExportOptions{}, 0, "")
     if err == nil {
         t.Logf("Expected error")
         t.Fail()

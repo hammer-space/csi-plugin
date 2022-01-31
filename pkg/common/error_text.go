@@ -38,22 +38,22 @@ const (
     MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
     BlockVolumeSizeNotSpecified   = "Capacity must be specified for block volumes"
 
-    InvalidExportOptions = "Export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
-    InvalidRootSquash    = "rootSquash must be a bool. Value received '%s'"
-    InvalidAdditionalMetadataTags   = "Extended Info must be of format key=value, received '%s'"
+    InvalidExportOptions             = "Export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
+    InvalidRootSquash                = "rootSquash must be a bool. Value received '%s'"
+    InvalidAdditionalMetadataTags    = "Extended Info must be of format key=value, received '%s'"
     InvalidObjectiveNameDoesNotExist = "Cannot find objective with the name %s"
 
     VolumeExistsSizeMismatch = "Requested volume exists, but has a different size. Existing: %d, Requested: %d"
 
     VolumeDeleteHasSnapshots = "Volumes with snapshots cannot be deleted, delete snapshots first"
-    VolumeBeingDeleted      = "The specified volume is currently being deleted"
+    VolumeBeingDeleted       = "The specified volume is currently being deleted"
 
     // Not Found errors
-    VolumeNotFound       = "Volume does not exist"
-    FileNotFound         = "File does not exist"
-    ShareNotFound        = "Share does not exist"
-    BackingShareNotFound = "Could not find specified backing share"
-    SourceSnapshotNotFound = "Could not find source snapshots"
+    VolumeNotFound              = "Volume does not exist"
+    FileNotFound                = "File does not exist"
+    ShareNotFound               = "Share does not exist"
+    BackingShareNotFound        = "Could not find specified backing share"
+    SourceSnapshotNotFound      = "Could not find source snapshots"
     SourceSnapshotShareNotFound = "Could not find the share for the source snapshot"
 
     // Internal errors
@@ -63,7 +63,6 @@ const (
     TargetPathUnknownFiletype = "Target path exists but is not a block device nor directory"
     UnknownError              = "Unknown internal error"
 
-
     // CSI v0
-    BlockVolumesUnsupported   = "Block volumes are unsupported in CSI v0.3"
+    BlockVolumesUnsupported = "Block volumes are unsupported in CSI v0.3"
 )

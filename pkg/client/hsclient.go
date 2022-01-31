@@ -90,44 +90,44 @@ func (client *HammerspaceClient) GetAnvilPortal() (string, error) {
 
 // Return a string with a floating data portal IP
 func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
-// Instead of using /cntl, use /cntl/state to simplify processing of the JSON
-// struct. If using /cntl, add [] before cluster struct
-  req, err := client.generateRequest("GET", "/cntl/state", "")
-  statusCode, respBody, _, err := client.doRequest(*req)
+    // Instead of using /cntl, use /cntl/state to simplify processing of the JSON
+    // struct. If using /cntl, add [] before cluster struct
+    req, err := client.generateRequest("GET", "/cntl/state", "")
+    statusCode, respBody, _, err := client.doRequest(*req)
 
-  if err != nil {
-      return "", err
-  }
-  if statusCode != 200 {
-      return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
-  }
-  var clusters common.Cluster
-  err = json.Unmarshal([]byte(respBody), &clusters)
-  if err != nil {
-      log.Error("Error parsing JSON response: " + err.Error())
-      return "", err
-  }
-  // Local random function
-  random_select := func () bool {
-    r := make(chan struct{})
-    close(r)
-    select {
-    case <-r:
-        return false
-    case <-r:
-        return true
+    if err != nil {
+        return "", err
     }
-  }
-  floatingip := ""
-  for _, p := range clusters.PortalFloatingIps {
-    floatingip = p.Address
-    // If there are more than 1 floating IPs configured, randomly select one
-    rr := random_select()
-    if rr == true {
-      break
+    if statusCode != 200 {
+        return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
     }
-  }
-  return floatingip, nil
+    var clusters common.Cluster
+    err = json.Unmarshal([]byte(respBody), &clusters)
+    if err != nil {
+        log.Error("Error parsing JSON response: " + err.Error())
+        return "", err
+    }
+    // Local random function
+    random_select := func() bool {
+        r := make(chan struct{})
+        close(r)
+        select {
+        case <-r:
+            return false
+        case <-r:
+            return true
+        }
+    }
+    floatingip := ""
+    for _, p := range clusters.PortalFloatingIps {
+        floatingip = p.Address
+        // If there are more than 1 floating IPs configured, randomly select one
+        rr := random_select()
+        if rr == true {
+            break
+        }
+    }
+    return floatingip, nil
 }
 
 // GetDataPortals returns a list of operational data-portals
@@ -316,7 +316,6 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
     return shares, nil
 }
 
-
 func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResponse, error) {
     req, err := client.generateRequest("GET", "/objectives", "")
     statusCode, respBody, _, err := client.doRequest(*req)
@@ -431,9 +430,6 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
     return file != nil, err
 }
 
-
-
-
 func (client *HammerspaceClient) CreateShare(name string,
     exportPath string,
     size int64, //size in bytes
@@ -444,6 +440,9 @@ func (client *HammerspaceClient) CreateShare(name string,
 
     log.Debug("Creating share: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
+    if exportOptions == nil { // send empty list to api req
+        exportOptions = make([]common.ShareExportOptions, 0)
+    }
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
@@ -469,11 +468,15 @@ func (client *HammerspaceClient) CreateShare(name string,
         log.Error(err)
         return err
     }
-    if statusCode == 400 {
-        // FIXME: We get a 400 if there is already a share-create task for a share with this name
-        // can we check if a task exists somehow?
-    }
     if statusCode != 202 {
+        if statusCode == 400 {
+            shareTaskRunning, err := client.CheckIfShareCreateTaskIsRunning(name)
+            log.Debug(fmt.Sprintf("Found share creating task running as: %v ", shareTaskRunning))
+            if shareTaskRunning {
+                return nil
+            }
+            return err
+        }
         return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
     }
 
@@ -485,8 +488,8 @@ func (client *HammerspaceClient) CreateShare(name string,
             return err
         }
         if !success {
-            return errors.New("Share failed to create")
             defer client.DeleteShare(share.Name, 0)
+            return errors.New("Share failed to create")
         }
 
     } else {
@@ -513,6 +516,10 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     snapshotPath string) error {
     log.Debug("Creating share from snapshot: " + name)
     extendedInfo := common.GetCommonExtendedInfo()
+
+    if exportOptions == nil { // send empty list to api req
+        exportOptions = make([]common.ShareExportOptions, 0)
+    }
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
@@ -532,7 +539,6 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     shareString := new(bytes.Buffer)
     json.NewEncoder(shareString).Encode(share)
 
-
     req, err := client.generateRequest("POST", "/shares", shareString.String())
     statusCode, _, respHeaders, err := client.doRequest(*req)
 
@@ -540,11 +546,15 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
         log.Error(err)
         return err
     }
-    if statusCode == 400 {
-        // FIXME: We get a 400 if there is already a share-create task for a share with this name
-        // can we check if a task exists somehow?
-    }
     if statusCode != 202 {
+        if statusCode == 400 {
+            shareTaskRunning, err := client.CheckIfShareCreateTaskIsRunning(name)
+            log.Debug(fmt.Sprintf("Found share creating task running as: %v ", shareTaskRunning))
+            if shareTaskRunning {
+                return nil
+            }
+            return err
+        }
         return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
     }
 
@@ -556,15 +566,13 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
             return err
         }
         if !success {
-            return errors.New("Share failed to create")
             defer client.DeleteShare(share.Name, 0)
+            return errors.New("Share failed to create")
         }
 
     } else {
         log.Errorf("No task returned to monitor")
     }
-
-    ////// End FIXME
 
     // Set objectives on share
     err = client.SetObjectives(name, "/", objectives, true)
@@ -574,6 +582,34 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     }
 
     return nil
+}
+
+func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName string) (bool, error) {
+    req, err := client.generateRequest("GET", "/tasks", "")
+    if err != nil {
+        log.Error("Failed to generate request object")
+        return false, err
+    }
+    statusCode, respBody, _, err := client.doRequest(*req)
+    if err != nil {
+        return false, err
+    }
+    if statusCode != 200 {
+        return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+    }
+    var tasks []common.Task
+    err = json.Unmarshal([]byte(respBody), &tasks)
+    if err != nil {
+        log.Error(err)
+        return false, nil
+    }
+    for _, task := range tasks {
+        log.Debug(fmt.Printf("Task Name: %v\n  Task Status: %s\n Share Name: %s\n", task.ParamsMap.Name, task.Status, shareName))
+        if task.Status == "EXECUTING" && task.ParamsMap.Name == shareName {
+            return true, nil
+        }
+    }
+    return false, nil
 }
 
 // Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
@@ -615,10 +651,9 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
     return nil
 }
 
-
 func (client *HammerspaceClient) UpdateShareSize(name string,
     size int64, //size in bytes
-    ) error {
+) error {
 
     log.Debugf("Update share size : %s to %v", name, size)
 
@@ -631,7 +666,7 @@ func (client *HammerspaceClient) UpdateShareSize(name string,
     shareString := new(bytes.Buffer)
     json.NewEncoder(shareString).Encode(share)
 
-    req, err := client.generateRequest("PUT", "/shares/" + name, shareString.String())
+    req, err := client.generateRequest("PUT", "/shares/"+name, shareString.String())
     statusCode, _, respHeaders, err := client.doRequest(*req)
 
     if err != nil {
@@ -745,14 +780,14 @@ func (client *HammerspaceClient) GetShareSnapshots(shareName string) ([]string, 
         log.Error("Error parsing JSON response: " + err.Error())
         return []string{}, err
     }
-// Need to prune the snapshot name current from the list
-// Needs to work for a slice with only current as an entry as well as when there are many snapshots and current is somewhere in the list
-   for i, v := range snapshotNames {
+    // Need to prune the snapshot name current from the list
+    // Needs to work for a slice with only current as an entry as well as when there are many snapshots and current is somewhere in the list
+    for i, v := range snapshotNames {
         if v == "current" {
             snapshotNames = append(snapshotNames[:i], snapshotNames[i+1:]...)
             break
         }
-   }
+    }
 
     return snapshotNames, nil
 }
@@ -799,8 +834,8 @@ func (client *HammerspaceClient) GetFileSnapshots(filePath string) ([]common.Fil
 func (client *HammerspaceClient) DeleteFileSnapshot(filePath, snapshotName string) error {
     // Get only the timestamp from the snapshot path
     snapshotTime := strings.Join(strings.SplitN(url.PathEscape(path.Base(snapshotName)),
-                                           "-", 6)[0:5],
-                            "-")
+        "-", 6)[0:5],
+        "-")
 
     req, _ := client.generateRequest("POST",
         fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")

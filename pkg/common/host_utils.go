@@ -34,7 +34,7 @@ import (
     "k8s.io/kubernetes/pkg/util/mount"
 )
 
-func execCommandHelper(command string, args...string) ([]byte, error) {
+func execCommandHelper(command string, args ...string) ([]byte, error) {
     cmd := exec.Command(command, args...)
     log.Debugf("Executing command: %v", cmd)
     var b bytes.Buffer
@@ -67,6 +67,7 @@ func execCommandHelper(command string, args...string) ([]byte, error) {
 }
 
 var ExecCommand = execCommandHelper
+
 // EnsureFreeLoopbackDeviceFile finds the next available loop device under /dev/loop*
 // If no free loop devices exist, a new one is created
 func EnsureFreeLoopbackDeviceFile() (uint64, error) {
@@ -83,7 +84,6 @@ func EnsureFreeLoopbackDeviceFile() (uint64, error) {
     }
     return uint64(dev), nil
 }
-
 
 func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) error {
     mounter := mount.New("")
@@ -112,7 +112,7 @@ func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) e
 }
 
 func ExpandFilesystem(device, fsType string) error {
-    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem and loopback device '%s'", device, fsType)
+    log.Infof("Resizing filesystem on file '%s' with '%s' filesystem", device, fsType)
 
     var command string
     if fsType == "xfs" {
@@ -179,7 +179,7 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
     sizeStr := strconv.FormatInt(size, 10)
     loopdev, err := determineLoopDeviceFromBackingFile(pathname)
     if err != nil {
-//        log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
+        //        log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
         return err
     }
     // Refresh the loop device size with losetup -c
@@ -279,11 +279,12 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
     return "", status.Errorf(codes.Internal,
         "could not determine backing file for loop device")
 }
+
 // Note that this function does not work in Alpine image due to
 // losetup cutting the output off at 79 characters
 func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
     log.Infof("determine loop device from backing file: '%s'", backingfile)
-    output, err := ExecCommand("losetup","-a")
+    output, err := ExecCommand("losetup", "-a")
     if err != nil {
         return "", status.Errorf(codes.Internal,
             "could not determine loop device for backing file, %v", err)
@@ -316,7 +317,7 @@ func GetNFSExports(address string) ([]string, error) {
             toReturn = append(toReturn, exportTokens[0])
         }
     }
-    if (len(toReturn) == 0) {
+    if len(toReturn) == 0 {
         return nil, status.Errorf(codes.Internal,
             "could not determine nfs exports, command output: %s", output)
     }
@@ -366,14 +367,14 @@ func UnmountFilesystem(targetPath string) error {
     return nil
 }
 
-func SetMetadataTags(localPath string, tags map[string]string) (error) {
+func SetMetadataTags(localPath string, tags map[string]string) error {
     // hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
     _, err := ExecCommand("hs",
         "attribute",
         "set", "CSI_DETAILS",
         fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash),
         localPath)
-    if err != nil{
+    if err != nil {
         log.Warn("Failed to set CSI_DETAILS metadata " + err.Error())
     }
 
@@ -384,7 +385,7 @@ func SetMetadataTags(localPath string, tags map[string]string) (error) {
         )
 
         // FIXME: The HS client returns exit code 0 even on failure, so we can't detect errors
-        if err != nil{
+        if err != nil {
             log.Error("Failed to set tag " + err.Error())
             break
         }
