@@ -31,6 +31,7 @@ const (
     ConflictingCapabilities       = "Cannot request a volume to be both raw and a filesystem"
     InvalidDeleteDelay            = "deleteDelay parameter must be an Integer. Value received '%s'"
     InvalidComment                = "Failed to set comment, invalid value"
+    InvalidShareNameSize          = "Share name cannot be longer than 80 characters"
     InvalidCommentSize            = "Share comment cannot be longer than 255 characters"
     EmptySnapshotId               = "Snapshot ID cannot be empty"
     MissingSnapshotSourceVolumeId = "Snapshot SourceVolumeId cannot be empty"
