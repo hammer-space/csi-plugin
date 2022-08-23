@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.2
+### Added
+- Updated the deprecated module
+- Added url parse to URI string, it was crashing the CSI when share name have % in it
+- Added condition to expand volume only when share state is Mounted state 
+
 ## 1.2.1
 ### Added
 - Removed unnecessary mount option

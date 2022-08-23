@@ -1,10 +1,10 @@
 package driver
 
 import (
-    "reflect"
-    "testing"
+	"reflect"
+	"testing"
 
-    common "github.com/hammer-space/csi-plugin/pkg/common"
+	common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 func TestParseParams(t *testing.T) {
@@ -105,12 +105,12 @@ func TestParseParams(t *testing.T) {
 
     // Test export options
     expectedOptions := []common.ShareExportOptions{
-        common.ShareExportOptions{
+        {
             Subnet:            "*",
             AccessPermissions: "RO",
             RootSquash:        false,
         },
-        common.ShareExportOptions{
+        {
             Subnet:            "10.2.0.0/24",
             AccessPermissions: "RW",
             RootSquash:        true,

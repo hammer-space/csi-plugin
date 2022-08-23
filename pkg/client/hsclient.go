@@ -18,26 +18,26 @@ limitations under the License.
 package client
 
 import (
-    "bytes"
-    "crypto/tls"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "io/ioutil"
-    "net/http"
-    "net/http/cookiejar"
-    "net/url"
-    "os"
-    "path"
-    "strconv"
-    "strings"
-    "time"
+	"bytes"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/ioutil"
+	"net/http"
+	"net/http/cookiejar"
+	"net/url"
+	"os"
+	"path"
+	"strconv"
+	"strings"
+	"time"
 
-    log "github.com/sirupsen/logrus"
-    "golang.org/x/net/publicsuffix"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/publicsuffix"
 
-    "github.com/hammer-space/csi-plugin/pkg/common"
-    "github.com/jpillora/backoff"
+	"github.com/hammer-space/csi-plugin/pkg/common"
+	"github.com/jpillora/backoff"
 )
 
 const (
@@ -179,9 +179,11 @@ func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPor
 
 // Logs into Hammerspace Anvil Server
 func (client *HammerspaceClient) EnsureLogin() error {
-    resp, err := client.httpclient.PostForm(fmt.Sprintf("%s%s/login", client.endpoint, BasePath),
-        url.Values{"username": {client.username},
-            "password": {client.password}})
+    v := url.Values{}
+    v.Add("username", client.username);
+    v.Add("password", client.password);
+
+    resp, err := client.httpclient.PostForm(fmt.Sprintf("%s%s/login", client.endpoint, BasePath),v)
     if err != nil {
         return err
     }
@@ -353,7 +355,7 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 }
 
 func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, error) {
-    req, err := client.generateRequest("GET", "/shares/"+name, "")
+    req, err := client.generateRequest("GET", "/shares/"+url.PathEscape(name), "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
     if err != nil {
@@ -376,7 +378,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
 }
 
 func (client *HammerspaceClient) GetShareRawFields(name string) (map[string]interface{}, error) {
-    req, err := client.generateRequest("GET", "/shares/"+name, "")
+    req, err := client.generateRequest("GET", "/shares/"+url.PathEscape(name), "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
     if err != nil {
@@ -399,7 +401,7 @@ func (client *HammerspaceClient) GetShareRawFields(name string) (map[string]inte
 }
 
 func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
-    req, err := client.generateRequest("GET", "/files?path="+path, "")
+    req, err := client.generateRequest("GET", "/files?path="+url.PathEscape(path), "")
     statusCode, respBody, _, err := client.doRequest(*req)
 
     if err != nil {
@@ -704,6 +706,9 @@ func (client *HammerspaceClient) DeleteShare(name string, deleteDelay int64) err
         queryParams = queryParams + "&delete-delay=" + strconv.Itoa(int(deleteDelay))
     }
     req, err := client.generateRequest("DELETE", "/shares/"+url.PathEscape(name)+queryParams, "")
+    if err != nil {
+        return err
+    }
     statusCode, body, respHeaders, err := client.doRequest(*req)
     if err != nil {
         return err
