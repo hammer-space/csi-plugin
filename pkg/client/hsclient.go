@@ -35,6 +35,8 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/publicsuffix"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/jpillora/backoff"
@@ -448,6 +450,9 @@ func (client *HammerspaceClient) CreateShare(name string,
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
+    if len(name) > 80 {
+        return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
+    }
 
     share := common.ShareRequest{
         Name:          name,
@@ -525,7 +530,9 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
     if deleteDelay >= 0 {
         extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
     }
-
+    if len(name) > 80 {
+        return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
+    }
     ////// FIXME: Replace with new api to clone a snapshot to a new share
     share := common.ShareRequest{
         Name:          name,
