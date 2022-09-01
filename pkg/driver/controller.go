@@ -17,23 +17,23 @@ limitations under the License.
 package driver
 
 import (
-    "fmt"
-    "path"
-    "strconv"
-    "strings"
-    "time"
+	"fmt"
+	"path"
+	"strconv"
+	"strings"
+	"time"
 
-    "github.com/golang/protobuf/ptypes/timestamp"
-    "github.com/jpillora/backoff"
-    "k8s.io/kubernetes/pkg/util/slice"
+	"github.com/jpillora/backoff"
+	timestamp "google.golang.org/protobuf/types/known/timestamppb"
+	"k8s.io/kubernetes/pkg/util/slice"
 
-    "github.com/container-storage-interface/spec/lib/go/csi"
-    log "github.com/sirupsen/logrus"
-    "golang.org/x/net/context"
-    "google.golang.org/grpc/codes"
-    "google.golang.org/grpc/status"
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
-    "github.com/hammer-space/csi-plugin/pkg/common"
+	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 const (
@@ -646,7 +646,7 @@ func (d *CSIDriver) deleteShareBackedVolume(share *common.ShareResponse) error {
 
     deleteDelay := int64(-1)
     if v, exists := share.ExtendedInfo["csi_delete_delay"]; exists {
-        if exists {
+        if v > "0" {
             deleteDelay, err = strconv.ParseInt(v, 10, 64)
             if err != nil {
                 log.Warnf("csi_delete_delay extended info, %s, should be an integer, on share %s; falling back to cluster defaults",

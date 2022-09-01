@@ -9,4 +9,5 @@ csi-plugin
 .DS_Store
 .IDEA/
 .idea/
+.vscode
 go.sum

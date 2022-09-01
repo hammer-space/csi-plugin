@@ -17,19 +17,20 @@ limitations under the License.
 package driver
 
 import (
-    "fmt"
-    "golang.org/x/net/context"
-    "k8s.io/kubernetes/pkg/util/mount"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "strconv"
-    "syscall"
-    "github.com/container-storage-interface/spec/lib/go/csi"
-    "github.com/hammer-space/csi-plugin/pkg/common"
-    log "github.com/sirupsen/logrus"
-    "google.golang.org/grpc/codes"
-    "google.golang.org/grpc/status"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"syscall"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/hammer-space/csi-plugin/pkg/common"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"k8s.io/kubernetes/pkg/util/mount"
 )
 
 func (d *CSIDriver) NodeStageVolume(
@@ -494,6 +495,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 
     return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 }
+
 func (d *CSIDriver) NodeExpandVolume(
     ctx context.Context,
     req *csi.NodeExpandVolumeRequest) (
@@ -513,7 +515,10 @@ func (d *CSIDriver) NodeExpandVolume(
     volumeName := GetVolumeNameFromPath(req.GetVolumeId())
     share, _ := d.hsclient.GetShare(volumeName)
     if share != nil {
-        typeMount = true
+        typeMount = true;
+        if isMounted, _ := common.IsShareMounted(share.ExportPath); !isMounted {
+            return nil, status.Error(codes.FailedPrecondition, common.ShareNotMounted)
+        }
     } else {
         fileBacked = true
     }

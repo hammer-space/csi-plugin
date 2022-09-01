@@ -17,14 +17,13 @@ limitations under the License.
 package driver
 
 import (
-    "golang.org/x/net/context"
+	"golang.org/x/net/context"
 
-    "github.com/container-storage-interface/spec/lib/go/csi"
-    "github.com/golang/protobuf/ptypes/wrappers"
-    "google.golang.org/grpc/codes"
-    "google.golang.org/grpc/status"
-
-    common "github.com/hammer-space/csi-plugin/pkg/common"
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/hammer-space/csi-plugin/pkg/common"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 func (d *CSIDriver) GetPluginInfo(

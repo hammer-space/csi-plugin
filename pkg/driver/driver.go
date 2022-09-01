@@ -17,23 +17,24 @@ limitations under the License.
 package driver
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "github.com/hammer-space/csi-plugin/pkg/common"
-    "net"
-    "os"
-    "strconv"
-    "sync"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net"
+	"os"
+	"strconv"
+	"sync"
+	"time"
 
-    log "github.com/sirupsen/logrus"
+	"github.com/hammer-space/csi-plugin/pkg/common"
 
-    "github.com/container-storage-interface/spec/lib/go/csi"
-    client "github.com/hammer-space/csi-plugin/pkg/client"
-    "google.golang.org/grpc"
-    "google.golang.org/grpc/keepalive"
-    "google.golang.org/grpc/reflection"
+	log "github.com/sirupsen/logrus"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	client "github.com/hammer-space/csi-plugin/pkg/client"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/reflection"
 )
 
 type CSIDriver struct {

@@ -38,6 +38,7 @@ const (
     MissingBlockBackingShareName  = "blockBackingShareName must be provided when creating BlockVolumes"
     MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
     BlockVolumeSizeNotSpecified   = "Capacity must be specified for block volumes"
+    ShareNotMounted               = "Share is not in mounted state."
 
     InvalidExportOptions             = "Export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
     InvalidRootSquash                = "rootSquash must be a bool. Value received '%s'"
