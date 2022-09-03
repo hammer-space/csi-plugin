@@ -26,7 +26,7 @@ build-dev:
 
 build:
 	@echo "==> Building Docker Image Latest"
-	@docker build -t "hammerspaceinc/csi-plugin-ubi:latest" . -f Dockerfile
+	@docker build -t "hammerspaceinc/csi-plugin-ubi:latest" . -f Dockerfile --no-cache
 
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
