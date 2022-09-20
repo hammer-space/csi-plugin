@@ -36,7 +36,7 @@ spec:
       containers:
         - name: csi-provisioner
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-provisioner:v1.5.0
+          image: k8s.gcr.io/sig-storage/csi-provisioner:v2.1.2
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--timeout=60s"  # Recommended as shares may take some time to create
@@ -49,7 +49,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-attacher
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-attacher:v2.1.0
+          image: k8s.gcr.io/sig-storage/csi-attacher:v3.4.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -61,7 +61,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-snapshotter
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-snapshotter:v2.0.1
+          image: k8s.gcr.io/sig-storage/csi-snapshotter:v4.2.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -73,7 +73,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-resizer
           imagePullPolicy: Always
-          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.4.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -90,7 +90,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.1
+          image: hammerspaceinc/csi-plugin:v1.2.3
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock
@@ -177,6 +177,9 @@ rules:
     resources: ["volumeattachments"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments/status"]
+    verbs: ["patch"]
+  - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch", "update"]
 ---
@@ -214,7 +217,7 @@ spec:
       containers:
         - name: csi-resizer
           imagePullPolicy: Always
-          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.4.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -226,7 +229,7 @@ spec:
               mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-node-driver-registrar:v1.2.0
+          image: k8s.gcr.io/sig-storage/csi-node-driver-registrar:v2.5.0
           lifecycle:
             preStop:
               exec:
@@ -259,7 +262,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.1
+          image: hammerspaceinc/csi-plugin:v1.2.0
           env:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock
