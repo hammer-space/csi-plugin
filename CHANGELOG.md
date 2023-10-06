@@ -6,6 +6,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.4
+### Added
+- Fixed error while creating share to track task status.
+- Added check for nfs mount before attempting to delete nfs mount volume.
+- Update docker dev file to use go lang v:1.21 and gocsi v:1.2.2 
+
 ## 1.2.3
 ### Added
 - Updated the deprecated module
