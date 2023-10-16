@@ -69,24 +69,24 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) (string) {
 func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
     backingShare, err := d.hsclient.GetShare(backingShareName)
     if err != nil {
-        return status.Errorf(codes.Internal, err.Error())
+        return status.Errorf(codes.NotFound, err.Error())
     }
-    if err != nil {
-        return status.Errorf(codes.Internal, err.Error())
-    }
-    backingDir := common.ShareStagingDir + backingShare.ExportPath
-    // Mount backing share
-    if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
-        mo := []string{}
-        err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, mo)
-        if err != nil {
-            log.Errorf("failed to mount backing share, %v", err)
-            return err
+    if backingShare != nil {
+        backingDir := common.ShareStagingDir + backingShare.ExportPath
+        // Mount backing share
+        if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
+            mo := []string{}
+            err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, mo)
+            if err != nil {
+                log.Errorf("failed to mount backing share, %v", err)
+                return err
+            }
+    
+            log.Infof("mounted backing share, %s", backingDir)
+        } else {
+            log.Infof("backing share already mounted, %s", backingDir)
         }
-
-        log.Infof("mounted backing share, %s", backingDir)
-    } else {
-        log.Infof("backing share already mounted, %s", backingDir)
+        return nil
     }
     return nil
 }
