@@ -356,6 +356,72 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 	return objectiveNames, nil
 }
 
+func (client *HammerspaceClient) ListVolumes() ([]common.VolumeResponse, error) {
+	req, err := client.generateRequest("GET", "/base-storage-volumes", "")
+	statusCode, respBody, _, err := client.doRequest(*req)
+
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+	if statusCode != 200 {
+		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+	}
+
+	var volumes []common.VolumeResponse
+	err = json.Unmarshal([]byte(respBody), &volumes)
+	if err != nil {
+		log.Error("Error parsing JSON response: " + err.Error())
+	}
+	log.Debug(fmt.Sprintf("Found %d volumes", len(volumes)))
+
+	return volumes, nil
+}
+
+func (client *HammerspaceClient) ListSnapshots() ([]common.SnapshotResponse, error) {
+	// get share snaphsots list
+	req1, err := client.generateRequest("GET", "/share-snapshots", "")
+	statusCode1, respBody1, _, err1 := client.doRequest(*req1)
+
+	if err1 != nil {
+		log.Error(err1)
+		return nil, err1
+	}
+	if statusCode1 != 200 {
+		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode1, 200))
+	}
+	var shareSnapshots []common.SnapshotResponse
+	err = json.Unmarshal([]byte(respBody1), &shareSnapshots)
+	if err != nil {
+		log.Error("Error parsing JSON response: " + err.Error())
+	}
+	// get file snapshots list
+	req2, err := client.generateRequest("GET", "/file-snapshots", "")
+	statusCode2, respBody2, _, err2 := client.doRequest(*req2)
+
+	if err2 != nil {
+		log.Error(err2)
+		return nil, err2
+	}
+	if statusCode2 != 200 {
+		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode2, 200))
+	}
+	var fileSnapshots []common.SnapshotResponse
+	err = json.Unmarshal([]byte(respBody2), &fileSnapshots)
+	if err != nil {
+		log.Error("Error parsing JSON response: " + err.Error())
+	}
+
+	// combine both file and share snapshots list
+	allSnapshots := make([]common.SnapshotResponse, len(shareSnapshots)+len(fileSnapshots))
+	for _, element := range fileSnapshots {
+		allSnapshots = append(shareSnapshots, element) //using append function append slices
+	}
+	log.Debug(fmt.Sprintf("Found %d snapshots", len(allSnapshots)))
+
+	return allSnapshots, nil
+}
+
 func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, error) {
 	req, err := client.generateRequest("GET", "/shares/"+url.PathEscape(name), "")
 	statusCode, respBody, _, err := client.doRequest(*req)

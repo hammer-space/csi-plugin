@@ -12,11 +12,11 @@ Implements the Identity, Node, and Controller interfaces as single Golang binary
 * CREATE_DELETE_SNAPSHOT
 * STAGE_UNSTAGE_VOLUME
 * GET_VOLUME_STATS
+* LIST_VOLUMES
+* EXPAND_VOLUME
+* LIST_SNAPSHOTS
 
 #### Unsupported Capabilities
-* LIST_VOLUMES
-* LIST_SNAPSHOTS
-* EXPAND_VOLUME
 * CLONE_VOLUME
 
 ## Volume Types
