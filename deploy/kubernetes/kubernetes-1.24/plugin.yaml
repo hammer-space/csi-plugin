@@ -36,7 +36,7 @@ spec:
       containers:
         - name: csi-provisioner
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-provisioner:v1.5.0
+          image: us.gcr.io/k8s-artifacts-prod/sig-storage/csi-provisioner:v3.2.2
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--timeout=60s"  # Recommended as shares may take some time to create
@@ -49,7 +49,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-attacher
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-attacher:v2.1.0
+          image: us.gcr.io/k8s-artifacts-prod/sig-storage/csi-attacher:v3.5.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -61,7 +61,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-snapshotter
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-snapshotter:v2.0.1
+          image: us.gcr.io/k8s-artifacts-prod/sig-storage/csi-snapshotter:v6.2.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -73,7 +73,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-resizer
           imagePullPolicy: Always
-          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.7.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -174,7 +174,7 @@ rules:
     resources: ["customresourcedefinitions"]
     verbs: ["create", "list", "watch", "delete"]
   - apiGroups: ["storage.k8s.io"]
-    resources: ["volumeattachments"]
+    resources: ["volumeattachments", "volumeattachments/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
@@ -214,7 +214,7 @@ spec:
       containers:
         - name: csi-resizer
           imagePullPolicy: Always
-          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.7.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -226,7 +226,7 @@ spec:
               mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
-          image: quay.io/k8scsi/csi-node-driver-registrar:v1.2.0
+          image: us.gcr.io/k8s-artifacts-prod/sig-storage/csi-node-driver-registrar:v2.6.3
           lifecycle:
             preStop:
               exec:
@@ -346,8 +346,9 @@ rules:
     resources: ["persistentvolumes", "persistentvolumeclaims", "persistentvolumeclaims/status", "events"]
     verbs: ["get", "list", "watch", "update", "patch"]
   - apiGroups: ["storage.k8s.io"]
-    resources: ["volumeattachments"]
+    resources: ["volumeattachments", "volumeattachments/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
+
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -361,4 +362,19 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: csi-node
+  apiGroup: rbac.authorization.k8s.io
+
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-volumeattachment-status-binding
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: csi-provisioner
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner-volumeattachment-status
   apiGroup: rbac.authorization.k8s.io
