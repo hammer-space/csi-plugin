@@ -51,7 +51,7 @@ type HSVolume struct {
 // We must create separate req and response objects since the API does not allow
 // specifying unused fields
 type ClusterResponse struct {
-	Capacity map[string]string `json:"capacity"`
+	Capacity map[string]int64 `json:"capacity"`
 }
 
 type ShareRequest struct {

@@ -990,7 +990,7 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
-	free, err := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
+	free := cluster.Capacity["free"]
 	if err != nil {
 		log.Error("Error parsing free cluster capacity: " + err.Error())
 	}
