@@ -465,13 +465,13 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 			return nil, status.Error(codes.NotFound, common.ShareNotFound)
 		}
 
-		available, _ := strconv.ParseInt(share.Space.Available, 10, 64)
-		used, _ := strconv.ParseInt(share.Space.Used, 10, 64)
-		total, _ := strconv.ParseInt(share.Space.Total, 10, 64)
+		available := share.Space.Available
+		used := share.Space.Used
+		total := share.Space.Total
 
-		inodes_available, _ := strconv.ParseInt(share.Inodes.Available, 10, 64)
-		inodes_used, _ := strconv.ParseInt(share.Inodes.Used, 10, 64)
-		inodes_total, _ := strconv.ParseInt(share.Inodes.Total, 10, 64)
+		inodes_available := share.Inodes.Available
+		inodes_used := share.Inodes.Used
+		inodes_total := share.Inodes.Total
 
 		return &csi.NodeGetVolumeStatsResponse{
 			Usage: []*csi.VolumeUsage{

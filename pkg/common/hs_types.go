@@ -75,25 +75,25 @@ type ShareResponse struct {
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
 	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit,omitifempty,string"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+	Size          int64                `json:"shareSizeLimit`
+	ExportOptions []ShareExportOptions `json:"exportOptions"`
 	Space         ShareSpaceResponse   `json:"space"`
 	Inodes        ShareInodesResponse  `json:"inodes"`
 	Objectives    ObjectivesResponse   `json:"objectives"`
 }
 
 type ShareSpaceResponse struct {
-	Used      string `json:"used"`
-	Total     string `json:"total"`
-	Available string `json:"available"`
-	percent   int
+	Used      int64 `json:"used"`
+	Total     int64 `json:"total"`
+	Available int64 `json:"available"`
+	Percent   int64 `json:"percent"`
 }
 
 type ShareInodesResponse struct {
-	Used      string `json:"used"`
-	Total     string `json:"total"`
-	Available string `json:"available"`
-	percent   int
+	Used      int64 `json:"used"`
+	Total     int64 `json:"total"`
+	Available int64 `json:"available"`
+	Percent   int64 `json:"percent"`
 }
 
 type ShareExportOptions struct {

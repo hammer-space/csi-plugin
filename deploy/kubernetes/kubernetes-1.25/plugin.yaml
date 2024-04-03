@@ -1,0 +1,364 @@
+#### Controller Service
+---
+# needed for StatefulSet
+kind: Service
+apiVersion: v1
+metadata:
+  name: csi-provisioner
+  namespace: kube-system
+  labels:
+    app: csi-provisioner
+spec:
+  selector:
+    app: csi-provisioner
+  ports:
+    - name: dummy
+      port: 12345
+---
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: csi-provisioner
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: csi-provisioner
+  serviceName: "csi-provisioner"
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: csi-provisioner
+    spec:
+      serviceAccount: csi-provisioner
+      hostNetwork: true
+      containers:
+        - name: csi-provisioner
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-provisioner:v1.5.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--timeout=60s"  # Recommended as shares may take some time to create
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: csi-attacher
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-attacher:v2.1.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: csi-snapshotter
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-snapshotter:v2.0.1
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: csi-resizer
+          imagePullPolicy: Always
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: hs-csi-plugin-controller
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: hammerspaceinc/csi-plugin:v1.2.5
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: HS_TLS_VERIFY
+              value: "false"
+            - name: CSI_MAJOR_VERSION
+              value: "1"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+            - name: staging-dir
+              mountPath: /tmp
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+        - name: staging-dir
+          hostPath:
+            path: /tmp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: csi-provisioner
+  namespace: kube-system
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "patch", "list", "watch", "create", "delete", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "persistentvolumeclaims/status"]
+    verbs: ["get", "patch", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["list", "watch", "create", "update", "delete", "get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "list", "watch", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch", "update"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: csi-provisioner
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner
+  apiGroup: rbac.authorization.k8s.io
+#### Node service
+---
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-node
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: csi-node
+  template:
+    metadata:
+      labels:
+        app: csi-node
+    spec:
+      serviceAccount: csi-node
+      hostNetwork: true
+      containers:
+        - name: csi-resizer
+          imagePullPolicy: Always
+          image: k8s.gcr.io/sig-storage/csi-resizer:v1.2.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+        - name: driver-registrar
+          imagePullPolicy: Always
+          image: quay.io/k8scsi/csi-node-driver-registrar:v1.2.0
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "rm -rf /$(REG_SOCKET)"]
+          args:
+            - "--v=5"
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--kubelet-registration-path=$(REG_SOCKET)"
+          securityContext:
+            privileged: true
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: REG_SOCKET
+              value: /var/lib/kubelet/plugins_registry/com.hammerspace.csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: hs-csi-plugin-node
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: hammerspaceinc/csi-plugin:v1.2.5
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HS_TLS_VERIFY
+              value: "false"
+            - name: CSI_MAJOR_VERSION
+              value: "1"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+              mountPropagation: Bidirectional
+            - name: mountpoint-dir
+              mountPath: /var/lib/kubelet/
+              mountPropagation: Bidirectional
+            - name: dev-dir
+              mountPath: /dev
+            - name: staging-dir
+              mountPath: /tmp
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/com.hammerspace.csi
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet/
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: staging-dir
+          hostPath:
+            path: /tmp
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: csi-node
+  namespace: kube-system
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-node
+  namespace: kube-system
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "update"]
+  - apiGroups: [""]
+    resources: ["namespaces", "events"]
+    verbs: ["get", "list", "create"]
+  - apiGroups: [""]
+    resources: ["persistentvolumes", "persistentvolumeclaims", "persistentvolumeclaims/status", "events"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-node
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: csi-node
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-node
+  apiGroup: rbac.authorization.k8s.io

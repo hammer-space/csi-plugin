@@ -299,7 +299,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 	if hsVolume.Size <= 0 {
 		return status.Error(codes.InvalidArgument, common.BlockVolumeSizeNotSpecified)
 	}
-	available, _ := strconv.ParseInt(backingShare.Space.Available, 10, 64)
+	available := backingShare.Space.Available
 	if hsVolume.Size > available {
 		return status.Errorf(codes.OutOfRange, common.OutOfCapacity, hsVolume.Size, available)
 	}
@@ -495,7 +495,7 @@ func (d *CSIDriver) CreateVolume(
 					return nil, status.Error(codes.Internal, err.Error())
 				}
 			} else {
-				available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+				available = backingShare.Space.Available
 			}
 		} else {
 			available, err = d.hsclient.GetClusterAvailableCapacity()
@@ -774,7 +774,7 @@ func (d *CSIDriver) ControllerExpandVolume(
 				if err != nil {
 					available = 0
 				} else {
-					available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+					available = backingShare.Space.Available
 				}
 
 				if available-sizeDiff < 0 {
@@ -804,7 +804,7 @@ func (d *CSIDriver) ControllerExpandVolume(
 		if err != nil {
 			currentSize = 0
 		} else {
-			currentSize, _ = strconv.ParseInt(share.Space.Available, 10, 64)
+			currentSize = share.Space.Available
 		}
 
 		if currentSize < requestedSize {
@@ -985,7 +985,7 @@ func (d *CSIDriver) GetCapacity(
 		if err != nil {
 			available = 0
 		} else {
-			available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+			available = backingShare.Space.Available
 		}
 
 	} else {
