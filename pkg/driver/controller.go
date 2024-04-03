@@ -299,7 +299,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 	if hsVolume.Size <= 0 {
 		return status.Error(codes.InvalidArgument, common.BlockVolumeSizeNotSpecified)
 	}
-	available, _ := strconv.ParseInt(backingShare.Space.Available, 10, 64)
+	available := backingShare.Space.Available
 	if hsVolume.Size > available {
 		return status.Errorf(codes.OutOfRange, common.OutOfCapacity, hsVolume.Size, available)
 	}
@@ -495,7 +495,7 @@ func (d *CSIDriver) CreateVolume(
 					return nil, status.Error(codes.Internal, err.Error())
 				}
 			} else {
-				available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+				available = backingShare.Space.Available
 			}
 		} else {
 			available, err = d.hsclient.GetClusterAvailableCapacity()
@@ -774,7 +774,7 @@ func (d *CSIDriver) ControllerExpandVolume(
 				if err != nil {
 					available = 0
 				} else {
-					available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+					available = backingShare.Space.Available
 				}
 
 				if available-sizeDiff < 0 {
@@ -804,7 +804,7 @@ func (d *CSIDriver) ControllerExpandVolume(
 		if err != nil {
 			currentSize = 0
 		} else {
-			currentSize, _ = strconv.ParseInt(share.Space.Available, 10, 64)
+			currentSize = share.Space.Available
 		}
 
 		if currentSize < requestedSize {
@@ -906,8 +906,36 @@ func (d *CSIDriver) ListVolumes(
 	ctx context.Context,
 	req *csi.ListVolumesRequest) (
 	*csi.ListVolumesResponse, error) {
+	// get list of volumes
+	if req.MaxEntries < 0 {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
+			"[ListVolumes] Invalid max entries request %v, must not be negative ", req.MaxEntries))
+	}
 
-	return nil, status.Error(codes.Unimplemented, "")
+	vlist, err := d.hsclient.ListVolumes()
+	if err != nil {
+		return nil, status.Error(codes.Internal, fmt.Sprintf("ListVolumes failed with error %v", err))
+	}
+
+	ventries := make([]*csi.ListVolumesResponse_Entry, 0, len(vlist))
+	publishedNodeIds := make([]string, 0, len(ventries))
+	for _, v := range vlist {
+		capacity, _ := strconv.Atoi(v.Capacity)
+		ventry := csi.ListVolumesResponse_Entry{
+			Volume: &csi.Volume{
+				VolumeId:      v.Name,
+				CapacityBytes: int64(capacity),
+			},
+			Status: &csi.ListVolumesResponse_VolumeStatus{
+				PublishedNodeIds: publishedNodeIds,
+			},
+		}
+
+		ventries = append(ventries, &ventry)
+	}
+	return &csi.ListVolumesResponse{
+		Entries: ventries,
+	}, nil
 }
 
 func (d *CSIDriver) GetCapacity(
@@ -957,7 +985,7 @@ func (d *CSIDriver) GetCapacity(
 		if err != nil {
 			available = 0
 		} else {
-			available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
+			available = backingShare.Space.Available
 		}
 
 	} else {
@@ -987,15 +1015,13 @@ func (d *CSIDriver) ControllerGetCapabilities(
 				},
 			},
 		},
-		/*
-		   {
-		       Type: &csi.ControllerServiceCapability_Rpc{
-		           Rpc: &csi.ControllerServiceCapability_RPC{
-		               Type: csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
-		           },
-		       },
-		   },
-		*/
+		{
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_LIST_VOLUMES,
+				},
+			},
+		},
 		{
 			Type: &csi.ControllerServiceCapability_Rpc{
 				Rpc: &csi.ControllerServiceCapability_RPC{
@@ -1003,15 +1029,13 @@ func (d *CSIDriver) ControllerGetCapabilities(
 				},
 			},
 		},
-
-		/*		{
-		    Type: &csi.ControllerServiceCapability_Rpc{
-		        Rpc: &csi.ControllerServiceCapability_RPC{
-		            Type: csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
-		        },
-		    },
-		},*/
-
+		{
+			Type: &csi.ControllerServiceCapability_Rpc{
+				Rpc: &csi.ControllerServiceCapability_RPC{
+					Type: csi.ControllerServiceCapability_RPC_LIST_SNAPSHOTS,
+				},
+			},
+		},
 		{
 			Type: &csi.ControllerServiceCapability_Rpc{
 				Rpc: &csi.ControllerServiceCapability_RPC{
@@ -1133,5 +1157,32 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 func (d *CSIDriver) ListSnapshots(ctx context.Context,
 	req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 
-	return nil, status.Error(codes.Unimplemented, "")
+	if req.MaxEntries < 0 {
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
+			"[ListSnapshots] Invalid max entries request %v, must not be negative ", req.MaxEntries))
+	}
+
+	slist, err := d.hsclient.ListSnapshots()
+	if err != nil {
+		return nil, status.Error(codes.Internal, fmt.Sprintf("ListSnapshots failed with error %v", err))
+	}
+
+	ventries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(slist))
+	for _, v := range slist {
+		createTime, _ := strconv.Atoi(v.Created)
+		ventry := csi.ListSnapshotsResponse_Entry{
+			Snapshot: &csi.Snapshot{
+				SnapshotId:     v.Name,
+				SourceVolumeId: v.Name,
+				CreationTime: &timestamp.Timestamp{
+					Seconds: int64(createTime),
+				},
+			},
+		}
+
+		ventries = append(ventries, &ventry)
+	}
+	return &csi.ListSnapshotsResponse{
+		Entries: ventries,
+	}, nil
 }
