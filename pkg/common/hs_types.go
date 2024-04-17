@@ -51,7 +51,7 @@ type HSVolume struct {
 // We must create separate req and response objects since the API does not allow
 // specifying unused fields
 type ClusterResponse struct {
-	Capacity map[string]int64 `json:"capacity"`
+	Capacity map[string]string `json:"capacity"`
 }
 
 type ShareRequest struct {
@@ -59,8 +59,8 @@ type ShareRequest struct {
 	ExportPath    string               `json:"path"`
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	Size          int64                `json:"shareSizeLimit,omitifempty"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+	Size          string               `json:"shareSizeLimit,omitempty"`
+	ExportOptions []ShareExportOptions `json:"exportOptions,omitempty"`
 }
 
 type ShareUpdateRequest struct {
@@ -75,7 +75,7 @@ type ShareResponse struct {
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
 	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit`
+	Size          int64                `json:"shareSizeLimit"`
 	ExportOptions []ShareExportOptions `json:"exportOptions"`
 	Space         ShareSpaceResponse   `json:"space"`
 	Inodes        ShareInodesResponse  `json:"inodes"`
@@ -83,17 +83,17 @@ type ShareResponse struct {
 }
 
 type ShareSpaceResponse struct {
-	Used      int64 `json:"used"`
-	Total     int64 `json:"total"`
-	Available int64 `json:"available"`
-	Percent   int64 `json:"percent"`
+	Used      string `json:"used"`
+	Total     string `json:"total"`
+	Available string `json:"available"`
+	Percent   string `json:"percent"`
 }
 
 type ShareInodesResponse struct {
-	Used      int64 `json:"used"`
-	Total     int64 `json:"total"`
-	Available int64 `json:"available"`
-	Percent   int64 `json:"percent"`
+	Used      string `json:"used"`
+	Total     string `json:"total"`
+	Available string `json:"available"`
+	Percent   string `json:"percent"`
 }
 
 type ShareExportOptions struct {

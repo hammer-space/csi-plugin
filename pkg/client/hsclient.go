@@ -31,6 +31,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,9 @@ const (
 	taskPollTimeout     = 3600 * time.Second // Seconds
 	taskPollIntervalCap = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
 )
+
+var wg sync.WaitGroup
+var mutex sync.Mutex
 
 type HammerspaceClient struct {
 	username   string
@@ -109,26 +113,30 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
-	// Local random function
-	random_select := func() bool {
-		r := make(chan struct{})
-		close(r)
-		select {
-		case <-r:
-			return false
-		case <-r:
-			return true
-		}
-	}
 	floatingip := ""
 	for _, p := range clusters.PortalFloatingIps {
-		floatingip = p.Address
-		// If there are more than 1 floating IPs configured, randomly select one
-		rr := random_select()
-		if rr == true {
-			break
-		}
+		wg.Add(1)
+		go func(floatingip string) {
+			defer wg.Done()
+
+			// check if showmount gives a response
+			exports, err := common.GetNFSExports(floatingip)
+			if err != nil {
+				log.Infof("Could not get exports for data-portal at %s. Error: %v", floatingip, err)
+				return
+			}
+
+			// Check if exports has any values
+			if len(exports) > 0 {
+				mutex.Lock()
+				floatingip = p.Address // Update the floating IP
+				mutex.Unlock()
+				log.Infof("Found floating IP data-portal %s.", floatingip)
+			}
+		}(p.Address)
 	}
+
+	wg.Wait()
 	return floatingip, nil
 }
 
@@ -528,7 +536,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 		Comment:       comment,
 	}
 	if size > 0 {
-		share.Size = size
+		share.Size = strconv.FormatInt(size, 10)
 	}
 
 	shareString := new(bytes.Buffer)
@@ -608,7 +616,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 		Comment:       comment,
 	}
 	if size > 0 {
-		share.Size = size
+		share.Size = strconv.FormatInt(size, 10)
 	}
 
 	shareString := new(bytes.Buffer)
@@ -990,7 +998,7 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
-	free := cluster.Capacity["free"]
+	free, err := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
 	if err != nil {
 		log.Error("Error parsing free cluster capacity: " + err.Error())
 	}
