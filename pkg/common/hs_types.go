@@ -86,14 +86,14 @@ type ShareSpaceResponse struct {
 	Used      string `json:"used"`
 	Total     string `json:"total"`
 	Available string `json:"available"`
-	Percent   string `json:"percent"`
+	Percent   int64  `json:"percent"`
 }
 
 type ShareInodesResponse struct {
 	Used      string `json:"used"`
 	Total     string `json:"total"`
 	Available string `json:"available"`
-	Percent   string `json:"percent"`
+	Percent   int64  `json:"percent"`
 }
 
 type ShareExportOptions struct {
