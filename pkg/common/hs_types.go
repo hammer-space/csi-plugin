@@ -59,8 +59,8 @@ type ShareRequest struct {
 	ExportPath    string               `json:"path"`
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	Size          int64                `json:"shareSizeLimit,omitifempty"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+	Size          int64                `json:"shareSizeLimit,omitempty"`
+	ExportOptions []ShareExportOptions `json:"exportOptions,omitempty"`
 }
 
 type ShareUpdateRequest struct {
@@ -75,7 +75,7 @@ type ShareResponse struct {
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
 	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit`
+	Size          int64                `json:"shareSizeLimit"`
 	ExportOptions []ShareExportOptions `json:"exportOptions"`
 	Space         ShareSpaceResponse   `json:"space"`
 	Inodes        ShareInodesResponse  `json:"inodes"`
@@ -170,15 +170,15 @@ type DataPortalNode struct {
 
 type VolumeResponse struct {
 	Name               string `json:"name"`
-	Created            string `json:"created"`
-	Modified           string `json:"modified"`
+	Created            int64  `json:"created"`
+	Modified           int64  `json:"modified"`
 	OperatingState     string `json:"operState"`
 	StorageVolumeState string `json:"storageVolumeState"`
-	Capacity           string `json:"effectiveTotalCapacity"`
+	Capacity           int64  `json:"effectiveTotalCapacity"`
 }
 
 type SnapshotResponse struct {
 	Name     string `json:"name"`
-	Created  string `json:"created"`
-	Modified string `json:"modified"`
+	Created  int64  `json:"created"`
+	Modified int64  `json:"modified"`
 }

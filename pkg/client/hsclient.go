@@ -19,6 +19,7 @@ package client
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -50,7 +51,7 @@ const (
 )
 
 var wg sync.WaitGroup
-var mutex sync.Mutex
+var mu sync.Mutex
 
 type HammerspaceClient struct {
 	username   string
@@ -115,31 +116,54 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
-	floatingip := ""
+	var floatingIP string
+	result := make(chan string)
+	done := make(chan error) // Channel to signal when all goroutines have finished or when a timeout occurs
+	const CommandExecTimeout = 30 * time.Second
+	// Create a context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), CommandExecTimeout)
+	defer cancel()
+
 	for _, p := range clusters.PortalFloatingIps {
 		wg.Add(1)
-		go func(floatingip string) {
+		go func(ctx context.Context, address string) {
 			defer wg.Done()
-
-			// check if showmount gives a response
-			exports, err := common.GetNFSExports(floatingip)
+			ok, err := common.CheckNFSExports(ctx, address)
 			if err != nil {
-				log.Infof("Could not get exports for data-portal at %s. Error: %v", floatingip, err)
+				fmt.Printf("Could not get exports for data-portal at %s. Error: %v\n", address, err)
 				return
 			}
-
-			// Check if exports has any values
-			if len(exports) > 0 {
-				mutex.Lock()
-				floatingip = p.Address // Update the floating IP
-				mutex.Unlock()
-				log.Infof("Found floating IP data-portal %s.", floatingip)
+			if ok {
+				mu.Lock()
+				defer mu.Unlock()
+				if floatingIP == "" {
+					floatingIP = address
+					result <- address
+				}
 			}
-		}(p.Address)
+		}(ctx, p.Address)
 	}
 
+	go func() {
+		wg.Wait()
+		close(result)
+		done <- nil // Signal that all goroutines have finished
+	}()
+
+	select {
+	case floatingIP = <-result:
+		fmt.Printf("Floating IP assigned: %s\n", floatingIP)
+	case <-ctx.Done():
+		fmt.Printf("No available floating IP found within timeout\n")
+	case err := <-done:
+		if err != nil {
+			fmt.Printf("Process finished with error: %v\n", err)
+		}
+	}
+
+	// Keep the main goroutine running until all goroutines finish
 	wg.Wait()
-	return floatingip, nil
+	return floatingIP, nil
 }
 
 // GetDataPortals returns a list of operational data-portals
@@ -383,8 +407,12 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 
 func (client *HammerspaceClient) ListVolumes() ([]common.VolumeResponse, error) {
 	req, err := client.generateRequest("GET", "/base-storage-volumes", "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
 
+	statusCode, respBody, _, err := client.doRequest(*req)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -767,6 +795,10 @@ func (client *HammerspaceClient) UpdateShareSize(name string,
 	json.NewEncoder(shareString).Encode(share)
 
 	req, err := client.generateRequest("PUT", "/shares/"+name, shareString.String())
+	if err != nil {
+		log.Error(err)
+		return err
+	}
 	statusCode, _, respHeaders, err := client.doRequest(*req)
 
 	if err != nil {

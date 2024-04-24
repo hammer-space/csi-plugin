@@ -89,7 +89,7 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	if exportOptionsParam, exists := params["exportOptions"]; exists {
 		if exists {
 			exportOptionsList := strings.Split(exportOptionsParam, ";")
-			vParams.ExportOptions = make([]common.ShareExportOptions, len(exportOptionsList), len(exportOptionsList))
+			vParams.ExportOptions = make([]common.ShareExportOptions, len(exportOptionsList))
 			for i, o := range exportOptionsList {
 				options := strings.Split(o, ",")
 				//assert options is len 3
@@ -353,7 +353,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 	}
 	startTime := time.Now()
 	var backingFileExists bool
-	for time.Now().Sub(startTime) < (10 * time.Minute) {
+	for time.Since(startTime) < (10 * time.Minute) {
 		dur := b.Duration()
 		time.Sleep(dur)
 
@@ -923,11 +923,10 @@ func (d *CSIDriver) ListVolumes(
 	ventries := make([]*csi.ListVolumesResponse_Entry, 0, len(vlist))
 	publishedNodeIds := make([]string, 0, len(ventries))
 	for _, v := range vlist {
-		capacity, _ := strconv.Atoi(v.Capacity)
 		ventry := csi.ListVolumesResponse_Entry{
 			Volume: &csi.Volume{
 				VolumeId:      v.Name,
-				CapacityBytes: int64(capacity),
+				CapacityBytes: v.Capacity,
 			},
 			Status: &csi.ListVolumesResponse_VolumeStatus{
 				PublishedNodeIds: publishedNodeIds,
@@ -1172,13 +1171,12 @@ func (d *CSIDriver) ListSnapshots(ctx context.Context,
 
 	ventries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(slist))
 	for _, v := range slist {
-		createTime, _ := strconv.Atoi(v.Created)
 		ventry := csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SnapshotId:     v.Name,
 				SourceVolumeId: v.Name,
 				CreationTime: &timestamp.Timestamp{
-					Seconds: int64(createTime),
+					Seconds: v.Created,
 				},
 			},
 		}
