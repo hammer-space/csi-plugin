@@ -35,7 +35,7 @@ type HSVolume struct {
 	Objectives             []string
 	BlockBackingShareName  string
 	MountBackingShareName  string
-	Size                   int64
+	Size                   string
 	Name                   string
 	Path                   string
 	VolumeMode             string
@@ -75,7 +75,7 @@ type ShareResponse struct {
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
 	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit"`
+	Size          string               `json:"shareSizeLimit"`
 	ExportOptions []ShareExportOptions `json:"exportOptions"`
 	Space         ShareSpaceResponse   `json:"space"`
 	Inodes        ShareInodesResponse  `json:"inodes"`
@@ -130,7 +130,7 @@ type TaskParamsMap struct {
 type File struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	Size int64  `json:"size,string"`
+	Size string `json:"size"`
 }
 
 type FileSnapshot struct {

@@ -119,19 +119,19 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		go func(floatingip string) {
 			defer wg.Done()
 
-			// check if showmount gives a response
-			exports, err := common.GetNFSExports(floatingip)
+			// check if rpcinfo gives a response
+			ok, err := common.CheckNFSExports(floatingip)
 			if err != nil {
-				log.Infof("Could not get exports for data-portal at %s. Error: %v", floatingip, err)
+				log.Warnf("Could not get exports for data-portal at %s. Error: %v", floatingip, err)
 				return
 			}
 
 			// Check if exports has any values
-			if len(exports) > 0 {
+			if ok {
 				mutex.Lock()
 				floatingip = p.Address // Update the floating IP
 				mutex.Unlock()
-				log.Infof("Found floating IP data-portal %s.", floatingip)
+				log.Infof("Found floating IP data-portal %s", floatingip)
 			}
 		}(p.Address)
 	}
@@ -303,11 +303,15 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			}
 		}
 	}
-	return false, errors.New(fmt.Sprintf("Task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status))
+	return false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
 }
 
 func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 	req, err := client.generateRequest("GET", "/shares", "")
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -315,7 +319,7 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var shares []common.ShareResponse
@@ -337,7 +341,7 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var objs []common.ClusterObjectiveResponse
@@ -493,7 +497,7 @@ func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var file common.File
 	err = json.Unmarshal([]byte(respBody), &file)
@@ -510,7 +514,7 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
 
 func (client *HammerspaceClient) CreateShare(name string,
 	exportPath string,
-	size int64, //size in bytes
+	size string, //size in bytes
 	objectives []string,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
@@ -535,8 +539,9 @@ func (client *HammerspaceClient) CreateShare(name string,
 		ExtendedInfo:  extendedInfo,
 		Comment:       comment,
 	}
-	if size > 0 {
-		share.Size = strconv.FormatInt(size, 10)
+	i, _ := strconv.Atoi(size)
+	if i > 0 {
+		share.Size = size
 	}
 
 	shareString := new(bytes.Buffer)
@@ -589,7 +594,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 
 func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 	exportPath string,
-	size int64, //size in bytes
+	size string, //size in bytes
 	objectives []string,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
@@ -615,8 +620,9 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 		ExtendedInfo:  extendedInfo,
 		Comment:       comment,
 	}
-	if size > 0 {
-		share.Size = strconv.FormatInt(size, 10)
+	i, _ := strconv.ParseInt(size, 10, 64)
+	if i > 0 {
+		share.Size = size
 	}
 
 	shareString := new(bytes.Buffer)
@@ -678,7 +684,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName strin
 		return false, err
 	}
 	if statusCode != 200 {
-		return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var tasks []common.Task
 	err = json.Unmarshal([]byte(respBody), &tasks)
@@ -727,16 +733,14 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
 			//FIXME: err is not set here
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
-			return errors.New(fmt.Sprint("failed to set objective"))
+			return errors.New("failed to set objective")
 		}
 	}
 
 	return nil
 }
 
-func (client *HammerspaceClient) UpdateShareSize(name string,
-	size int64, //size in bytes
-) error {
+func (client *HammerspaceClient) UpdateShareSize(name string, size string) error {
 
 	log.Debugf("Update share size : %s to %v", name, size)
 
