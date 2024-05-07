@@ -182,7 +182,7 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 	sizeStr := strconv.FormatInt(size, 10)
 	loopdev, err := determineLoopDeviceFromBackingFile(pathname)
 	if err != nil {
-		//        log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
+		// log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
 		return err
 	}
 	// Refresh the loop device size with losetup -c
@@ -221,8 +221,20 @@ func FormatDevice(device, fsType string) error {
 
 func DeleteFile(pathname string) error {
 	log.Infof("deleting file '%s'", pathname)
-	err := os.Remove(pathname)
-	if err != nil {
+
+	// Check if the file exists
+	if _, err := os.Stat(pathname); err != nil {
+		// If the file does not exist, return without an error
+		if os.IsNotExist(err) {
+			log.Errorf("file '%s' does not exist", pathname)
+			return nil
+		}
+		// If there was an error other than the file not existing, return it
+		return err
+	}
+
+	// Delete the file
+	if err := os.Remove(pathname); err != nil {
 		return err
 	}
 
@@ -307,70 +319,63 @@ func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
 }
 
 func GetNFSExports(address string) ([]string, error) {
-	output, err := ExecCommand("showmount", "--no-headers", "-e", address)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal,
-			"could not determine nfs exports, %v: %s", err, output)
-	}
-	exports := strings.Split(string(output), "\n")
-	toReturn := []string{}
-	for _, export := range exports {
-		exportTokens := strings.Fields(export)
-		if len(exportTokens) > 0 {
-			toReturn = append(toReturn, exportTokens[0])
-		}
-	}
-	if len(toReturn) == 0 {
-		return nil, status.Errorf(codes.Internal,
-			"could not determine nfs exports, command output: %s", output)
-	}
-	return toReturn, nil
-}
+	// Create a context with timeout of 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-func CheckNFSExports(ctx context.Context, address string) (bool, error) {
+	// Execute the command within the context
+	outputChan := make(chan []byte)
+	errChan := make(chan error)
+	go func() {
+		output, err := ExecCommand("showmount", "--no-headers", "-e", address)
+		if err != nil {
+			errChan <- err
+			return
+		}
+		outputChan <- output
+	}()
+
 	select {
 	case <-ctx.Done():
-		return false, fmt.Errorf("timeout reached while checking NFS exports for %s", address)
-	default:
-		// rcpinfo -a uaddr -T tcp6 100003 3
-		// rpcinfo -a 10.200.104.82.8.1 -T tcp 100003 3 -> program 100003 version 3 ready and waiting
-		protocol := "tcp"
-		if strings.Contains(address, ":") {
-			protocol = "tcp6"
+		// Timeout exceeded
+		return nil, status.Errorf(codes.DeadlineExceeded, "command execution timed out")
+	case err := <-errChan:
+		return nil, status.Errorf(codes.Internal, "could not determine nfs exports: %v", err)
+	case output := <-outputChan:
+		exports := strings.Split(string(output), "\n")
+		toReturn := []string{}
+		for _, export := range exports {
+			exportTokens := strings.Fields(export)
+			if len(exportTokens) > 0 {
+				toReturn = append(toReturn, exportTokens[0])
+			}
 		}
-		uaddr, err := computeUaddr(address, 2049)
-		if err != nil {
-			return false, err
+		if len(toReturn) == 0 {
+			return nil, status.Errorf(codes.Internal, "could not determine nfs exports")
 		}
-		output, err := ExecCommand("rpcinfo", "-a", uaddr, "-T", protocol, "100003", "3")
-		if err != nil {
-			return false, status.Errorf(codes.Internal,
-				"could not determine nfs avalibility, %v: %s", err, output)
-		}
-		log.Infof("rpcinfo %v", output)
-		return true, nil
+		return toReturn, nil
 	}
 }
 
-func computeUaddr(ipAddress string, port int) (string, error) {
+func computeUaddr(ipAddress string, port int) (string, string, error) {
 	ipType, err := checkIPType(ipAddress)
+	if err != nil {
+		return "", "", err
+	}
+
 	switch ipType {
 	case "IPv4":
-		log.Infof("got ipv4 IP while computing uaddr ip - %s:%d", ipAddress, port)
-		return computeIPv4Uaddr(ipAddress, port), nil
+		return computeIPv4Uaddr(ipAddress, port), "tcp", nil
 	case "IPv6":
-		log.Infof("got ipv6 IP while computing uaddr ip - %s:%d", ipAddress, port)
-		return computeIPv6Uaddr(ipAddress, port), nil
+		return computeIPv6Uaddr(ipAddress, port), "tcp", nil
 	default:
-		log.Infof("Invalid ip while computing uaddr ip - %s:%d", ipAddress, port)
-		return "", err
+		return "", "", errors.New("unsupported IP type")
 	}
 }
 
 func computeIPv4Uaddr(ipAddress string, port int) string {
 	// Split the IPv4 address into octets
 	octets := strings.Split(ipAddress, ".")
-
 	if len(octets) != 4 {
 		return ""
 	}
@@ -406,6 +411,43 @@ func checkIPType(ipAddress string) (string, error) {
 		return "IPv6", nil
 	}
 	return "", errors.New("unknown IP type")
+}
+
+func CheckNFSExports(address string) (bool, error) {
+	// Create a context with timeout of 30 seconds
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	log.Infof("Checking floating ip %s", address)
+
+	uaddr, protocol, err := computeUaddr(address, 2049)
+	if err != nil {
+		log.Errorf("Error while computing uaddr: %v", err)
+	}
+
+	// Execute the command within the context
+	outputChan := make(chan []byte)
+	errChan := make(chan error)
+	go func() {
+		output, err := ExecCommand("rpcinfo", "-a", uaddr, "-T", protocol, "100003", "3")
+		if err != nil {
+			errChan <- err
+			return
+		}
+		log.Infof("Check was success on uaddr %s, with protocol %s.", uaddr, protocol)
+		outputChan <- output
+	}()
+
+	select {
+	case <-ctx.Done():
+		// Timeout exceeded
+		return false, status.Errorf(codes.DeadlineExceeded, "command execution timed out while checking nfs exports with rpcinfo")
+	case err := <-errChan:
+		return false, status.Errorf(codes.Internal, "could not determine nfs exports: %v", err)
+	case output := <-outputChan:
+		log.Infof(string(output))
+		return true, nil
+	}
 }
 
 func IsShareMounted(targetPath string) (bool, error) {

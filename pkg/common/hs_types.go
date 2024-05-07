@@ -130,7 +130,7 @@ type TaskParamsMap struct {
 type File struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	Size int64  `json:"size,string"`
+	Size int64  `json:"size"`
 }
 
 type FileSnapshot struct {

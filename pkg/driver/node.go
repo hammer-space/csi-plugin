@@ -266,7 +266,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(
 		log.Errorf("could not remove bind mount, %s", err)
 		return status.Error(codes.Internal, err.Error())
 	}
-
+	log.Infof("unmounted the targetPath %s. Command output %v ", targetPath, output)
 	// delete target path
 	err = os.Remove(targetPath)
 	if err != nil {
@@ -490,8 +490,6 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 			},
 		}, nil
 	}
-
-	return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 }
 
 func (d *CSIDriver) NodeExpandVolume(

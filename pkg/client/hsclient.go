@@ -19,7 +19,6 @@ package client
 
 import (
 	"bytes"
-	"context"
 	"crypto/tls"
 	"encoding/json"
 	"errors"
@@ -51,7 +50,7 @@ const (
 )
 
 var wg sync.WaitGroup
-var mu sync.Mutex
+var mutex sync.Mutex
 
 type HammerspaceClient struct {
 	username   string
@@ -117,48 +116,27 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		return "", err
 	}
 	var floatingIP string
-	result := make(chan string)
-	done := make(chan error) // Channel to signal when all goroutines have finished or when a timeout occurs
-	const CommandExecTimeout = 30 * time.Second
-	// Create a context with timeout
-	ctx, cancel := context.WithTimeout(context.Background(), CommandExecTimeout)
-	defer cancel()
 
 	for _, p := range clusters.PortalFloatingIps {
 		wg.Add(1)
-		go func(ctx context.Context, address string) {
+		go func(fip string) {
 			defer wg.Done()
-			ok, err := common.CheckNFSExports(ctx, address)
+
+			// check if rpcinfo gives a response
+			ok, err := common.CheckNFSExports(fip)
 			if err != nil {
-				fmt.Printf("Could not get exports for data-portal at %s. Error: %v\n", address, err)
+				log.Warnf("Could not get exports for data-portal at %s. Error: %v", fip, err)
 				return
 			}
+
+			// Check if exports has any values
 			if ok {
-				mu.Lock()
-				defer mu.Unlock()
-				if floatingIP == "" {
-					floatingIP = address
-					result <- address
-				}
+				mutex.Lock()
+				floatingIP = fip // Update the floating IP
+				mutex.Unlock()
+				log.Infof("Found floating IP data-portal %s", floatingIP)
 			}
-		}(ctx, p.Address)
-	}
-
-	go func() {
-		wg.Wait()
-		close(result)
-		done <- nil // Signal that all goroutines have finished
-	}()
-
-	select {
-	case floatingIP = <-result:
-		fmt.Printf("Floating IP assigned: %s\n", floatingIP)
-	case <-ctx.Done():
-		fmt.Printf("No available floating IP found within timeout\n")
-	case err := <-done:
-		if err != nil {
-			fmt.Printf("Process finished with error: %v\n", err)
-		}
+		}(p.Address)
 	}
 
 	// Keep the main goroutine running until all goroutines finish
@@ -387,7 +365,8 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
 	log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST", objs, 60*5)
 	return objs, nil
 }
 
@@ -401,7 +380,8 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 	for i, o := range objectives {
 		objectiveNames[i] = o.Name
 	}
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
 	return objectiveNames, nil
 }
 
@@ -1042,7 +1022,6 @@ func (client *HammerspaceClient) RestoreFileSnapToDestination(snapshotPath, file
 
 func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	req, err := client.generateRequest("GET", "/cntl/state", "")
-
 	if err != nil {
 		log.Error(err)
 		return 0, err
@@ -1063,6 +1042,9 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
+	// set free capacity to cache expire in 5 min
+	SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
+
 	free := cluster.Capacity["free"]
 	if err != nil {
 		log.Error("Error parsing free cluster capacity: " + err.Error())
