@@ -221,8 +221,20 @@ func FormatDevice(device, fsType string) error {
 
 func DeleteFile(pathname string) error {
 	log.Infof("deleting file '%s'", pathname)
-	err := os.Remove(pathname)
-	if err != nil {
+
+	// Check if the file exists
+	if _, err := os.Stat(pathname); err != nil {
+		// If the file does not exist, return without an error
+		if os.IsNotExist(err) {
+			log.Errorf("file '%s' does not exist", pathname)
+			return nil
+		}
+		// If there was an error other than the file not existing, return it
+		return err
+	}
+
+	// Delete the file
+	if err := os.Remove(pathname); err != nil {
 		return err
 	}
 
@@ -486,24 +498,24 @@ func SetMetadataTags(localPath string, tags map[string]string) error {
 	_, err := ExecCommand("hs",
 		"attribute",
 		"set", "CSI_DETAILS",
-		fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash),
+		fmt.Sprintf("-e CSI_DETAILS_TABLE{%s,%s,%s,%s}", CsiVersion, CsiPluginName, Version, Githash),
 		localPath)
 	if err != nil {
 		log.Warn("Failed to set CSI_DETAILS metadata " + err.Error())
 	}
 
 	for tag_key, tag_value := range tags {
-		output, err := ExecCommand("hs",
+		output1, err := ExecCommand("hs",
 			"-v", "tag",
-			"set", "-e", fmt.Sprintf("'%s'", tag_value), tag_key, localPath,
+			"set", "-e", tag_value, tag_key, localPath,
 		)
 
 		// FIXME: The HS client returns exit code 0 even on failure, so we can't detect errors
 		if err != nil {
-			log.Error("Failed to set tag " + err.Error())
+			log.Errorf("Failed to set tag %v. Output - %v", err.Error(), output1)
 			break
 		}
-		log.Debugf("HS command output: %s", output)
+		log.Debugf("HS command output: %s", output1)
 	}
 
 	return err
