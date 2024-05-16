@@ -49,6 +49,12 @@ $ yum install nfs-utils
 
 The plugin container(s) must run as privileged containers
 
+## Development Dependencies
+
+```bash
+$ pip2 install pre-commit
+```
+
 ## Installation
 Kubernetes specific deployment instructions are located at [here](https://github.com/hammer-space/csi-plugin/blob/master/deploy/kubernetes/README.md)
 
@@ -90,6 +96,7 @@ Currently, only the ``topology.csi.hammerspace.com/is-data-portal`` key is suppo
 * Docker
 * Golang 1.12+
 * nfs-utils
+* pre-commit
 
 ### Building
 ##### Build a new docker image from local source:
