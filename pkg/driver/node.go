@@ -461,7 +461,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 		// NFS backend
 		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
 		share, err := d.hsclient.GetShare(volumeName)
-		if err != nil {
+		if err != nil || share == nil {
 			return nil, status.Error(codes.NotFound, common.ShareNotFound)
 		}
 

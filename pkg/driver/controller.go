@@ -148,31 +148,44 @@ func ParseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	return vParams, nil
 }
 
-func (d *CSIDriver) ensureShareBackedVolumeExists(
-	ctx context.Context,
-	hsVolume *common.HSVolume) error {
+func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
 
-	//// Check if Mount Volume Exists
+	// Check if the Mount Volume Exists
 	share, err := d.hsclient.GetShare(hsVolume.Name)
 	if err != nil {
-		return status.Errorf(codes.Internal, err.Error())
+		return fmt.Errorf("failed to get share: %w", err)
+	}
+	if share == nil {
+		// Create the Mountvolume
+		err = d.hsclient.CreateShare(
+			hsVolume.Name,
+			hsVolume.Path,
+			hsVolume.Size,
+			hsVolume.Objectives,
+			hsVolume.ExportOptions,
+			hsVolume.DeleteDelay,
+			hsVolume.Comment,
+		)
+
+		if err != nil {
+			return status.Errorf(codes.Internal, err.Error())
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("share not found")
 	}
 	if share.Size != hsVolume.Size {
-		if share.Size != hsVolume.Size {
-			return status.Errorf(
-				codes.AlreadyExists,
-				common.VolumeExistsSizeMismatch,
-				share.Size,
-				hsVolume.Size)
-		}
-		if share.ShareState == "REMOVED" {
-			return status.Errorf(codes.Aborted, common.VolumeBeingDeleted)
-		}
-		// FIXME: Check that it's objectives, export options, deleteDelay(extended info),
-		//  etc match (optional functionality with CSI 1.0)
-
-		return nil
+		return status.Errorf(
+			codes.AlreadyExists,
+			common.VolumeExistsSizeMismatch,
+			share.Size,
+			hsVolume.Size)
 	}
+
+	if share.ShareState == "REMOVED" {
+		return status.Errorf(codes.Aborted, common.VolumeBeingDeleted)
+	}
+
 	if hsVolume.SourceSnapPath != "" {
 		// Create from snapshot
 		sourceShare, err := d.hsclient.GetShare(hsVolume.SourceSnapShareName)
@@ -241,15 +254,12 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(
 
 func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error) {
 	share, err := d.hsclient.GetShare(backingShareName)
-	if err != nil {
-		return share, status.Errorf(codes.Internal, err.Error())
-	}
 	if share == nil {
 		err = d.hsclient.CreateShare(
 			backingShareName,
-			"/"+backingShareName,
-			"-1",
-			[]string{},
+			hsVolume.Path,
+			hsVolume.Size,
+			hsVolume.Objectives,
 			hsVolume.ExportOptions,
 			hsVolume.DeleteDelay,
 			hsVolume.Comment,
@@ -365,7 +375,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 			backingFileExists = false
 			time.Sleep(time.Second)
 		} else {
-			log.Infof("file exist -> %s", string(output))
+			log.Infof("file exist - %s", string(output))
 			backingFileExists = true
 			break
 		}
@@ -441,7 +451,7 @@ func (d *CSIDriver) CreateVolume(
 	var blockRequested bool
 	var filesystemRequested bool
 	var fileBacked bool
-	var fsType string
+	var fsType string = "nfs"
 	for _, cap := range req.VolumeCapabilities {
 		switch cap.AccessType.(type) {
 		case *csi.VolumeCapability_Block:
@@ -450,9 +460,7 @@ func (d *CSIDriver) CreateVolume(
 		case *csi.VolumeCapability_Mount:
 			filesystemRequested = true
 			fsType = vParams.FSType
-			if fsType == "" {
-				fsType = "nfs"
-			} else if fsType != "nfs" {
+			if fsType != "nfs" {
 				fileBacked = true
 			}
 		}
@@ -507,7 +515,7 @@ func (d *CSIDriver) CreateVolume(
 		backingShareName = vParams.MountBackingShareName
 	}
 	backingShare, err = d.hsclient.GetShare(backingShareName)
-	if err != nil {
+	if err != nil || backingShare == nil {
 		log.Infof("share dosent exist ensuring share exist.")
 		backingShare, err = d.ensureBackingShareExists(backingShare.Name, hsVolume)
 		if err != nil {
@@ -605,7 +613,6 @@ func (d *CSIDriver) CreateVolume(
 		// restore snap to weird path
 		// move weird path to proper location
 		// NOTE: Expect this to change when we change restore from snapshot in the core product.
-
 		hsVolume.Path = common.SharePathPrefix + volumeName
 		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
 		if err != nil {
@@ -620,7 +627,7 @@ func (d *CSIDriver) CreateVolume(
 
 	if volumeMode == "Block" {
 		volContext["blockBackingShareName"] = hsVolume.BlockBackingShareName
-	} else if volumeMode == "Filesystem" && fsType != "nfs" {
+	} else if volumeMode == "Filesystem" {
 		volContext["mountBackingShareName"] = hsVolume.MountBackingShareName
 		volContext["fsType"] = fsType
 	}
@@ -640,9 +647,11 @@ func (d *CSIDriver) CreateVolume(
 }
 
 func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
+	var err error
 	var exists bool
-	if exists, _ = d.hsclient.DoesFileExist(filepath); exists {
-		log.Debugf("found file-backed volume to delete, %s", filepath)
+	exists, err = d.hsclient.DoesFileExist(filepath)
+	if err != nil {
+		return fmt.Errorf("file not found error while fetching file from file path %s. Error %v", filepath, err.Error())
 	}
 
 	// Check if file has snapshots and fail
@@ -654,6 +663,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 	residingShareName := path.Base(path.Dir(filepath))
 
 	if exists {
+		log.Debugf("found file-backed volume to delete, %s", filepath)
 		// mount share and delete file
 		destination := common.ShareStagingDir + path.Dir(filepath)
 		// grab and defer a lock here for the backing share
@@ -673,7 +683,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 		}
 	}
 
-	return nil
+	return err
 }
 
 func (d *CSIDriver) deleteShareBackedVolume(share *common.ShareResponse) error {
@@ -716,16 +726,25 @@ func (d *CSIDriver) DeleteVolume(
 	d.getVolumeLock(volumeId)
 
 	volumeName := GetVolumeNameFromPath(volumeId)
+	log.Infof("delete volume checking for share name %s. Volume Id %s", volumeName, volumeId)
 	share, err := d.hsclient.GetShare(volumeName)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, err.Error())
+		return nil, fmt.Errorf("unable to get share, volume id %s and volume name %s. Err %v", volumeId, volumeName, err)
 	}
 	if share == nil { // Share does not exist, may be a file-backed volume
+		log.Infof("share is nil and Volume Id %s", volumeId)
 		err = d.deleteFileBackedVolume(volumeId)
+		if err != nil {
+			return nil, fmt.Errorf("unable to delete file backed volume, volume id %s and volume name %s. Err %v", volumeId, volumeName, err)
+		}
 
 		return &csi.DeleteVolumeResponse{}, err
 	} else { // Share exists and is a Filesystem
+		log.Infof("share exist with name %s", share.Name)
 		err = d.deleteShareBackedVolume(share)
+		if err != nil {
+			return nil, fmt.Errorf("unable to delete share backed volume, share %s and volume name %s. Err %v", share.Name, volumeName, err)
+		}
 		return &csi.DeleteVolumeResponse{}, err
 	}
 
@@ -803,11 +822,9 @@ func (d *CSIDriver) ControllerExpandVolume(
 				// if required - current > available on backend share
 				sizeDiff := requestedSize - fileSize
 				backingShareName := path.Base(path.Dir(req.GetVolumeId()))
-				backingShare, err := d.hsclient.GetShare(backingShareName)
-				var available int64
-				if err != nil {
-					available = 0
-				} else {
+				backingShare, _ := d.hsclient.GetShare(backingShareName)
+				var available int64 = 0
+				if backingShare != nil {
 					available, _ = strconv.ParseInt(backingShare.Space.Available, 10, 64)
 				}
 

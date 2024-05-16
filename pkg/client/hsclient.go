@@ -453,7 +453,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var share common.ShareResponse

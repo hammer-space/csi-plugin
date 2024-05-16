@@ -19,19 +19,19 @@ limitations under the License.
 package sanitytest
 
 import (
+	"context"
 	"fmt"
+	"os"
+	"strings"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	"io/ioutil"
 	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
-	"strings"
-)
 
-import (
-	"context"
 	. "github.com/onsi/ginkgo"
+
 	. "github.com/onsi/gomega"
 )
 
@@ -140,12 +140,12 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 			}
 			for key, value := range additionalMetadataTags {
 				// Check the file exists
-				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", sc.Config.TargetPath + "/"))
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", sc.Config.TargetPath+"/"))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
 				log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", sc.Config.TargetPath + "/", key))
+				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", sc.Config.TargetPath+"/", key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -164,7 +164,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 				}
 
 				for _, obj := range objectives {
-					if ! driver.IsValueInList(obj, objectiveNames) {
+					if !driver.IsValueInList(obj, objectiveNames) {
 						Fail(fmt.Sprintf("%s objective is not set on share, applied objectives: %s", obj, share.Objectives))
 					}
 				}
@@ -173,15 +173,15 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 			By("Write data to volume")
 			//sc.Config.TargetPath
 			testData := []byte("test_data")
-			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/testfile", testData, 0644)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("unpublish the volume")
 			_, err = c.NodeUnpublishVolume(
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath,
+					VolumeId:   vol.GetVolume().GetVolumeId(),
+					TargetPath: sc.Config.TargetPath,
 				},
 			)
 
@@ -194,7 +194,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 					VolumeId:          vol.GetVolume().GetVolumeId(),
 					TargetPath:        sc.Config.TargetPath,
 					StagingTargetPath: sc.Config.StagingPath,
-					Readonly: true,
+					Readonly:          true,
 					VolumeCapability: &csi.VolumeCapability{
 						AccessType: &csi.VolumeCapability_Mount{
 							Mount: &csi.VolumeCapability_MountVolume{
@@ -203,7 +203,6 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 						},
 						AccessMode: &csi.VolumeCapability_AccessMode{
 							Mode: csi.VolumeCapability_AccessMode_MULTI_NODE_MULTI_WRITER,
-
 						},
 					},
 					VolumeContext: vol.GetVolume().GetVolumeContext(),
@@ -214,20 +213,20 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 			Expect(nodepubvol).NotTo(BeNil())
 
 			By("Read data from volume")
-			output, err := ioutil.ReadFile(sc.Config.TargetPath + "/testfile")
+			output, err := os.ReadFile(sc.Config.TargetPath + "/testfile")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal(testData))
 
 			By("Ensure write data to volume fails")
-			err = ioutil.WriteFile(sc.Config.TargetPath + "/testfile", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/testfile", testData, 0644)
 			Expect(err).To(HaveOccurred())
 
 			By("unpublish the volume")
 			_, err = c.NodeUnpublishVolume(
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath,
+					VolumeId:   vol.GetVolume().GetVolumeId(),
+					TargetPath: sc.Config.TargetPath,
 				},
 			)
 

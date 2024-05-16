@@ -19,42 +19,41 @@ package common
 import "time"
 
 const (
-    CsiPluginName = "com.hammerspace.csi"
+	CsiPluginName = "com.hammerspace.csi"
 
-    // Directory on hosts where backing shares for file-backed volumes will be mounted
-    // Must end with a "/"
-    ShareStagingDir             = "/tmp"
-    SharePathPrefix             = "/"
-    DefaultBackingFileSizeBytes = 1073741824
-    DefaultVolumeNameFormat     = "%s"
+	// Directory on hosts where backing shares for file-backed volumes will be mounted
+	// Must end with a "/"
+	ShareStagingDir             = "/tmp"
+	SharePathPrefix             = "/"
+	DefaultBackingFileSizeBytes = 1073741824
+	DefaultVolumeNameFormat     = "%s"
 
-    // Topology keys
-    TopologyKeyDataPortal       = "topology.csi.hammerspace.com/is-data-portal"
+	// Topology keys
+	TopologyKeyDataPortal = "topology.csi.hammerspace.com/is-data-portal"
 )
 
 var (
-    // These should be set at compile time
-    Version = "NONE"
-    Githash = "NONE"
+	// These should be set at compile time
+	Version = "NONE"
+	Githash = "NONE"
 
-    CsiVersion = "1"
+	CsiVersion = "1"
 
-    // The list of export path prefixes to try to use, in order, when mounting to a data portal
-    DefaultDataPortalMountPrefixes = [...]string{"/", "/mnt/data-portal", ""}
-    DataPortalMountPrefix = ""
-    CommandExecTimeout = 300 * time.Second  // Seconds
+	// The list of export path prefixes to try to use, in order, when mounting to a data portal
+	DefaultDataPortalMountPrefixes = [...]string{"/", "/mnt/data-portal", ""}
+	DataPortalMountPrefix          = ""
+	CommandExecTimeout             = 300 * time.Second // Seconds
 
-
-    UseAnvil      bool
+	UseAnvil bool
 )
 
 // Extended info to be set on every share created by the driver
-func GetCommonExtendedInfo() (map[string]string) {
-    extendedInfo := map[string]string{
-        "csi_created_by_plugin_name":    CsiPluginName,
-        "csi_created_by_plugin_version": Version,
-        "csi_created_by_plugin_git_hash": Githash,
-        "csi_created_by_csi_version": CsiVersion,
-    }
-    return extendedInfo
+func GetCommonExtendedInfo() map[string]string {
+	extendedInfo := map[string]string{
+		"csi_created_by_plugin_name":     CsiPluginName,
+		"csi_created_by_plugin_version":  Version,
+		"csi_created_by_plugin_git_hash": Githash,
+		"csi_created_by_csi_version":     CsiVersion,
+	}
+	return extendedInfo
 }
