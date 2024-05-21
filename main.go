@@ -29,8 +29,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-var ()
-
 func init() {
 	// Setup logging
 	log.SetFormatter(&log.JSONFormatter{
@@ -104,10 +102,19 @@ func main() {
 	var server Server
 
 	CSI_version := os.Getenv("CSI_MAJOR_VERSION")
-
 	endpoint := os.Getenv("CSI_ENDPOINT")
+	hs_endpoint := os.Getenv("HS_ENDPOINT")
+	if os.Getenv("FQDN") != "" {
+		log.Infof("FQDN - %v", os.Getenv("FQDN"))
+		extracted_endpoint, err := common.ResolveFQDN(os.Getenv("FQDN"))
+		if err != nil {
+			log.Errorf("Error - %v", err)
+		} else {
+			hs_endpoint = extracted_endpoint
+		}
+	}
 	csiDriver := driver.NewCSIDriver(
-		os.Getenv("HS_ENDPOINT"),
+		hs_endpoint,
 		os.Getenv("HS_USERNAME"),
 		os.Getenv("HS_PASSWORD"),
 		os.Getenv("HS_TLS_VERIFY"),

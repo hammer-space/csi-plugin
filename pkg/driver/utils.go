@@ -17,7 +17,6 @@ limitations under the License.
 package driver
 
 import (
-	"errors"
 	"fmt"
 	"os/exec"
 	"path"
@@ -130,6 +129,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, 
 
 func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath string, mountFlags []string) error {
 	var err error
+	var fipaddr string = ""
 
 	log.Infof("Finding best host exporting %s", shareExportPath)
 
@@ -137,10 +137,22 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 	if err != nil {
 		log.Errorf("Could not create list of data-portals, %v", err)
 	}
-	// Always look for floating data portal IPs
-	fipaddr, err := d.hsclient.GetPortalFloatingIp()
-	if err != nil {
-		log.Errorf("Could not contact Anvil for floating IPs, %v", err)
+
+	if d.fqdn != "" { // if fqdn is provided use that ip for all Communication
+		// check if rpcinfo gives a response
+		ok, err := common.CheckNFSExports(d.endpoint)
+		if err != nil {
+			log.Warnf("Could not get exports for fqdn ip at %s. Error: %v", d.endpoint, err)
+		}
+		if ok {
+			fipaddr = d.endpoint
+		}
+	} else {
+		// Always look for floating data portal IPs
+		fipaddr, err = d.hsclient.GetPortalFloatingIp()
+		if err != nil {
+			log.Errorf("Could not contact Anvil for floating IPs, %v", err)
+		}
 	}
 
 	MountToDataPortal := func(portal common.DataPortal, mount_options []string) bool {
@@ -168,6 +180,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 			// Check the default prefixes
 			for _, mountPrefix := range common.DefaultDataPortalMountPrefixes {
 				for _, e := range exports {
+					log.Infof("check export %s - with - %s", e, fmt.Sprintf("%s%s", mountPrefix, shareExportPath))
 					if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
 						export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
 						log.Infof("Found export %s", export)
@@ -179,7 +192,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 				}
 			}
 			if export == "" {
-				log.Infof("Could not find any matching export on data-portal, %s.", portal.Uoid["uuid"])
+				log.Infof("Could not find any matching export on data-portal address - %s uuid - %s.", portal.Node.MgmtIpAddress.Address, portal.Uoid["uuid"])
 				return false
 			}
 		}
@@ -194,16 +207,16 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		return false
 	}
 
-	log.Infof("Attempting to mount via NFS 4.2.")
+	log.Infof("Attempting to mount via NFS 4.1.")
 	mounted := false
 	for _, p := range portals {
-		mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.2"))
+		mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.1"))
 		if mounted {
 			break
 		}
 	}
 	if !mounted {
-		log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
+		log.Infof("Could not mount via NFS 4.1, falling back to NFS 3.")
 		for _, p := range portals {
 			mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock"))
 			if mounted {
@@ -214,5 +227,5 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 	if mounted {
 		return nil
 	}
-	return errors.New("Could not mount to any data-portals")
+	return fmt.Errorf("could not mount to any data-portals")
 }

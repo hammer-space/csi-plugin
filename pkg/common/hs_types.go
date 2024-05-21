@@ -27,6 +27,7 @@ type HSVolumeParameters struct {
 	FSType                 string
 	Comment                string
 	AdditionalMetadataTags map[string]string
+	CacheEnabled           bool
 }
 
 type HSVolume struct {
