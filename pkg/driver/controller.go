@@ -145,6 +145,14 @@ func ParseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		}
 	}
 
+	if params["cacheEnabled"] != "" {
+		cacheEnabled, err := strconv.ParseBool(params["cacheEnabled"])
+		if err != nil {
+			vParams.CacheEnabled = false
+		}
+		vParams.CacheEnabled = cacheEnabled
+	}
+
 	return vParams, nil
 }
 

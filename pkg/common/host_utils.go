@@ -520,3 +520,16 @@ func SetMetadataTags(localPath string, tags map[string]string) error {
 
 	return err
 }
+
+// resolveFQDN resolves the FQDN to an IP address
+func ResolveFQDN(fqdn string) (string, error) {
+	ips, err := net.LookupIP(fqdn)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve FQDN %s: %v", fqdn, err)
+	}
+	if len(ips) == 0 {
+		return "", fmt.Errorf("no IP addresses found for FQDN %s", fqdn)
+	}
+	// Use the first resolved IP address
+	return ips[0].String(), nil
+}

@@ -58,8 +58,14 @@ func validateEnvironmentVars() {
 	}
 
 	hsEndpoint := os.Getenv("HS_ENDPOINT")
+	if os.Getenv("FQDN") != "" {
+		hsEndpoint = os.Getenv("FQDN")
+		if !strings.HasPrefix(hsEndpoint, "https://") {
+			hsEndpoint = "https://" + hsEndpoint
+		}
+	}
 	if len(hsEndpoint) == 0 {
-		log.Error("HS_ENDPOINT must be defined")
+		log.Error("HS_ENDPOINT or FQDN must be defined")
 		os.Exit(1)
 	}
 
@@ -109,8 +115,22 @@ func main() {
 	CSI_version := os.Getenv("CSI_MAJOR_VERSION")
 
 	endpoint := os.Getenv("CSI_ENDPOINT")
+	hs_endpoint := os.Getenv("HS_ENDPOINT")
+	if os.Getenv("FQDN") != "" {
+		log.Infof("FQDN - %v", os.Getenv("FQDN"))
+		extracted_endpoint, err := common.ResolveFQDN(os.Getenv("FQDN"))
+		if err != nil {
+			log.Errorf("Error - %v", err)
+		} else {
+			if !strings.HasPrefix(extracted_endpoint, "https://") {
+				hs_endpoint = "https://" + extracted_endpoint
+			} else {
+				hs_endpoint = extracted_endpoint
+			}
+		}
+	}
 	csiDriver := driver.NewCSIDriver(
-		os.Getenv("HS_ENDPOINT"),
+		hs_endpoint,
 		os.Getenv("HS_USERNAME"),
 		os.Getenv("HS_PASSWORD"),
 		os.Getenv("HS_TLS_VERIFY"),
