@@ -28,6 +28,7 @@ type HSVolumeParameters struct {
 	Comment                string
 	AdditionalMetadataTags map[string]string
 	CacheEnabled           bool
+	FQDN                   string
 }
 
 type HSVolume struct {
@@ -45,6 +46,7 @@ type HSVolume struct {
 	Comment                string
 	SourceSnapShareName    string
 	AdditionalMetadataTags map[string]string
+	FQDN                   string
 }
 
 ///// Request and Response objects for interacting with the HS API

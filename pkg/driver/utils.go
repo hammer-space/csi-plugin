@@ -65,7 +65,7 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
+func (d *CSIDriver) EnsureBackingShareMounted(backingShareName, fqdn string) error {
 	backingShare, err := d.hsclient.GetShare(backingShareName)
 	if err != nil {
 		return status.Errorf(codes.NotFound, err.Error())
@@ -75,7 +75,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string) error {
 		// Mount backing share
 		if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
 			mo := []string{}
-			err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, mo)
+			err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, mo, fqdn)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
 				return err
@@ -130,7 +130,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, 
 	return true, err
 }
 
-func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath string, mountFlags []string) error {
+func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath string, mountFlags []string, fqdn string) error {
 	var err error
 	var fipaddr string = ""
 
@@ -141,14 +141,15 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		log.Errorf("Could not create list of data-portals, %v", err)
 	}
 
-	if d.fqdn != "" { // if fqdn is provided use that ip for all Communication
+	extracted_endpoint, err := common.ResolveFQDN(fqdn)
+	if extracted_endpoint != "" && err == nil { // if fqdn is provided use that ip instead of floatingips
 		// check if rpcinfo gives a response
-		ok, err := common.CheckNFSExports(d.endpoint)
+		ok, err := common.CheckNFSExports(extracted_endpoint)
 		if err != nil {
-			log.Warnf("Could not get exports for fqdn ip at %s. Error: %v", d.endpoint, err)
+			log.Warnf("Could not get exports for fqdn ip at %s. Error: %v", extracted_endpoint, err)
 		}
 		if ok {
-			fipaddr = d.endpoint
+			fipaddr = extracted_endpoint
 		}
 	} else {
 		// Always look for floating data portal IPs

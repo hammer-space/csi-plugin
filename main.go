@@ -58,14 +58,8 @@ func validateEnvironmentVars() {
 	}
 
 	hsEndpoint := os.Getenv("HS_ENDPOINT")
-	if os.Getenv("FQDN") != "" {
-		hsEndpoint = os.Getenv("FQDN")
-		if !strings.HasPrefix(hsEndpoint, "https://") {
-			hsEndpoint = "https://" + hsEndpoint
-		}
-	}
 	if len(hsEndpoint) == 0 {
-		log.Error("HS_ENDPOINT or FQDN must be defined")
+		log.Error("HS_ENDPOINT must be defined")
 		os.Exit(1)
 	}
 
@@ -80,11 +74,13 @@ func validateEnvironmentVars() {
 		log.Error("HS_USERNAME must be defined")
 		os.Exit(1)
 	}
+
 	password := os.Getenv("HS_PASSWORD")
 	if len(password) == 0 {
 		log.Error("HS_PASSWORD must be defined")
 		os.Exit(1)
 	}
+
 	if os.Getenv("HS_TLS_VERIFY") != "" {
 		_, err = strconv.ParseBool(os.Getenv("HS_TLS_VERIFY"))
 		if err != nil {
@@ -92,12 +88,14 @@ func validateEnvironmentVars() {
 			os.Exit(1)
 		}
 	}
+
 	if os.Getenv("CSI_MAJOR_VERSION") != "0" || os.Getenv("CSI_MAJOR_VERSION") != "1" {
 		if err != nil {
 			log.Error("CSI_MAJOR_VERSION must be set to \"0\" or \"1\"")
 			os.Exit(1)
 		}
 	}
+
 	common.DataPortalMountPrefix = os.Getenv("HS_DATA_PORTAL_MOUNT_PREFIX")
 }
 
@@ -115,22 +113,8 @@ func main() {
 	CSI_version := os.Getenv("CSI_MAJOR_VERSION")
 
 	endpoint := os.Getenv("CSI_ENDPOINT")
-	hs_endpoint := os.Getenv("HS_ENDPOINT")
-	if os.Getenv("FQDN") != "" {
-		log.Infof("FQDN - %v", os.Getenv("FQDN"))
-		extracted_endpoint, err := common.ResolveFQDN(os.Getenv("FQDN"))
-		if err != nil {
-			log.Errorf("Error - %v", err)
-		} else {
-			if !strings.HasPrefix(extracted_endpoint, "https://") {
-				hs_endpoint = "https://" + extracted_endpoint
-			} else {
-				hs_endpoint = extracted_endpoint
-			}
-		}
-	}
 	csiDriver := driver.NewCSIDriver(
-		hs_endpoint,
+		os.Getenv("HS_ENDPOINT"),
 		os.Getenv("HS_USERNAME"),
 		os.Getenv("HS_PASSWORD"),
 		os.Getenv("HS_TLS_VERIFY"),
