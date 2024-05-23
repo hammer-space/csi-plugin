@@ -1,4 +1,16 @@
-#### Controller Service
+#### CSI Object
+apiVersion: storage.k8s.io/v1
+kind: CSIDriver
+metadata:
+  name: com.hammerspace.csi
+spec:
+  podInfoOnMount: true
+  requiresRepublish: true
+  volumeLifecycleModes:
+    - Persistent
+  storageCapacity: true
+
+  #### Controller Service
 ---
 # needed for StatefulSet
 kind: Service
@@ -31,7 +43,7 @@ spec:
       labels:
         app: csi-provisioner
     spec:
-      serviceAccount: csi-provisioner
+      serviceAccountName: csi-provisioner
       hostNetwork: true
       containers:
         - name: csi-provisioner
@@ -73,7 +85,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-resizer
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.9.0
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -214,7 +226,7 @@ spec:
       containers:
         - name: csi-resizer
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.9.0
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"

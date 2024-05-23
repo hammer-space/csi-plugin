@@ -47,8 +47,6 @@ type CSIDriver struct {
 	snapshotLocks map[string]*sync.Mutex
 	hsclient      *client.HammerspaceClient
 	NodeID        string
-	fqdn          string
-	endpoint      string
 }
 
 func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver {
@@ -71,8 +69,6 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		volumeLocks:   make(map[string]*sync.Mutex),
 		snapshotLocks: make(map[string]*sync.Mutex),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
-		fqdn:          os.Getenv("FQDN"),
-		endpoint:      endpoint,
 	}
 
 }
