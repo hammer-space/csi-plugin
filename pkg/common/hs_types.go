@@ -115,11 +115,12 @@ type ClusterObjectiveResponse struct {
 }
 
 type Task struct {
-	Uuid      string        `json:"uuid"`
-	Action    string        `json:"name"`
-	Status    string        `json:"status"`
-	ExitValue string        `json:"exitValue"`
-	ParamsMap TaskParamsMap `json:"paramsMap"`
+	Uuid          string        `json:"uuid"`
+	Action        string        `json:"name"`
+	Status        string        `json:"status"`
+	Progress      int           `json:"progress"`
+	StatusMessage string        `json:"statusMessage"`
+	ParamsMap     TaskParamsMap `json:"paramsMap"`
 }
 
 type TaskParamsMap struct {

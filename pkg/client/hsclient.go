@@ -280,7 +280,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 	startTime := time.Now()
 
 	var task common.Task
-	for time.Now().Sub(startTime) < taskPollTimeout {
+	for time.Since(startTime) < taskPollTimeout {
 		d := b.Duration()
 		time.Sleep(d)
 
@@ -304,11 +304,11 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			log.Error(err)
 			return false, nil
 		}
-		if task.ExitValue != "NONE" {
+		if task.Status != "NONE" && task.Status != "EXECUTING" {
 			if task.Status == "COMPLETED" || task.Status == "FAILED" || task.Status == "HALTED" || task.Status == "CANCELLED" {
 				return true, nil
 			} else {
-				log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.ExitValue))
+				log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.StatusMessage))
 				return false, nil
 			}
 		}
@@ -712,7 +712,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName strin
 		return false, nil
 	}
 	for _, task := range tasks {
-		log.Debug(fmt.Printf("Task Name: %v\n  Task Status: %s\n Share Name: %s\n", task.ParamsMap.Name, task.Status, shareName))
+		// log.Debug(fmt.Printf("Task Name: %v\n  Task Status: %s\n Share Name: %s\n", task.ParamsMap.Name, task.Status, shareName))
 		if task.Status == "EXECUTING" && task.ParamsMap.Name == shareName {
 			return true, nil
 		}

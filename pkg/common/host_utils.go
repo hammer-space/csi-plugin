@@ -495,27 +495,26 @@ func UnmountFilesystem(targetPath string) error {
 
 func SetMetadataTags(localPath string, tags map[string]string) error {
 	// hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
-	_, err := ExecCommand("hs",
+	attributeSetOutput, err := ExecCommand("hs",
 		"attribute",
 		"set", "CSI_DETAILS",
-		fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\"", CsiVersion, CsiPluginName, Version, Githash),
+		fmt.Sprintf("-e \"CSI_DETAILS_TABLE{'%s','%s','%s','%s'}\" ", CsiVersion, CsiPluginName, Version, Githash),
 		localPath)
 	if err != nil {
-		log.Warn("Failed to set CSI_DETAILS metadata " + err.Error())
+		log.Errorf("Failed to set CSI_DETAILS metadata. Command output %s. Error %s", string(attributeSetOutput), err.Error())
 	}
 
+	log.Debugf("hs attributes set. Command output %s", string(attributeSetOutput))
+
 	for tag_key, tag_value := range tags {
-		output, err := ExecCommand("hs",
-			"-v", "tag",
-			"set", "-e", fmt.Sprintf("'%s'", tag_value), tag_key, localPath,
-		)
+		output, err := ExecCommand("hs", "-v", "tag", "set", "-e", tag_value, tag_key, localPath)
 
 		// FIXME: The HS client returns exit code 0 even on failure, so we can't detect errors
 		if err != nil {
-			log.Error("Failed to set tag " + err.Error())
+			log.Errorf("Failed to set tag. Error - %v" + err.Error())
 			break
 		}
-		log.Debugf("HS command output: %s", output)
+		log.Debugf("hs tag set. output: %s", output)
 	}
 
 	return err
