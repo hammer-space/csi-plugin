@@ -31,6 +31,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,9 @@ const (
 	taskPollTimeout     = 3600 * time.Second // Seconds
 	taskPollIntervalCap = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
 )
+
+var wg sync.WaitGroup
+var mutex sync.Mutex
 
 type HammerspaceClient struct {
 	username   string
@@ -95,13 +99,15 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 	// Instead of using /cntl, use /cntl/state to simplify processing of the JSON
 	// struct. If using /cntl, add [] before cluster struct
 	req, err := client.generateRequest("GET", "/cntl/state", "")
+	if err != nil {
+		return "", err
+	}
 	statusCode, respBody, _, err := client.doRequest(*req)
-
 	if err != nil {
 		return "", err
 	}
 	if statusCode != 200 {
-		return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var clusters common.Cluster
 	err = json.Unmarshal([]byte(respBody), &clusters)
@@ -109,33 +115,45 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
-	// Local random function
-	random_select := func() bool {
-		r := make(chan struct{})
-		close(r)
-		select {
-		case <-r:
-			return false
-		case <-r:
-			return true
-		}
-	}
-	floatingip := ""
+	var floatingIP string
+
 	for _, p := range clusters.PortalFloatingIps {
-		floatingip = p.Address
-		// If there are more than 1 floating IPs configured, randomly select one
-		rr := random_select()
-		if rr == true {
-			break
-		}
+		wg.Add(1)
+		go func(fip string) {
+			defer wg.Done()
+
+			// check if rpcinfo gives a response
+			ok, err := common.CheckNFSExports(fip)
+			if err != nil {
+				log.Warnf("Could not get exports for data-portal at %s. Error: %v", fip, err)
+				return
+			}
+
+			// Check if exports has any values
+			if ok {
+				mutex.Lock()
+				floatingIP = fip // Update the floating IP
+				mutex.Unlock()
+				log.Infof("Found floating IP data-portal %s", floatingIP)
+			}
+		}(p.Address)
 	}
-	return floatingip, nil
+
+	// Keep the main goroutine running until all goroutines finish
+	wg.Wait()
+	return floatingIP, nil
 }
 
 // GetDataPortals returns a list of operational data-portals
 // those with a matching nodeID are put at the top of the list
 func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPortal, error) {
 	req, err := client.generateRequest("GET", "/data-portals/", "")
+
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -143,7 +161,7 @@ func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPor
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var portals []common.DataPortal
@@ -262,7 +280,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 	startTime := time.Now()
 
 	var task common.Task
-	for time.Now().Sub(startTime) < taskPollTimeout {
+	for time.Since(startTime) < taskPollTimeout {
 		d := b.Duration()
 		time.Sleep(d)
 
@@ -278,7 +296,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			return false, err
 		}
 		if statusCode != 200 {
-			return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+			return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 		}
 
 		err = json.Unmarshal([]byte(respBody), &task)
@@ -286,20 +304,24 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			log.Error(err)
 			return false, nil
 		}
-		if task.ExitValue != "NONE" {
+		if task.Status != "NONE" && task.Status != "EXECUTING" {
 			if task.Status == "COMPLETED" || task.Status == "FAILED" || task.Status == "HALTED" || task.Status == "CANCELLED" {
 				return true, nil
 			} else {
-				log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.ExitValue))
+				log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.StatusMessage))
 				return false, nil
 			}
 		}
 	}
-	return false, errors.New(fmt.Sprintf("Task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status))
+	return false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
 }
 
 func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 	req, err := client.generateRequest("GET", "/shares", "")
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -307,7 +329,7 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var shares []common.ShareResponse
@@ -322,6 +344,11 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 
 func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResponse, error) {
 	req, err := client.generateRequest("GET", "/objectives", "")
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -329,7 +356,7 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var objs []common.ClusterObjectiveResponse
@@ -338,7 +365,8 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
 	log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST", objs, 60*5)
 	return objs, nil
 }
 
@@ -352,20 +380,25 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 	for i, o := range objectives {
 		objectiveNames[i] = o.Name
 	}
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
 	return objectiveNames, nil
 }
 
 func (client *HammerspaceClient) ListVolumes() ([]common.VolumeResponse, error) {
 	req, err := client.generateRequest("GET", "/base-storage-volumes", "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
 
+	statusCode, respBody, _, err := client.doRequest(*req)
 	if err != nil {
 		log.Error(err)
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var volumes []common.VolumeResponse
@@ -388,7 +421,7 @@ func (client *HammerspaceClient) ListSnapshots() ([]common.SnapshotResponse, err
 		return nil, err1
 	}
 	if statusCode1 != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode1, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode1, 200)
 	}
 	var shareSnapshots []common.SnapshotResponse
 	err = json.Unmarshal([]byte(respBody1), &shareSnapshots)
@@ -404,7 +437,7 @@ func (client *HammerspaceClient) ListSnapshots() ([]common.SnapshotResponse, err
 		return nil, err2
 	}
 	if statusCode2 != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode2, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode2, 200)
 	}
 	var fileSnapshots []common.SnapshotResponse
 	err = json.Unmarshal([]byte(respBody2), &fileSnapshots)
@@ -434,7 +467,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var share common.ShareResponse
@@ -457,7 +490,7 @@ func (client *HammerspaceClient) GetShareRawFields(name string) (map[string]inte
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var share map[string]interface{}
@@ -485,7 +518,7 @@ func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var file common.File
 	err = json.Unmarshal([]byte(respBody), &file)
@@ -550,7 +583,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 			}
 			return err
 		}
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
 	// ensure the location header is set and also make sure length >= 1
@@ -630,7 +663,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 			}
 			return err
 		}
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
 	// ensure the location header is set and also make sure length >= 1
@@ -670,7 +703,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName strin
 		return false, err
 	}
 	if statusCode != 200 {
-		return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var tasks []common.Task
 	err = json.Unmarshal([]byte(respBody), &tasks)
@@ -679,7 +712,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName strin
 		return false, nil
 	}
 	for _, task := range tasks {
-		log.Debug(fmt.Printf("Task Name: %v\n  Task Status: %s\n Share Name: %s\n", task.ParamsMap.Name, task.Status, shareName))
+		// log.Debug(fmt.Printf("Task Name: %v\n  Task Status: %s\n Share Name: %s\n", task.ParamsMap.Name, task.Status, shareName))
 		if task.Status == "EXECUTING" && task.ParamsMap.Name == shareName {
 			return true, nil
 		}
@@ -742,6 +775,10 @@ func (client *HammerspaceClient) UpdateShareSize(name string,
 	json.NewEncoder(shareString).Encode(share)
 
 	req, err := client.generateRequest("PUT", "/shares/"+name, shareString.String())
+	if err != nil {
+		log.Error(err)
+		return err
+	}
 	statusCode, _, respHeaders, err := client.doRequest(*req)
 
 	if err != nil {
@@ -752,7 +789,7 @@ func (client *HammerspaceClient) UpdateShareSize(name string,
 		//
 	}
 	if statusCode != 202 {
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
 	// ensure the location header is set and also make sure length >= 1
@@ -795,7 +832,7 @@ func (client *HammerspaceClient) DeleteShare(name string, deleteDelay int64) err
 		return nil
 	}
 	if statusCode != 202 {
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 202))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
 	// ensure the location header is set and also make sure length >= 1
@@ -826,7 +863,7 @@ func (client *HammerspaceClient) SnapshotShare(shareName string) (string, error)
 		return "", err
 	}
 	if statusCode != 200 {
-		return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	//var snapshotNames []string
@@ -849,7 +886,7 @@ func (client *HammerspaceClient) GetShareSnapshots(shareName string) ([]string, 
 		return nil, err
 	}
 	if statusCode != 200 {
-		return []string{}, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return []string{}, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var snapshotNames []string
@@ -883,7 +920,7 @@ func (client *HammerspaceClient) DeleteShareSnapshot(shareName, snapshotName str
 	if statusCode == 404 || statusCode == 200 {
 		return nil
 	} else {
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 }
 
@@ -896,7 +933,7 @@ func (client *HammerspaceClient) GetFileSnapshots(filePath string) ([]common.Fil
 		return nil, err
 	}
 	if statusCode != 200 {
-		return []common.FileSnapshot{}, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return []common.FileSnapshot{}, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var snapshots []common.FileSnapshot
@@ -933,12 +970,17 @@ func (client *HammerspaceClient) DeleteFileSnapshot(filePath, snapshotName strin
 	if statusCode == 404 || statusCode == 200 {
 		return nil
 	} else {
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 }
 
 func (client *HammerspaceClient) SnapshotFile(filepath string) (string, error) {
 	req, err := client.generateRequest("POST", fmt.Sprintf("/file-snapshots/create?filename-expression=%s", url.PathEscape(filepath)), "")
+	if err != nil {
+		log.Error(err)
+		return "", err
+	}
+
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -946,7 +988,7 @@ func (client *HammerspaceClient) SnapshotFile(filepath string) (string, error) {
 		return "", err
 	}
 	if statusCode != 200 {
-		return "", errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var snapshotNames []string
 	err = json.Unmarshal([]byte(respBody), &snapshotNames)
@@ -960,6 +1002,12 @@ func (client *HammerspaceClient) SnapshotFile(filepath string) (string, error) {
 
 func (client *HammerspaceClient) RestoreFileSnapToDestination(snapshotPath, filePath string) error {
 	req, err := client.generateRequest("POST", fmt.Sprintf("/file-snapshots/%s/%s", url.PathEscape(snapshotPath), url.PathEscape(filePath)), "")
+
+	if err != nil {
+		log.Error(err)
+		return err
+	}
+
 	statusCode, _, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -967,13 +1015,18 @@ func (client *HammerspaceClient) RestoreFileSnapToDestination(snapshotPath, file
 		return err
 	}
 	if statusCode != 200 {
-		return errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	return nil
 }
 
 func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	req, err := client.generateRequest("GET", "/cntl/state", "")
+	if err != nil {
+		log.Error(err)
+		return 0, err
+	}
+
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -981,8 +1034,7 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 		return 0, err
 	}
 	if statusCode != 200 {
-		return 0, errors.New(
-			fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return 0, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var cluster common.ClusterResponse
@@ -990,6 +1042,9 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
+	// set free capacity to cache expire in 5 min
+	SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
+
 	free := cluster.Capacity["free"]
 	if err != nil {
 		log.Error("Error parsing free cluster capacity: " + err.Error())

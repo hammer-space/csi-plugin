@@ -27,6 +27,8 @@ type HSVolumeParameters struct {
 	FSType                 string
 	Comment                string
 	AdditionalMetadataTags map[string]string
+	CacheEnabled           bool
+	FQDN                   string
 }
 
 type HSVolume struct {
@@ -44,6 +46,7 @@ type HSVolume struct {
 	Comment                string
 	SourceSnapShareName    string
 	AdditionalMetadataTags map[string]string
+	FQDN                   string
 }
 
 ///// Request and Response objects for interacting with the HS API
@@ -59,8 +62,8 @@ type ShareRequest struct {
 	ExportPath    string               `json:"path"`
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	Size          int64                `json:"shareSizeLimit,omitifempty"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitifempty"`
+	Size          int64                `json:"shareSizeLimit,omitempty"`
+	ExportOptions []ShareExportOptions `json:"exportOptions,omitempty"`
 }
 
 type ShareUpdateRequest struct {
@@ -75,7 +78,7 @@ type ShareResponse struct {
 	Comment       string               `json:"comment"`
 	ExtendedInfo  map[string]string    `json:"extendedInfo"`
 	ShareState    string               `json:"shareState"`
-	Size          int64                `json:"shareSizeLimit`
+	Size          int64                `json:"shareSizeLimit"`
 	ExportOptions []ShareExportOptions `json:"exportOptions"`
 	Space         ShareSpaceResponse   `json:"space"`
 	Inodes        ShareInodesResponse  `json:"inodes"`
@@ -112,11 +115,12 @@ type ClusterObjectiveResponse struct {
 }
 
 type Task struct {
-	Uuid      string        `json:"uuid"`
-	Action    string        `json:"name"`
-	Status    string        `json:"status"`
-	ExitValue string        `json:"exitValue"`
-	ParamsMap TaskParamsMap `json:"paramsMap"`
+	Uuid          string        `json:"uuid"`
+	Action        string        `json:"name"`
+	Status        string        `json:"status"`
+	Progress      int           `json:"progress"`
+	StatusMessage string        `json:"statusMessage"`
+	ParamsMap     TaskParamsMap `json:"paramsMap"`
 }
 
 type TaskParamsMap struct {
@@ -130,7 +134,7 @@ type TaskParamsMap struct {
 type File struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
-	Size int64  `json:"size,string"`
+	Size int64  `json:"size"`
 }
 
 type FileSnapshot struct {
@@ -170,15 +174,15 @@ type DataPortalNode struct {
 
 type VolumeResponse struct {
 	Name               string `json:"name"`
-	Created            string `json:"created"`
-	Modified           string `json:"modified"`
+	Created            int64  `json:"created"`
+	Modified           int64  `json:"modified"`
 	OperatingState     string `json:"operState"`
 	StorageVolumeState string `json:"storageVolumeState"`
-	Capacity           string `json:"effectiveTotalCapacity"`
+	Capacity           int64  `json:"effectiveTotalCapacity"`
 }
 
 type SnapshotResponse struct {
 	Name     string `json:"name"`
-	Created  string `json:"created"`
-	Modified string `json:"modified"`
+	Created  int64  `json:"created"`
+	Modified int64  `json:"modified"`
 }
