@@ -525,21 +525,18 @@ func (d *CSIDriver) CreateVolume(
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
 	}
-	var backingShare *common.ShareResponse
+
 	// if it's file backed, we should check capacity of backing share
 	var backingShareName string
 	if blockRequested {
 		backingShareName = vParams.BlockBackingShareName
-	} else {
+	} else if filesystemRequested {
 		backingShareName = vParams.MountBackingShareName
-	}
-	backingShare, err = d.hsclient.GetShare(backingShareName)
-	if err != nil || backingShare == nil {
-		log.Infof("share dosent exist ensuring share exist.")
-		backingShare, err = d.ensureBackingShareExists(backingShare.Name, hsVolume)
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+		if backingShareName == "" && fsType == "nfs" {
+			backingShareName = volumeName
 		}
+	} else {
+		backingShareName = volumeName
 	}
 
 	if requestedSize > 0 {

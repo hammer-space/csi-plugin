@@ -184,7 +184,6 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 			// Check the default prefixes
 			for _, mountPrefix := range common.DefaultDataPortalMountPrefixes {
 				for _, e := range exports {
-					log.Debugf("checking exports for %s%s with %s", mountPrefix, shareExportPath, e)
 					if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
 						export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
 						log.Infof("Found export %s", export)
