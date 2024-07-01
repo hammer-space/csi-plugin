@@ -31,6 +31,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -47,6 +48,9 @@ const (
 	taskPollTimeout     = 3600 * time.Second // Seconds
 	taskPollIntervalCap = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
 )
+
+var wg sync.WaitGroup
+var mutex sync.Mutex
 
 type HammerspaceClient struct {
 	username   string
@@ -109,26 +113,30 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
-	// Local random function
-	random_select := func() bool {
-		r := make(chan struct{})
-		close(r)
-		select {
-		case <-r:
-			return false
-		case <-r:
-			return true
-		}
-	}
 	floatingip := ""
 	for _, p := range clusters.PortalFloatingIps {
-		floatingip = p.Address
-		// If there are more than 1 floating IPs configured, randomly select one
-		rr := random_select()
-		if rr == true {
-			break
-		}
+		wg.Add(1)
+		go func(fip string) {
+			defer wg.Done()
+
+			// check if rpcinfo gives a response
+			ok, err := common.CheckNFSExports(fip)
+			if err != nil {
+				log.Warnf("Could not get exports for data-portal at %s. Error: %v", fip, err)
+				return
+			}
+
+			// Check if exports has any values
+			if ok {
+				mutex.Lock()
+				floatingip = fip // Update the floating IP
+				mutex.Unlock()
+				log.Infof("Found floating IP data-portal %s", floatingip)
+			}
+		}(p.Address)
 	}
+
+	wg.Wait()
 	return floatingip, nil
 }
 
@@ -136,6 +144,11 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 // those with a matching nodeID are put at the top of the list
 func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPortal, error) {
 	req, err := client.generateRequest("GET", "/data-portals/", "")
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
+
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -143,7 +156,7 @@ func (client *HammerspaceClient) GetDataPortals(nodeID string) ([]common.DataPor
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var portals []common.DataPortal
@@ -262,7 +275,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 	startTime := time.Now()
 
 	var task common.Task
-	for time.Now().Sub(startTime) < taskPollTimeout {
+	for time.Since(startTime) < taskPollTimeout {
 		d := b.Duration()
 		time.Sleep(d)
 
@@ -278,7 +291,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			return false, err
 		}
 		if statusCode != 200 {
-			return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+			return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 		}
 
 		err = json.Unmarshal([]byte(respBody), &task)
@@ -295,11 +308,15 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 			}
 		}
 	}
-	return false, errors.New(fmt.Sprintf("Task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status))
+	return false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
 }
 
 func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 	req, err := client.generateRequest("GET", "/shares", "")
+	if err != nil {
+		log.Error(err)
+		return nil, err
+	}
 	statusCode, respBody, _, err := client.doRequest(*req)
 
 	if err != nil {
@@ -307,7 +324,7 @@ func (client *HammerspaceClient) ListShares() ([]common.ShareResponse, error) {
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var shares []common.ShareResponse
@@ -329,7 +346,7 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		return nil, err
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var objs []common.ClusterObjectiveResponse
@@ -338,7 +355,8 @@ func (client *HammerspaceClient) ListObjectives() ([]common.ClusterObjectiveResp
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
 	log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST", objs, 60*5)
 	return objs, nil
 }
 
@@ -352,7 +370,8 @@ func (client *HammerspaceClient) ListObjectiveNames() ([]string, error) {
 	for i, o := range objectives {
 		objectiveNames[i] = o.Name
 	}
-
+	// set free capacity to cache expire in 5 min
+	SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
 	return objectiveNames, nil
 }
 
@@ -434,7 +453,7 @@ func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, e
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 
 	var share common.ShareResponse
@@ -485,7 +504,7 @@ func (client *HammerspaceClient) GetFile(path string) (*common.File, error) {
 		return nil, nil
 	}
 	if statusCode != 200 {
-		return nil, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var file common.File
 	err = json.Unmarshal([]byte(respBody), &file)
@@ -502,7 +521,7 @@ func (client *HammerspaceClient) DoesFileExist(path string) (bool, error) {
 
 func (client *HammerspaceClient) CreateShare(name string,
 	exportPath string,
-	size int64, //size in bytes
+	size string, //size in bytes
 	objectives []string,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
@@ -527,7 +546,8 @@ func (client *HammerspaceClient) CreateShare(name string,
 		ExtendedInfo:  extendedInfo,
 		Comment:       comment,
 	}
-	if size > 0 {
+	i, _ := strconv.Atoi(size)
+	if i > 0 {
 		share.Size = size
 	}
 
@@ -581,7 +601,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 
 func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 	exportPath string,
-	size int64, //size in bytes
+	size string, //size in bytes
 	objectives []string,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
@@ -607,7 +627,8 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 		ExtendedInfo:  extendedInfo,
 		Comment:       comment,
 	}
-	if size > 0 {
+	i, _ := strconv.ParseInt(size, 10, 64)
+	if i > 0 {
 		share.Size = size
 	}
 
@@ -670,7 +691,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(shareName strin
 		return false, err
 	}
 	if statusCode != 200 {
-		return false, errors.New(fmt.Sprintf(common.UnexpectedHSStatusCode, statusCode, 200))
+		return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var tasks []common.Task
 	err = json.Unmarshal([]byte(respBody), &tasks)
@@ -719,16 +740,14 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
 			//FIXME: err is not set here
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
-			return errors.New(fmt.Sprint("failed to set objective"))
+			return errors.New("failed to set objective")
 		}
 	}
 
 	return nil
 }
 
-func (client *HammerspaceClient) UpdateShareSize(name string,
-	size int64, //size in bytes
-) error {
+func (client *HammerspaceClient) UpdateShareSize(name string, size string) error {
 
 	log.Debugf("Update share size : %s to %v", name, size)
 
@@ -990,10 +1009,12 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity() (int64, error) {
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
-	free := cluster.Capacity["free"]
+	free, err := strconv.ParseInt(cluster.Capacity["free"], 10, 64)
 	if err != nil {
 		log.Error("Error parsing free cluster capacity: " + err.Error())
 	}
 
+	// set free capacity to cache expire in 5 min
+	SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
 	return free, nil
 }

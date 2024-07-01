@@ -71,7 +71,7 @@ func (d *CSIDriver) NodeUnstageVolume(
 
 func (d *CSIDriver) publishShareBackedVolume(
 	exportPath,
-	targetPath string, mountFlags []string, readOnly bool) error {
+	targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
 
 	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
 	if err != nil {
@@ -93,12 +93,12 @@ func (d *CSIDriver) publishShareBackedVolume(
 	if readOnly {
 		mountFlags = append(mountFlags, "ro")
 	}
-	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags)
+	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags, fqdn)
 	return err
 }
 
 func (d *CSIDriver) publishFileBackedVolume(
-	backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool) error {
+	backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
 	defer d.releaseVolumeLock(backingShareName)
 	d.getVolumeLock(backingShareName)
 
@@ -125,7 +125,7 @@ func (d *CSIDriver) publishFileBackedVolume(
 	}
 
 	// Ensure the backing share is mounted
-	err = d.EnsureBackingShareMounted(backingShareName)
+	err = d.EnsureBackingShareMounted(backingShareName, fqdn)
 	if err != nil {
 		return err
 	}
@@ -206,6 +206,7 @@ func (d *CSIDriver) NodePublishVolume(
 
 	var volumeMode, fsType string
 	var mountFlags []string
+	fqdn := req.GetVolumeContext()["fqdn"]
 	cap := req.GetVolumeCapability()
 	switch cap.GetAccessType().(type) {
 	case *csi.VolumeCapability_Block:
@@ -225,7 +226,7 @@ func (d *CSIDriver) NodePublishVolume(
 	}
 	var err error
 	if fsType == "nfs" {
-		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly())
+		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly(), fqdn)
 	} else {
 		var backingShareName string
 		if volumeMode == "Block" {
@@ -235,8 +236,7 @@ func (d *CSIDriver) NodePublishVolume(
 		}
 		log.Infof("Found backing share %s for volume %s", backingShareName, req.GetVolumeId())
 
-		err = d.publishFileBackedVolume(
-			backingShareName, req.GetVolumeId(), req.GetTargetPath(), fsType, mountFlags, req.GetReadonly())
+		err = d.publishFileBackedVolume(backingShareName, req.GetVolumeId(), req.GetTargetPath(), fsType, mountFlags, req.GetReadonly(), fqdn)
 
 	}
 
@@ -461,17 +461,17 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 		// NFS backend
 		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
 		share, err := d.hsclient.GetShare(volumeName)
-		if err != nil {
+		if err != nil || share == nil {
 			return nil, status.Error(codes.NotFound, common.ShareNotFound)
 		}
 
-		available := share.Space.Available
-		used := share.Space.Used
-		total := share.Space.Total
+		available, _ := strconv.ParseInt(share.Space.Available, 10, 64)
+		used, _ := strconv.ParseInt(share.Space.Used, 10, 64)
+		total, _ := strconv.ParseInt(share.Space.Total, 10, 64)
 
-		inodes_available := share.Inodes.Available
-		inodes_used := share.Inodes.Used
-		inodes_total := share.Inodes.Total
+		inodes_available, _ := strconv.ParseInt(share.Inodes.Available, 10, 64)
+		inodes_used, _ := strconv.ParseInt(share.Inodes.Used, 10, 64)
+		inodes_total, _ := strconv.ParseInt(share.Inodes.Total, 10, 64)
 
 		return &csi.NodeGetVolumeStatsResponse{
 			Usage: []*csi.VolumeUsage{
@@ -490,8 +490,6 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 			},
 		}, nil
 	}
-
-	return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 }
 
 func (d *CSIDriver) NodeExpandVolume(

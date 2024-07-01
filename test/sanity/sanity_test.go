@@ -30,7 +30,6 @@ var (
 	HSClient *client.HammerspaceClient
 )
 
-
 func Mkdir(targetPath string) (string, error) {
 	os.Mkdir(targetPath, 0755)
 	return targetPath, nil

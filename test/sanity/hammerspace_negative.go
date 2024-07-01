@@ -100,7 +100,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 
 		})
 
-
 		// Create Volume  with invalid metadata tags field
 		It("should fail with invalid metadata", func() {
 			name := uniqueString("sanity-node-full")
@@ -136,7 +135,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 			Expect(err).To(HaveOccurred())
 
 		})
-
 
 		// Create Volume  with invalid objectives field
 		It("should fail with invalid objectives", func() {
@@ -206,7 +204,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 			)
 			Expect(err).To(HaveOccurred())
 		})
-
 
 		// Create Volume  with invalid export options
 		It("should fail with invalid objectives", func() {
