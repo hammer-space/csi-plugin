@@ -173,7 +173,22 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	if err != nil {
 		return fmt.Errorf("failed to get share: %w", err)
 	}
-	if share == nil {
+	if share != nil {
+		if share.Size != hsVolume.Size {
+			return status.Errorf(
+				codes.AlreadyExists,
+				common.VolumeExistsSizeMismatch,
+				share.Size,
+				hsVolume.Size)
+		}
+
+		if share.ShareState == "REMOVED" {
+			return status.Errorf(codes.Aborted, common.VolumeBeingDeleted)
+		}
+	}
+
+	if share == nil && err == nil {
+		// Create empty share
 		// Create the Mountvolume
 		err = d.hsclient.CreateShare(
 			hsVolume.Name,
@@ -188,20 +203,6 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		if err != nil {
 			return status.Errorf(codes.Internal, err.Error())
 		}
-	}
-	if err != nil {
-		return fmt.Errorf("share not found")
-	}
-	if share.Size != hsVolume.Size {
-		return status.Errorf(
-			codes.AlreadyExists,
-			common.VolumeExistsSizeMismatch,
-			share.Size,
-			hsVolume.Size)
-	}
-
-	if share.ShareState == "REMOVED" {
-		return status.Errorf(codes.Aborted, common.VolumeBeingDeleted)
 	}
 
 	if hsVolume.SourceSnapPath != "" {
@@ -239,24 +240,10 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		if err != nil {
 			return status.Errorf(codes.Internal, err.Error())
 		}
-	} else { // Create empty share
-		// Create the Mountvolume
-		err = d.hsclient.CreateShare(
-			hsVolume.Name,
-			hsVolume.Path,
-			hsVolume.Size,
-			hsVolume.Objectives,
-			hsVolume.ExportOptions,
-			hsVolume.DeleteDelay,
-			hsVolume.Comment,
-		)
-
-		if err != nil {
-			return status.Errorf(codes.Internal, err.Error())
-		}
 	}
+
 	// generate unique target path on host for setting file metadata
-	targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	defer common.UnmountFilesystem(targetPath)
 	err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
 	if err != nil {
@@ -291,7 +278,7 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
 		}
 
 		// generate unique target path on host for setting file metadata
-		targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(targetPath)
 		err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
 		if err != nil {

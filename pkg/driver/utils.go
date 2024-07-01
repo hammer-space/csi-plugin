@@ -139,6 +139,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 	portals, err := d.hsclient.GetDataPortals(d.NodeID)
 	if err != nil {
 		log.Errorf("Could not create list of data-portals, %v", err)
+		return err
 	}
 
 	extracted_endpoint, err := common.ResolveFQDN(fqdn)
