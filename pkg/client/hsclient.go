@@ -287,8 +287,6 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 		d := b.Duration()
 		time.Sleep(d)
 
-		log.Info(taskId)
-
 		req, err := client.generateRequest("GET", "/tasks/"+taskId, "")
 		if err != nil {
 			log.Error("Failed to generate request object")

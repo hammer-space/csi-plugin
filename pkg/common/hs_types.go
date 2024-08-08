@@ -29,6 +29,7 @@ type HSVolumeParameters struct {
 	AdditionalMetadataTags map[string]string
 	CacheEnabled           bool
 	FQDN                   string
+	ClientMountOptions     []string
 }
 
 type HSVolume struct {
@@ -47,6 +48,7 @@ type HSVolume struct {
 	SourceSnapShareName    string
 	AdditionalMetadataTags map[string]string
 	FQDN                   string
+	ClientMountOptions     []string
 }
 
 ///// Request and Response objects for interacting with the HS API

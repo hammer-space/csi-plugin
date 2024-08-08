@@ -162,6 +162,11 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		vParams.FQDN = FQDN
 	}
 
+	clientMountOptions, exists := params["clientMountOptions"]
+	if exists {
+		vParams.ClientMountOptions = strings.Split(clientMountOptions, ",")
+	}
+
 	return vParams, nil
 }
 
@@ -239,9 +244,9 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		}
 	}
 	// generate unique target path on host for setting file metadata
-	targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	defer common.UnmountFilesystem(targetPath)
-	err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
+	err = d.publishShareBackedVolume(hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
@@ -277,9 +282,9 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
 		}
 
 		// generate unique target path on host for setting file metadata
-		targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(targetPath)
-		err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
+		err = d.publishShareBackedVolume(hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
@@ -337,7 +342,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 		//// Mount Backing Share
 
 		defer d.UnmountBackingShareIfUnused(backingShare.Name)
-		err = d.EnsureBackingShareMounted(backingShare.Name, hsVolume.FQDN) // check if share is mounted
+		err = d.EnsureBackingShareMounted(backingShare.Name, hsVolume) // check if share is mounted
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
@@ -557,6 +562,7 @@ func (d *CSIDriver) CreateVolume(
 		AdditionalMetadataTags: vParams.AdditionalMetadataTags,
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
+		ClientMountOptions:     vParams.ClientMountOptions,
 	}
 
 	// if it's file backed, we should check capacity of backing share
@@ -686,6 +692,11 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 
 	residingShareName := path.Base(path.Dir(filepath))
 
+	hsVolume := &common.HSVolume{
+		FQDN:               "",
+		ClientMountOptions: []string{},
+	}
+
 	if exists {
 		// mount share and delete file
 		destination := common.ShareStagingDir + path.Dir(filepath)
@@ -693,7 +704,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 		defer d.releaseVolumeLock(residingShareName)
 		d.getVolumeLock(residingShareName)
 		defer d.UnmountBackingShareIfUnused(residingShareName)
-		err := d.EnsureBackingShareMounted(residingShareName, "") // check if share is mounted
+		err := d.EnsureBackingShareMounted(residingShareName, hsVolume) // check if share is mounted
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, err.Error())
