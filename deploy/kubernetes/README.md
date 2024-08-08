@@ -228,3 +228,97 @@ spec:
       persistentVolumeClaim:
         claimName: myfilesystem
 ```
+### This example demonstrates how to use Fully Qualified Domain Names (FQDN) with the Hammerspace CSI Plugin for file-backed storage.
+
+Example File-Backed StorageClass
+The following StorageClass definition shows how to configure a file-backed filesystem volume with an FQDN parameter.
+
+```yaml
+# Example File-Backed StorageClass
+# Define a StorageClass for file-backed Filesystem volumes with the Hammerspace CSI Plugin
+kind: StorageClass
+apiVersion: storage.k8s.io/v1
+metadata:
+  name: hs-file-backed
+  namespace: kube-system
+provisioner: com.hammerspace.csi
+parameters:
+  fsType: "ext4"
+  mountBackingShareName: k8s-file-storage
+  objectives: "keep-online"
+  volumeNameFormat: "csi-%s"
+  additionalMetadataTags: "storageClassName=hs-file-backed,fsType=file"
+  comment: "My share description"
+  cacheEnabled: "true"
+  fqdn: "storage-server.example.com"
+allowVolumeExpansion: true
+```
+
+Configuring CoreDNS for FQDN Support
+To use an FQDN, update your Kubernetes CoreDNS configuration. This ensures the FQDN resolves correctly within your cluster.
+
+### Steps to Update CoreDNS
+* Edit the CoreDNS ConfigMap
+Modify the Corefile in the kube-system namespace to include the desired FQDN mapping under the hosts plugin section.
+
+```json
+{
+    "Corefile": ".:53 {
+        log
+        errors
+        health {
+            lameduck 5s
+        }
+        ready
+        kubernetes cluster.local in-addr.arpa ip6.arpa {
+            pods insecure
+            fallthrough in-addr.arpa ip6.arpa
+            ttl 30
+        }
+        prometheus :9153
+        hosts {
+            <some-ip> storage-server.example.com
+            192.168.49.1 host.minikube.internal
+            fallthrough
+        }
+        forward . /etc/resolv.conf {
+            max_concurrent 1000
+        }
+        cache 30
+        loop
+        reload
+        loadbalance
+    }
+}
+
+```
+Apply the Updated ConfigMap
+Save your changes and apply the updated ConfigMap:
+
+```bash
+kubectl apply -f <updated-configmap-file>
+Restart CoreDNS
+```
+
+Roll out a restart of the CoreDNS deployment to apply the new configuration:
+```bash
+kubectl -n kube-system rollout restart deployment coredns
+```
+
+- Verifying the Configuration
+Confirm that the StorageClass is correctly applied:
+```bash
+kubectl get storageclass hs-file-backed
+```
+
+Verify the CoreDNS configuration using the following command:
+```bash
+kubectl -n kube-system logs -l k8s-app=kube-dns
+```
+
+Test FQDN resolution within your cluster:
+
+```bash
+nslookup storage-server.example.com
+```
+By following these steps, you can configure Kubernetes to support FQDN in your StorageClass YAML, ensuring smooth operations with Hammerspace CSI.

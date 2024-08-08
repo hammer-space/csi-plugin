@@ -37,6 +37,8 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 )
 
+const LOOP_CTL_GET_FREE = 0x4C82
+
 func execCommandHelper(command string, args ...string) ([]byte, error) {
 	cmd := exec.Command(command, args...)
 	log.Debugf("Executing command: %v", cmd)
@@ -74,16 +76,19 @@ var ExecCommand = execCommandHelper
 // EnsureFreeLoopbackDeviceFile finds the next available loop device under /dev/loop*
 // If no free loop devices exist, a new one is created
 func EnsureFreeLoopbackDeviceFile() (uint64, error) {
-	LOOP_CTL_GET_FREE := uintptr(0x4C82)
-	LoopControlPath := "/dev/loop-control"
-	ctrl, err := os.OpenFile(LoopControlPath, os.O_RDWR, 0660)
+	loopControlPath := "/dev/loop-control"
+
+	// Open the loop-control device
+	ctrl, err := os.OpenFile(loopControlPath, os.O_RDWR, 0660)
 	if err != nil {
-		return 0, fmt.Errorf("could not open %s: %v", LoopControlPath, err)
+		return 0, fmt.Errorf("could not open %s: %w", loopControlPath, err)
 	}
 	defer ctrl.Close()
-	dev, _, errno := unix.Syscall(unix.SYS_IOCTL, ctrl.Fd(), LOOP_CTL_GET_FREE, 0)
-	if dev < 0 {
-		return 0, fmt.Errorf("could not get free device: %v", errno)
+
+	// Use IoctlGetInt to get a free loop device
+	dev, err := unix.IoctlGetInt(int(ctrl.Fd()), LOOP_CTL_GET_FREE)
+	if err != nil {
+		return 0, fmt.Errorf("could not get free loop device: %w", err)
 	}
 	return uint64(dev), nil
 }
@@ -208,7 +213,7 @@ func FormatDevice(device, fsType string) error {
 	}
 	output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
 	if err != nil {
-		log.Info(err)
+		log.Errorf("Error executing mkfs command. %v", err)
 		if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
 			log.Warningf("Device %s is already mounted", device)
 			return err
@@ -445,7 +450,7 @@ func CheckNFSExports(address string) (bool, error) {
 	case err := <-errChan:
 		return false, status.Errorf(codes.Internal, "could not determine nfs exports: %v", err)
 	case output := <-outputChan:
-		log.Infof(string(output))
+		log.Infof("%s", string(output))
 		return true, nil
 	}
 }
@@ -511,7 +516,7 @@ func SetMetadataTags(localPath string, tags map[string]string) error {
 
 		// FIXME: The HS client returns exit code 0 even on failure, so we can't detect errors
 		if err != nil {
-			log.Errorf("Failed to set tag. Error - %v" + err.Error())
+			log.Errorf("%s", "Failed to set tag. Error - %v"+err.Error())
 			break
 		}
 		log.Debugf("hs tag set. output: %s", output)
