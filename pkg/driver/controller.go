@@ -1218,16 +1218,18 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 
 	shareName := GetVolumeNameFromPath(path)
 
-	// delete if it's a share snap
-	err := d.hsclient.DeleteShareSnapshot(shareName, snapshotName)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	// delete if it's a file snap
-	err = d.hsclient.DeleteFileSnapshot(path, snapshotName)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	if shareName != "" {
+		// delete if it's a share snap
+		err := d.hsclient.DeleteShareSnapshot(shareName, snapshotName)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	} else {
+		// delete if it's a file snap
+		err := d.hsclient.DeleteFileSnapshot(path, snapshotName)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
 	}
 
 	// Delete snapshot
