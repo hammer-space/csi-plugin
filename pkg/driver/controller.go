@@ -1236,34 +1236,53 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 
-func (d *CSIDriver) ListSnapshots(ctx context.Context,
-	req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 
 	if req.MaxEntries < 0 {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
 			"[ListSnapshots] Invalid max entries request %v, must not be negative ", req.MaxEntries))
 	}
 
-	slist, err := d.hsclient.ListSnapshots()
+	// Initialize a slice to hold the snapshot entries
+	var snapshots []*csi.ListSnapshotsResponse_Entry
+
+	// Fetch all snapshots from the backend storage
+	backendSnapshots, err := d.hsclient.ListSnapshots(req.SnapshotId, req.SourceVolumeId)
 	if err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("ListSnapshots failed with error %v", err))
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	ventries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(slist))
-	for _, v := range slist {
-		ventry := csi.ListSnapshotsResponse_Entry{
+	// Apply filtering based on snapshot_id and source_volume_id
+	for _, snapshot := range backendSnapshots {
+		// Filter by snapshot_id if provided
+		if req.GetSnapshotId() != "" && snapshot.Id != req.GetSnapshotId() {
+			continue
+		}
+
+		// Filter by source_volume_id if provided
+		if req.GetSourceVolumeId() != "" && snapshot.SourceVolumeId != req.GetSourceVolumeId() {
+			continue
+		}
+
+		// Build the SnapshotEntry for each matching snapshot
+		snapshotEntry := &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
-				SnapshotId:     v.Name,
-				SourceVolumeId: v.Name,
+				SizeBytes:      snapshot.Size,
+				SnapshotId:     snapshot.Id,
+				ReadyToUse:     snapshot.ReadyToUse,
+				SourceVolumeId: snapshot.SourceVolumeId,
 				CreationTime: &timestamp.Timestamp{
-					Seconds: v.Created,
+					Seconds: snapshot.Created,
 				},
 			},
 		}
 
-		ventries = append(ventries, &ventry)
+		// Add the snapshot entry to the response
+		snapshots = append(snapshots, snapshotEntry)
 	}
+
+	// Return the ListSnapshotsResponse with filtered snapshots
 	return &csi.ListSnapshotsResponse{
-		Entries: ventries,
+		Entries: snapshots,
 	}, nil
 }
