@@ -635,6 +635,8 @@ func (d *CSIDriver) CreateVolume(
 			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		hsVolume.SourceSnapShareName = sourceSnapShareName
+
+		log.Info("using snapshot as volume source")
 	}
 
 	if fileBacked {
@@ -669,13 +671,27 @@ func (d *CSIDriver) CreateVolume(
 	}
 
 	log.Infof("Total time taken for create volume %v", time.Since(startTime))
-	return &csi.CreateVolumeResponse{
+
+	resp := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes: hsVolume.Size,
 			VolumeId:      hsVolume.Path,
 			VolumeContext: volContext,
 		},
-	}, nil
+	}
+
+	if snap != nil {
+		resp.Volume.ContentSource = &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: snap.GetSnapshotId(),
+				},
+			},
+		}
+	}
+
+	log.WithField("response", resp).Info("volume was created")
+	return resp, nil
 }
 
 func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
