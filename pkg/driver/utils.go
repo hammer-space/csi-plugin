@@ -139,7 +139,10 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 	}
 
 	extracted_endpoint, err := common.ResolveFQDN(fqdn)
-	if extracted_endpoint != "" || err != nil { // if fqdn is provided use that ip
+	if err != nil {
+		log.Errorf("Not able to resolve FQDN=%s checking floating IP's. Error %v", fqdn, err)
+	}
+	if extracted_endpoint != "" && err == nil { // if fqdn is provided use that ip
 		// check if rpcinfo gives a response
 		ok, err := common.CheckNFSExports(extracted_endpoint)
 		if err != nil {
