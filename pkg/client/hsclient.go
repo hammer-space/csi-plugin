@@ -118,29 +118,32 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 	var floatingIP string
 
 	for _, p := range clusters.PortalFloatingIps {
+		fip := p.Address
 		wg.Add(1)
 		go func(fip string) {
 			defer wg.Done()
+			log.Infof("Goroutine started with fip: %s", fip)
 
-			// check if rpcinfo gives a response
+			// Check if NFS exports are available for the current floating IP
 			ok, err := common.CheckNFSExports(fip)
 			if err != nil {
 				log.Warnf("Could not get exports for data-portal at %s. Error: %v", fip, err)
 				return
 			}
 
-			// Check if exports has any values
+			// Update the floating IP if exports were found
 			if ok {
 				mutex.Lock()
-				floatingIP = fip // Update the floating IP
+				floatingIP = fip
+				log.Infof("Updated floatingIP to: %s", floatingIP)
 				mutex.Unlock()
-				log.Infof("Found floating IP data-portal %s", floatingIP)
 			}
-		}(p.Address)
+		}(fip)
 	}
 
 	// Keep the main goroutine running until all goroutines finish
 	wg.Wait()
+	log.Info("All goroutines finished")
 	return floatingIP, nil
 }
 
