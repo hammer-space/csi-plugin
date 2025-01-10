@@ -210,16 +210,16 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		return false
 	}
 
-	log.Infof("Attempting to mount via NFS 4.1.")
+	log.Infof("Attempting to mount via NFS 4.2.")
 	mounted := false
 	for _, p := range portals {
-		mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.1"))
+		mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.2"))
 		if mounted {
 			break
 		}
 	}
 	if !mounted {
-		log.Infof("Could not mount via NFS 4.1, falling back to NFS 3.")
+		log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
 		for _, p := range portals {
 			mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock"))
 			if mounted {
