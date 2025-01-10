@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.6
+### Fixed Bug
+- Fixed error where floating IP's is not being used. 
+
 ## 1.2.5
 ### Added
 - Fixed error to get volume capability due to change in type fromat. (Fix breaking changes only work with thor2 and above)

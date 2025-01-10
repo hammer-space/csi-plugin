@@ -17,7 +17,7 @@ limitations under the License.
 package client
 
 const (
-    FakeShareRoot = `
+	FakeShareRoot = `
 {
     "uoid": {
         "uuid": "acd90e88-ed23-3464-90ee-320e11de31ae",
@@ -53,7 +53,7 @@ const (
     "scheduledPurgeTime": null
 }
 `
-    FakeShare1 = `
+	FakeShare1 = `
 {
 	"uoid": {
 		"uuid": "ac486652-6957-43cd-ac75-9885b3b3e9c9",
@@ -102,30 +102,30 @@ const (
 }
 `
 
-    FakeTaskCompleted = `
+	FakeTaskCompleted = `
 {
     "uuid": "a59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
     "status": "COMPLETED",
-    "exitValue": "COMPLETED"
+    "statusMessage": "COMPLETED"
 }
 `
 
-    FakeTaskFailed = `
+	FakeTaskFailed = `
 {
     "uuid": "b59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
     "status": "FAILED",
-    "exitValue": "Status: 500, Output: random"
+    "statusMessage": "Status: 500, Output: random"
 }
 `
 
-    FakeTaskRunning = `
+	FakeTaskRunning = `
 {
     "uuid": "c59ad344-6f1a-4ef2-b1e2-1d232707978d",
     "name": "share-create",
     "status": "VALIDATING",
-    "exitValue": "NONE"
+    "statusMessage": "NONE"
 }
 `
 )

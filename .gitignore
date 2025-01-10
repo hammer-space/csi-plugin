@@ -1,7 +1,9 @@
 bin/
 tmp/
-hammerspace-cs-driver
+hammerspace-csi-driver
 csi-plugin
+deploy-test/
+vendor/
 
 *.swp
 *.test
