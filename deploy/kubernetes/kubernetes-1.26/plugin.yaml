@@ -1,4 +1,4 @@
-#### CSI Object
+# CSI Driver Object
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
@@ -10,9 +10,9 @@ spec:
     - Persistent
   storageCapacity: true
 
-#### Controller Service
+# Controller Service
 ---
-# needed for StatefulSet
+# Needed for StatefulSet
 kind: Service
 apiVersion: v1
 metadata:
@@ -51,7 +51,7 @@ spec:
           image: registry.k8s.io/sig-storage/csi-provisioner:v3.6.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
-            - "--timeout=60s"  # Recommended as shares may take some time to create
+            - "--timeout=60s" # Recommended as shares may take some time to create
             - "--v=5"
           env:
             - name: CSI_ENDPOINT
@@ -73,7 +73,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-snapshotter
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-snapshotter:v6.2.1
+          image: registry.k8s.io/sig-storage/csi-snapshotter:v8.1.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -102,7 +102,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.5
+          image: hammerspaceinc/csi-plugin:v1.2.6
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock
@@ -144,58 +144,44 @@ metadata:
   name: csi-provisioner
   namespace: kube-system
 ---
+# RBAC for Controller
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
   name: csi-provisioner
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["list", "watch"]
-  - apiGroups: [""]
-    resources: ["persistentvolumes"]
-    verbs: ["get", "patch", "list", "watch", "create", "delete", "update"]
-  - apiGroups: [""]
-    resources: ["persistentvolumeclaims", "persistentvolumeclaims/status"]
-    verbs: ["get", "patch", "list", "watch", "update"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["events"]
-    verbs: ["list", "watch", "create", "update", "patch"]
-  - apiGroups: [""]
-    resources: ["endpoints"]
-    verbs: ["list", "watch", "create", "update", "delete", "get"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list"]
-  - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshotclasses"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshotcontents"]
-    verbs: ["create", "get", "list", "watch", "update", "delete"]
-  - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshots"]
-    verbs: ["get", "list", "watch", "update"]
-  - apiGroups: ["apiextensions.k8s.io"]
-    resources: ["customresourcedefinitions"]
-    verbs: ["create", "list", "watch", "delete"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["volumeattachments", "volumeattachments/status"]
-    verbs: ["get", "list", "watch", "update", "patch"]
-  - apiGroups: ["storage.k8s.io"]
-    resources: ["storageclasses"]
-    verbs: ["get", "list", "watch", "update"]
+    resources:
+      [
+        "pods",
+        "persistentvolumes",
+        "persistentvolumeclaims",
+        "nodes",
+        "events",
+        "endpoints",
+        "secrets",
+      ]
+    verbs: ["list", "watch", "get", "create", "delete", "update", "patch"]
+  - apiGroups:
+      ["storage.k8s.io", "snapshot.storage.k8s.io", "apiextensions.k8s.io"]
+    resources:
+      [
+        "storageclasses",
+        "volumeattachments",
+        "volumeattachments/status",
+        "volumesnapshotcontents/status",
+        "volumesnapshots",
+        "volumesnapshotcontents",
+        "volumesnapshotclasses",
+        "customresourcedefinitions",
+      ]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: csi-provisioner
+  name: csi-provisioner-binding
   namespace: kube-system
 subjects:
   - kind: ServiceAccount
@@ -205,8 +191,8 @@ roleRef:
   kind: ClusterRole
   name: csi-provisioner
   apiGroup: rbac.authorization.k8s.io
-#### Node service
 ---
+# Node Service
 kind: DaemonSet
 apiVersion: apps/v1
 metadata:
@@ -271,7 +257,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.5
+          image: hammerspaceinc/csi-plugin:v1.2.6
           env:
             - name: CSI_ENDPOINT
               value: /csi/csi.sock
@@ -343,23 +329,22 @@ metadata:
   namespace: kube-system
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["list", "watch"]
-  - apiGroups: [""]
-    resources: ["secrets"]
-    verbs: ["get", "list"]
-  - apiGroups: [""]
-    resources: ["nodes"]
-    verbs: ["get", "list", "update"]
-  - apiGroups: [""]
-    resources: ["namespaces", "events"]
-    verbs: ["get", "list", "create"]
-  - apiGroups: [""]
-    resources: ["persistentvolumes", "persistentvolumeclaims", "persistentvolumeclaims/status","events"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    resources:
+      [
+        "pods",
+        "secrets",
+        "nodes",
+        "namespaces",
+        "events",
+        "persistentvolumes",
+        "persistentvolumeclaims",
+        "persistentvolumeclaims/status",
+      ]
+    verbs: ["get", "list", "create", "watch", "update", "patch"]
+
   - apiGroups: ["storage.k8s.io"]
     resources: ["volumeattachments", "volumeattachments/status"]
-    verbs: ["get", "list", "watch", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
 
 ---
 kind: ClusterRoleBinding
@@ -374,19 +359,4 @@ subjects:
 roleRef:
   kind: ClusterRole
   name: csi-node
-  apiGroup: rbac.authorization.k8s.io
-
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: csi-provisioner-volumeattachment-status-binding
-  namespace: kube-system
-subjects:
-  - kind: ServiceAccount
-    name: csi-provisioner
-    namespace: kube-system
-roleRef:
-  kind: ClusterRole
-  name: csi-provisioner-volumeattachment-status
   apiGroup: rbac.authorization.k8s.io

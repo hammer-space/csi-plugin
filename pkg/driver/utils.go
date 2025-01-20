@@ -232,16 +232,16 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		log.Infof("Mount with provided mount flags failed, removed nfsvers option.")
 	}
 
-	// Fallback to NFS 4.1
-	log.Infof("Provided mount flags do not contain nfsvers option or failed to mount, using default to NFS 4.1.")
+	// Fallback to NFS 4.2
+	log.Infof("Provided mount flags do not contain nfsvers option or failed to mount, using default to NFS 4.2.")
 	for _, p := range portals {
-		if MountToDataPortal(p, append(mountFlags, "nfsvers=4.1")) {
+		if MountToDataPortal(p, append(mountFlags, "nfsvers=4.2")) {
 			return nil
 		}
 	}
 
 	// Fallback to NFS 3
-	log.Infof("Could not mount via NFS 4.1, falling back to NFS 3.")
+	log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
 	for _, p := range portals {
 		if MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock")) {
 			return nil
