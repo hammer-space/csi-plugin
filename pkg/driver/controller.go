@@ -162,6 +162,11 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		vParams.FQDN = FQDN
 	}
 
+	clientMountOptions, exists := params["clientMountOptions"]
+	if exists {
+		vParams.ClientMountOptions = strings.Split(clientMountOptions, ",")
+	}
+
 	return vParams, nil
 }
 
@@ -239,9 +244,9 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		}
 	}
 	// generate unique target path on host for setting file metadata
-	targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	defer common.UnmountFilesystem(targetPath)
-	err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
+	err = d.publishShareBackedVolume(hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
@@ -277,9 +282,9 @@ func (d *CSIDriver) ensureBackingShareExists(backingShareName string, hsVolume *
 		}
 
 		// generate unique target path on host for setting file metadata
-		targetPath := common.ShareStagingDir + "metadata-mounts" + hsVolume.Path
+		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(targetPath)
-		err = d.publishShareBackedVolume(hsVolume.Path, targetPath, []string{}, false, hsVolume.FQDN)
+		err = d.publishShareBackedVolume(hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
@@ -337,7 +342,7 @@ func (d *CSIDriver) ensureDeviceFileExists(
 		//// Mount Backing Share
 
 		defer d.UnmountBackingShareIfUnused(backingShare.Name)
-		err = d.EnsureBackingShareMounted(backingShare.Name, hsVolume.FQDN) // check if share is mounted
+		err = d.EnsureBackingShareMounted(backingShare.Name, hsVolume) // check if share is mounted
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
@@ -557,6 +562,7 @@ func (d *CSIDriver) CreateVolume(
 		AdditionalMetadataTags: vParams.AdditionalMetadataTags,
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
+		ClientMountOptions:     vParams.ClientMountOptions,
 	}
 
 	// if it's file backed, we should check capacity of backing share
@@ -629,6 +635,8 @@ func (d *CSIDriver) CreateVolume(
 			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		hsVolume.SourceSnapShareName = sourceSnapShareName
+
+		log.Info("using snapshot as volume source")
 	}
 
 	if fileBacked {
@@ -663,13 +671,27 @@ func (d *CSIDriver) CreateVolume(
 	}
 
 	log.Infof("Total time taken for create volume %v", time.Since(startTime))
-	return &csi.CreateVolumeResponse{
+
+	resp := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes: hsVolume.Size,
 			VolumeId:      hsVolume.Path,
 			VolumeContext: volContext,
 		},
-	}, nil
+	}
+
+	if snap != nil {
+		resp.Volume.ContentSource = &csi.VolumeContentSource{
+			Type: &csi.VolumeContentSource_Snapshot{
+				Snapshot: &csi.VolumeContentSource_SnapshotSource{
+					SnapshotId: snap.GetSnapshotId(),
+				},
+			},
+		}
+	}
+
+	log.WithField("response", resp).Info("volume was created")
+	return resp, nil
 }
 
 func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
@@ -686,6 +708,11 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 
 	residingShareName := path.Base(path.Dir(filepath))
 
+	hsVolume := &common.HSVolume{
+		FQDN:               "",
+		ClientMountOptions: []string{},
+	}
+
 	if exists {
 		// mount share and delete file
 		destination := common.ShareStagingDir + path.Dir(filepath)
@@ -693,7 +720,7 @@ func (d *CSIDriver) deleteFileBackedVolume(filepath string) error {
 		defer d.releaseVolumeLock(residingShareName)
 		d.getVolumeLock(residingShareName)
 		defer d.UnmountBackingShareIfUnused(residingShareName)
-		err := d.EnsureBackingShareMounted(residingShareName, "") // check if share is mounted
+		err := d.EnsureBackingShareMounted(residingShareName, hsVolume) // check if share is mounted
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, err.Error())
@@ -1207,50 +1234,71 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 
 	shareName := GetVolumeNameFromPath(path)
 
-	// delete if it's a share snap
-	err := d.hsclient.DeleteShareSnapshot(shareName, snapshotName)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
-	}
-
-	// delete if it's a file snap
-	err = d.hsclient.DeleteFileSnapshot(path, snapshotName)
-	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+	if shareName != "" {
+		// delete if it's a share snap
+		err := d.hsclient.DeleteShareSnapshot(shareName, snapshotName)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	} else {
+		// delete if it's a file snap
+		err := d.hsclient.DeleteFileSnapshot(path, snapshotName)
+		if err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
 	}
 
 	// Delete snapshot
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 
-func (d *CSIDriver) ListSnapshots(ctx context.Context,
-	req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
+func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsRequest) (*csi.ListSnapshotsResponse, error) {
 
 	if req.MaxEntries < 0 {
 		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
 			"[ListSnapshots] Invalid max entries request %v, must not be negative ", req.MaxEntries))
 	}
 
-	slist, err := d.hsclient.ListSnapshots()
+	// Initialize a slice to hold the snapshot entries
+	var snapshots []*csi.ListSnapshotsResponse_Entry
+
+	// Fetch all snapshots from the backend storage
+	backendSnapshots, err := d.hsclient.ListSnapshots(req.SnapshotId, req.SourceVolumeId)
 	if err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("ListSnapshots failed with error %v", err))
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	ventries := make([]*csi.ListSnapshotsResponse_Entry, 0, len(slist))
-	for _, v := range slist {
-		ventry := csi.ListSnapshotsResponse_Entry{
+	// Apply filtering based on snapshot_id and source_volume_id
+	for _, snapshot := range backendSnapshots {
+		// Filter by snapshot_id if provided
+		if req.GetSnapshotId() != "" && snapshot.Id != req.GetSnapshotId() {
+			continue
+		}
+
+		// Filter by source_volume_id if provided
+		if req.GetSourceVolumeId() != "" && snapshot.SourceVolumeId != req.GetSourceVolumeId() {
+			continue
+		}
+
+		// Build the SnapshotEntry for each matching snapshot
+		snapshotEntry := &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
-				SnapshotId:     v.Name,
-				SourceVolumeId: v.Name,
+				SizeBytes:      snapshot.Size,
+				SnapshotId:     snapshot.Id,
+				ReadyToUse:     snapshot.ReadyToUse,
+				SourceVolumeId: snapshot.SourceVolumeId,
 				CreationTime: &timestamp.Timestamp{
-					Seconds: v.Created,
+					Seconds: snapshot.Created,
 				},
 			},
 		}
 
-		ventries = append(ventries, &ventry)
+		// Add the snapshot entry to the response
+		snapshots = append(snapshots, snapshotEntry)
 	}
+
+	// Return the ListSnapshotsResponse with filtered snapshots
 	return &csi.ListSnapshotsResponse{
-		Entries: ventries,
+		Entries: snapshots,
 	}, nil
 }

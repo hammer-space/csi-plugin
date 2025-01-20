@@ -208,7 +208,7 @@ func FormatDevice(device, fsType string) error {
 	}
 	output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
 	if err != nil {
-		log.Info(err)
+		log.Errorf("Error executing mkfs command. %v", err)
 		if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
 			log.Warningf("Device %s is already mounted", device)
 			return err

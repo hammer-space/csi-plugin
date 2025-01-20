@@ -65,7 +65,7 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func (d *CSIDriver) EnsureBackingShareMounted(backingShareName, fqdn string) error {
+func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string, hsVol *common.HSVolume) error {
 	backingShare, err := d.hsclient.GetShare(backingShareName)
 	if err != nil {
 		return status.Errorf(codes.NotFound, err.Error())
@@ -74,8 +74,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName, fqdn string) err
 		backingDir := common.ShareStagingDir + backingShare.ExportPath
 		// Mount backing share
 		if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
-			mo := []string{}
-			err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, mo, fqdn)
+			err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
 				return err
@@ -92,8 +91,9 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName, fqdn string) err
 
 func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, error) {
 	backingShare, err := d.hsclient.GetShare(backingShareName)
-	if err != nil {
+	if err != nil || backingShare == nil {
 		log.Errorf("unable to get share while checking UnmountBackingShareIfUnused. Err %v", err)
+		return false, err
 	}
 	mountPath := common.ShareStagingDir + backingShare.ExportPath
 	if isMounted, _ := common.IsShareMounted(mountPath); !isMounted {
@@ -159,6 +159,16 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		}
 	}
 
+	// Helper function to check if mountFlags contains nfsvers
+	containsNfsvers := func(flags []string) bool {
+		for _, flag := range flags {
+			if strings.HasPrefix(flag, "nfsvers=") {
+				return true
+			}
+		}
+		return false
+	}
+
 	MountToDataPortal := func(portal common.DataPortal, mount_options []string) bool {
 		addr := ""
 		if len(fipaddr) > 0 {
@@ -199,8 +209,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 				return false
 			}
 		}
-		mo := append(mountFlags, mount_options...)
-		err = common.MountShare(export, targetPath, mo)
+		err = common.MountShare(export, targetPath, mount_options)
 		if err != nil {
 			log.Infof("Could not mount via data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
 		} else {
@@ -210,25 +219,34 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		return false
 	}
 
-	log.Infof("Attempting to mount via NFS 4.2.")
-	mounted := false
-	for _, p := range portals {
-		mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=4.2"))
-		if mounted {
-			break
-		}
-	}
-	if !mounted {
-		log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
+	log.Infof("Attempting to mount with provided mount flags.")
+	// Attempt to mount with provided mount flags if they contain nfsvers
+	if containsNfsvers(mountFlags) {
 		for _, p := range portals {
-			mounted = MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock"))
-			if mounted {
-				break
+			if MountToDataPortal(p, mountFlags) {
+				return nil
 			}
 		}
+		// Remove nfsvers option from mountFlags if mount fails
+		mountFlags = []string{}
+		log.Infof("Mount with provided mount flags failed, removed nfsvers option.")
 	}
-	if mounted {
-		return nil
+
+	// Fallback to NFS 4.2
+	log.Infof("Provided mount flags do not contain nfsvers option or failed to mount, using default to NFS 4.2.")
+	for _, p := range portals {
+		if MountToDataPortal(p, append(mountFlags, "nfsvers=4.2")) {
+			return nil
+		}
 	}
+
+	// Fallback to NFS 3
+	log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
+	for _, p := range portals {
+		if MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock")) {
+			return nil
+		}
+	}
+
 	return fmt.Errorf("could not mount to any data-portals")
 }

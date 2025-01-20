@@ -287,8 +287,6 @@ func (client *HammerspaceClient) WaitForTaskCompletion(taskLocation string) (boo
 		d := b.Duration()
 		time.Sleep(d)
 
-		log.Info(taskId)
-
 		req, err := client.generateRequest("GET", "/tasks/"+taskId, "")
 		if err != nil {
 			log.Error("Failed to generate request object")
@@ -414,48 +412,52 @@ func (client *HammerspaceClient) ListVolumes() ([]common.VolumeResponse, error) 
 	return volumes, nil
 }
 
-func (client *HammerspaceClient) ListSnapshots() ([]common.SnapshotResponse, error) {
-	// get share snaphsots list
-	req1, err := client.generateRequest("GET", "/share-snapshots", "")
-	statusCode1, respBody1, _, err1 := client.doRequest(*req1)
+func (client *HammerspaceClient) ListSnapshots(snapshot_id, volume_id string) ([]common.SnapshotResponse, error) {
+	// Get all shares
+	shares, err := client.ListShares()
+	if err != nil || shares == nil {
+		log.Error(err)
+		return nil, err
+	}
 
-	if err1 != nil {
-		log.Error(err1)
-		return nil, err1
-	}
-	if statusCode1 != 200 {
-		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode1, 200)
-	}
 	var shareSnapshots []common.SnapshotResponse
-	err = json.Unmarshal([]byte(respBody1), &shareSnapshots)
-	if err != nil {
-		log.Error("Error parsing JSON response: " + err.Error())
-	}
-	// get file snapshots list
-	req2, err := client.generateRequest("GET", "/file-snapshots", "")
-	statusCode2, respBody2, _, err2 := client.doRequest(*req2)
 
-	if err2 != nil {
-		log.Error(err2)
-		return nil, err2
-	}
-	if statusCode2 != 200 {
-		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode2, 200)
-	}
-	var fileSnapshots []common.SnapshotResponse
-	err = json.Unmarshal([]byte(respBody2), &fileSnapshots)
-	if err != nil {
-		log.Error("Error parsing JSON response: " + err.Error())
-	}
+	// Iterate over each share
+	for _, share := range shares {
+		// Skip shares that don't match the provided volume_id (if specified)
+		if volume_id != "" && share.Name != volume_id {
+			continue
+		}
 
-	// combine both file and share snapshots list
-	allSnapshots := make([]common.SnapshotResponse, len(shareSnapshots)+len(fileSnapshots))
-	for _, element := range fileSnapshots {
-		allSnapshots = append(shareSnapshots, element) //using append function append slices
-	}
-	log.Debug(fmt.Sprintf("Found %d snapshots", len(allSnapshots)))
+		// Get the snapshots from the /.snapshot/ directory of the share
+		shareSnapshotDir := share.ExportPath + "/.snapshot/"
+		shareFile, err := client.GetFile(shareSnapshotDir)
+		if err != nil {
+			log.Errorf("Failed to get share snapshots from %s: %v", shareSnapshotDir, err)
+			return nil, err
+		}
 
-	return allSnapshots, nil
+		// Iterate over the snapshots in the /.snapshot/ directory
+		for _, snapshotFile := range shareFile.Children {
+			snapshot := common.SnapshotResponse{
+				Id:             snapshotFile.Name,
+				Created:        snapshotFile.CreateTime,
+				SourceVolumeId: share.Name,
+				ReadyToUse:     true, // Assume true if the snapshot exists
+				Size:           snapshotFile.Size,
+			}
+
+			// Filter by snapshot_id if provided
+			if snapshot_id != "" && snapshot.Id != snapshot_id {
+				continue
+			}
+
+			// Add the snapshot to the list
+			shareSnapshots = append(shareSnapshots, snapshot)
+		}
+	}
+	log.Infof("%v, %s, %s", shareSnapshots, snapshot_id, volume_id)
+	return shareSnapshots, nil
 }
 
 func (client *HammerspaceClient) GetShare(name string) (*common.ShareResponse, error) {
@@ -762,9 +764,8 @@ func (client *HammerspaceClient) SetObjectives(shareName string,
 	return nil
 }
 
-func (client *HammerspaceClient) UpdateShareSize(name string,
-	size int64, //size in bytes
-) error {
+// size in bytes
+func (client *HammerspaceClient) UpdateShareSize(name string, size int64) error {
 
 	log.Debugf("Update share size : %s to %v", name, size)
 

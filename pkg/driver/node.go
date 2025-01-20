@@ -124,8 +124,15 @@ func (d *CSIDriver) publishFileBackedVolume(
 		return nil
 	}
 
+	hsVolume := &common.HSVolume{
+		FQDN:               fqdn,
+		FSType:             fsType,
+		ClientMountOptions: mountFlags,
+	}
+	log.Infof("check publish file backed volume %v", hsVolume)
+
 	// Ensure the backing share is mounted
-	err = d.EnsureBackingShareMounted(backingShareName, fqdn)
+	err = d.EnsureBackingShareMounted(backingShareName, hsVolume)
 	if err != nil {
 		return err
 	}
@@ -462,7 +469,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 		// NFS backend
 		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
 		share, err := d.hsclient.GetShare(volumeName)
-		if err != nil {
+		if err != nil || share == nil {
 			return nil, status.Error(codes.NotFound, common.ShareNotFound)
 		}
 
