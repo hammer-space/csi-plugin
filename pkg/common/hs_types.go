@@ -29,6 +29,7 @@ type HSVolumeParameters struct {
 	AdditionalMetadataTags map[string]string
 	CacheEnabled           bool
 	FQDN                   string
+	ClientMountOptions     []string
 }
 
 type HSVolume struct {
@@ -47,6 +48,7 @@ type HSVolume struct {
 	SourceSnapShareName    string
 	AdditionalMetadataTags map[string]string
 	FQDN                   string
+	ClientMountOptions     []string
 }
 
 ///// Request and Response objects for interacting with the HS API
@@ -132,9 +134,20 @@ type TaskParamsMap struct {
 }
 
 type File struct {
-	Name string `json:"name"`
-	Path string `json:"path"`
-	Size int64  `json:"size"`
+	Name     string         `json:"name"`
+	Path     string         `json:"path"`
+	Size     int64          `json:"size"`
+	Children []FileChildren `json:"children"`
+}
+
+type FileChildren struct {
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	Size       int64  `json:"size"`
+	Parent     string `json:"parent"`
+	SharePath  string `json:"sharePath"`
+	ShareName  string `json:"shareName"`
+	CreateTime int64  `json:"createTime"`
 }
 
 type FileSnapshot struct {
@@ -182,7 +195,9 @@ type VolumeResponse struct {
 }
 
 type SnapshotResponse struct {
-	Name     string `json:"name"`
-	Created  int64  `json:"created"`
-	Modified int64  `json:"modified"`
+	Id             string `json:"name"`
+	Size           int64  `json:"size"`
+	Created        int64  `json:"created"`
+	ReadyToUse     bool   `json:"ReadyToUse"`
+	SourceVolumeId string `json:"ShareName"`
 }
