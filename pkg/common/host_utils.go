@@ -537,3 +537,41 @@ func ResolveFQDN(fqdn string) (string, error) {
 	// Use the first resolved IP address
 	return ips[0].String(), nil
 }
+
+// MakeEmptyRawFolder creates a folder at the specified path
+func MakeEmptyRawFolder(pathname string) error {
+	log.Infof("checking folder '%s'", pathname)
+
+	// Check if directory exists
+	info, err := os.Stat(pathname)
+	if err == nil {
+		if !info.IsDir() {
+			log.Errorf("Path exists but is not a directory: %s", pathname)
+			return status.Error(codes.Internal, "path exists but is not a directory")
+		}
+		// Correct permissions if needed
+		err = os.Chmod(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("Failed to set correct permissions on %s: %v", pathname, err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Infof("Directory already exists: %s", pathname)
+		return nil
+	}
+
+	// Create the directory if it does not exist
+	if os.IsNotExist(err) {
+		log.Infof("creating folder '%s'", pathname)
+		err = os.MkdirAll(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("could not make folder, %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Infof("Successfully created folder: %s", pathname)
+		return nil
+	}
+
+	// Handle unexpected errors
+	log.Errorf("Unexpected error checking folder: %v", err)
+	return status.Error(codes.Internal, err.Error())
+}

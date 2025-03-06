@@ -170,6 +170,37 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	return vParams, nil
 }
 
+func (d *CSIDriver) ensureNFSDirectoryExists(_ context.Context, backingShareName string, hsVolume *common.HSVolume) error {
+	// Check if backing share exists
+	d.getVolumeLock(backingShareName)
+	defer d.releaseVolumeLock(backingShareName)
+	backingShare, err := d.ensureBackingShareExists(backingShareName, hsVolume)
+	if err != nil {
+		return status.Errorf(codes.Internal, "%s", err.Error())
+	}
+
+	// generate unique target path on host for setting file metadata
+	targetPath := common.ShareStagingDir + backingShare.ExportPath
+	deviceFile := targetPath + "/" + hsVolume.Name
+
+	// mount the share to create the directory
+	defer d.UnmountBackingShareIfUnused(backingShare.Name)
+	err = d.EnsureBackingShareMounted(backingShare.Name, hsVolume) // check if share is mounted
+	if err != nil {
+		log.Errorf("failed to ensure backing share is mounted, %v", err)
+		return err
+	}
+
+	// create NFS directory inside base share
+	err = common.MakeEmptyRawFolder(deviceFile)
+	if err != nil {
+		log.Errorf("failed to create backing folder for volume, %v", err)
+		return err
+	}
+
+	return nil
+}
+
 func (d *CSIDriver) ensureShareBackedVolumeExists(_ context.Context, hsVolume *common.HSVolume) error {
 
 	// Check if the Mount Volume Exists
@@ -255,6 +286,13 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(_ context.Context, hsVolume *c
 	if err != nil {
 		log.Warnf("failed to set additional metadata on share %v", err)
 	}
+	// create NFS directory inside base share
+	err = common.MakeEmptyRawFolder(targetPath + "/" + hsVolume.Name)
+	if err != nil {
+		log.Errorf("failed to create backing folder for volume, %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -498,7 +536,7 @@ func (d *CSIDriver) CreateVolume(
 		case *csi.VolumeCapability_Mount:
 			filesystemRequested = true
 			fsType = vParams.FSType
-			if fsType == "" {
+			if fsType == "nfs" || fsType == "" {
 				fsType = "nfs"
 				fileBacked = false
 			} else if fsType != "nfs" {
@@ -636,12 +674,20 @@ func (d *CSIDriver) CreateVolume(
 		log.Info("using snapshot as volume source")
 	}
 
-	if fileBacked {
+	log.Infof("Volume Mode=%s, fsType=%s, Block=%t, FileBacked=%t", volumeMode, fsType, blockRequested, fileBacked)
+	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
+		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		if err != nil {
+			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
+			return nil, status.Errorf(codes.Internal, "failed to ensure base NFS share (%s): %v", backingShareName, err)
+		}
+		// mark the NFS created folder as a backing share, so that it can be used as ID for volumeDelete
+		hsVolume.Path = common.SharePathPrefix + backingShareName + "/" + hsVolume.Name
+	} else if fileBacked {
 		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
 		}
-
 	} else {
 		// TODO/FIXME: create from snapshot
 		// Workaround:
@@ -649,6 +695,7 @@ func (d *CSIDriver) CreateVolume(
 		// restore snap to weird path
 		// move weird path to proper location
 		// NOTE: Expect this to change when we change restore from snapshot in the core product.
+		log.Debugf("Creating share-backed volume %s", hsVolume.Name)
 		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
 		if err != nil {
 			return nil, err
