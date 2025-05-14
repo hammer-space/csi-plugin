@@ -6,6 +6,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.7
+### Changed
+- Changed the portal floating IP selection algorithm from fastest-response (using goroutines with `rpcInfo`) to round-robin.
+
+### Added
+- The `exportOptions` parameter in the StorageClass now accepts a JSON string instead of a single comma-separated string.
+- Within `exportOptions`, the new `securityOptions` field supports both `sys` and Kerberos-based configurations (`krb5`, `krb5i`, `krb5p`).
+
+
 ## 1.2.6
 ### Fixed Bug
 - Fixed error where floating IP's is not being used. 
@@ -31,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 1.2.2
 ### Added
 - Added share name length restriction to 80 characters.
+
 ## 1.2.1
 ### Added
 - Removed unnecessary mount option

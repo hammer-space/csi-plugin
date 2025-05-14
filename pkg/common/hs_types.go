@@ -102,10 +102,13 @@ type ShareInodesResponse struct {
 }
 
 type ShareExportOptions struct {
-	Subnet            string `json:"subnet"`
-	AccessPermissions string `json:"accessPermissions"` // Must be "RO" or "RW"
-	RootSquash        bool   `json:"rootSquash"`
+	Subnet            string   `json:"subnet"`
+	Insecure          bool     `json:"insecure"`
+	AccessPermissions string   `json:"accessPermissions"` // Must be "RO" or "RW"
+	RootSquash        bool     `json:"rootSquash"`
+	SecurityOptions   []string `json:"securityOptions"` // Must be ["SYS", "KRB5", "KRB5I", "KRB5P"]
 }
+
 type ObjectivesResponse struct {
 	Applied []AppliedObjectiveResponse `json:"appliedObjectives"`
 }

@@ -1,33 +1,64 @@
-# This a general example StorageClass definition for creating volumes with the Hammerspace CSI Plugin
-kind: StorageClass
-apiVersion: storage.k8s.io/v1
+# This file defines a StorageClass for Hammerspace CSI in Kubernetes.
+apiVersion: storage.k8s.io/v1 # StorageClass API version
+kind: StorageClass # Kind of resource being defined
 metadata:
-  name: hs-storage
-  namespace: kube-system
+  name: hs-storage # Name of the StorageClass
+  namespace: kube-system # Namespace where the StorageClass is created
   annotations:
-    storageclass.kubernetes.io/is-default-class: "true"
-provisioner: com.hammerspace.csi
-#mountOptions:
-# Only for debugging purposes
+    storageclass.kubernetes.io/is-default-class: "true" # Marks this StorageClass as the default for the cluster
+provisioner: com.hammerspace.csi # CSI driver name used for provisioning volumes
+reclaimPolicy: Retain  # Retain volume data when PVC is deleted. Use "Delete" to auto-delete.
+volumeBindingMode: Immediate  # Delay provisioning until a pod uses the PVC Immediate || WaitForFirstConsumer
+allowVolumeExpansion: true  # Allows PVCs to be resized
+mountOptions: # Optional mount options passed to the NFS client
+  - nfsvers=4.2 # NFS version 4.2: Specifies the NFS protocol version to use. Version 4.2 supports features like sparse file handling, SEEK, and server-side copy.
+  - rsize=1048576 # Read size: Sets the maximum number of bytes that can be read in a single NFS read operation. 1 MiB (1048576 bytes) is a common value for performance.
+  - wsize=1048576 # Write size: Sets the maximum number of bytes that can be written in a single NFS write operation. 1 MiB (1048576 bytes) is a common value for performance.
+  - noac # No attribute caching: Disables attribute caching to ensure that file attributes are always fetched from the server, which can be useful for consistency in certain workloads.
+  - nolock # No locking: Disables file locking, which can be useful in environments where locking is not needed or causes issues.
+  - proto=tcp # Protocol: Specifies that NFS should use TCP as the transport protocol, which is more reliable than UDP.
+  - hard # Hard mount: If the server becomes unresponsive, the NFS client keeps retrying indefinitely (can hang the process until the server returns). Suitable for critical data where failure is not acceptable.
+  - timeo=600 # Sets the timeout value (in tenths of a second) before the client retries an NFS request. 600 = 60 seconds. Applies to soft mounts or RPC retries.
+  - retrans=2 # Number of times to retry a request before reporting an error to the NFS client layer. Applies especially with soft mounts, but still used with hard if server is flaky.
+
 parameters:
-  fsType: "nfs"
-  # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
-  blockBackingShareName: k8s-block-storage
-  # Optional, for use if we are supporting file-backed Mount volumes. Auto-created if it does not exist. Never deleted by the driver
+  fsType: "nfs"  # Filesystem type for the mounted volume
+  # Name of the backing share used for NFS mount volumes. 
+  # Automatically created if not present. Not deleted by CSI driver.
   mountBackingShareName: k8s-file-storage
-  # Objectives to set on shares in addition to HS cluster defaults
+  # Comma-separated list of Hammerspace objectives to apply on the share
   objectives: "keep-online"
-  # ';' seperated list of <subnet>,access,rootSquash
-  exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
-  # One should be careful to set this if shares are used outside of the cluster. 
-  # -1 means Hammerspace defalt which is to delete the share in 24 hours
-  # 0 means now (5 minute delay)
-  # Specified in nanoseconds
+  # NFS export options (as a JSON string). Supports multiple entries.
+  # Each entry defines:
+  # - subnet: CIDR/IP allowed
+  # - accessPermissions: "RW" (ReadWrite) or "RO" (ReadOnly)
+  # - rootSquash: true/false
+  # - insecure: true/false (allow insecure NFS)
+  # - securityOptions: e.g., ["SYS", "KRB5", "KRB5I", "KRB5P"]
+  exportOptions: >
+    [
+      {
+        "subnet": "*",
+        "accessPermissions": "RW",
+        "rootSquash": false,
+        "securityOptions": [],
+        "insecure": false
+      },
+      {
+        "subnet": "10.20.30.40",
+        "accessPermissions": "RW",
+        "rootSquash": false,
+        "insecure": false,
+        "securityOptions": ["SYS"]
+      }
+    ]
+  # Delay before share deletion in nanoseconds:
+  # -1 = cluster default (typically 24h)
+  # 0 = delete now (with a 5-minute buffer)
   deleteDelay: "0"
-  # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
+  # Naming format for provisioned volumes. %s is replaced by pvc-<uuid>
   volumeNameFormat: "csi-%s"
-  # Metadata to set on files and shares created by the plugin.
+  # Optional metadata tags added to the created files/shares
   additionalMetadataTags: "storageClassName=hs-storage,fsType=nfs"
-  # Ability to add a share description
-  comment: "My share description"
-allowVolumeExpansion: true
+  # Optional comment/description set on the Hammerspace share
+  comment: "My Hammerspace NFS share"
