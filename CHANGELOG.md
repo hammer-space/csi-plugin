@@ -6,6 +6,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+## 1.2.8
+
+### Added
+- Introduced support for organizing all NFS shares under a single base share, defined by the `mountBackingShareName` parameter in the StorageClass.
+- If `mountBackingShareName` is not specified, each NFS share will continue to be created individually as before.
+
+### Update
+- Update python2 to python3
+
+### Fixed
+- Corrected the UBI repository URL to point to the appropriate build location.
+
 ## 1.2.6
 ### Fixed Bug
 - Fixed error where floating IP's is not being used. 
