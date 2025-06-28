@@ -1,17 +1,28 @@
 # Volume Imports
-This guide describes adding existing Hammerspace shares, or files contained in a Hammerspace share, as a PersistentVolume in Kubernetes. This guide assumes the reader has basic knowledge of PersistentVolumes and PersistentVolumeClaims in Kubernetes ([Docs](https://kubernetes.io/docs/concepts/storage/persistent-volumes/))
 
-Using existing storage can be helpful for Disaster Recovery or simply using the same storage for applications across multiple Kubernetes clusters.
+This guide describes how to import existing Hammerspace shares or files into Kubernetes using static PersistentVolumes. This is particularly useful for:
+- **Disaster recovery** workflows,
+- **Sharing storage across multiple Kubernetes clusters**,
+- **Retaining data after PVC deletion**.
 
+> This guide assumes basic understanding of Kubernetes [PersistentVolumes and PersistentVolumeClaims](https://kubernetes.io/docs/concepts/storage/persistent-volumes/).
 
-## NFS share Backed Volumes
-NFS shares allow multiple hosts to mount them as ReadWrite at the same time. This means you can create a volume either separately from Kubernetes or in a cluster, then consume it in multiple clusters by creating a PersistentVolume object that points to the backing storage.
+## Prerequisites
 
-It is critical that the [persistentVolumeReclaimPolicy](https://kubernetes.io/docs/tasks/administer-cluster/change-pv-reclaim-policy/) on your PV is set to "Retain" so that when a bound PVC is deleted, the HS plugin will not delete the HS share out from under any other consumers.
+- Hammerspace CSI driver (`com.hammerspace.csi`) is installed and running in the cluster.
+- Hammerspace shares or backing files already exist.
+- The required `StorageClass` resources (e.g., `hs-storage`, `hs-storage-file-backed`, `hs-storage-block`) are created and configured.
 
-The following example will import an existing HS share (with path `/test-restore`) as a Kubernetes PersistentVolume which is then bound to a PersistentVolumeClaim.
+## Volume Import Scenarios
 
-##### PersistentVolume Definition
+### 1. NFS-Backed Shares (ReadWriteMany)
+
+NFS shares support simultaneous read-write access from multiple hosts, making them ideal for multi-cluster or multi-pod access.
+
+> Ensure the [`persistentVolumeReclaimPolicy`](https://kubernetes.io/docs/tasks/administer-cluster/change-pv-reclaim-policy/) is set to `Retain` to avoid accidental data deletion when the PVC is removed.
+
+#### PersistentVolume Definition
+
 ```yaml
 apiVersion: v1
 kind: PersistentVolume
@@ -23,7 +34,7 @@ metadata:
     name: restored-nfs-pv-test
 spec:
   accessModes:
-  - ReadWriteMany
+    - ReadWriteMany
   capacity:
     storage: 1Gi
   csi:
@@ -31,14 +42,14 @@ spec:
     fsType: nfs
     volumeAttributes:
       mode: Filesystem
-    # Points to the export path of the share in Hammerspace
+    # Path to the existing HS share export
     volumeHandle: /test-restore
   persistentVolumeReclaimPolicy: Retain
-  # This storage class must exist and should represent the characteristics of the existing share
   storageClassName: hs-storage
   volumeMode: Filesystem
 ```
 ##### PersistentVolumeClaim Definition
+
 ```yaml
 kind: PersistentVolumeClaim
 apiVersion: v1
@@ -58,8 +69,10 @@ spec:
 
 ```
 
-## File-backed Mount Volumes
+## 2. File-backed Mount Volumes
+
 ##### PersistentVolume Definition
+
 ```yaml
 apiVersion: v1
 kind: PersistentVolume
@@ -106,7 +119,7 @@ spec:
       name: restored-filebacked-pv
 ```
 
-## File-backed Block Volumes
+## 3. File-backed Block Volumes
 ##### PersistentVolume Definition
 ```yaml
 apiVersion: v1
@@ -128,7 +141,7 @@ spec:
       blockBackingShareName: k8s-block-storage
       mode: Block
       size: "1073741824"
-    volumeHandle: /k8s-block-storage/csi-k8s-pvc-b55c132c-5f1a-11ea-b1fd-42010a800016
+    volumeHandle: /k8s-block-storage/csi-k8s-pvc-b55c132c-5f1a-11ea-b1fd-42010a800016 # /path_name_in_storageclass/file_name
   persistentVolumeReclaimPolicy: Retain
   storageClassName: hs-storage-block
   volumeMode: Block
@@ -142,7 +155,7 @@ metadata:
 spec:
   accessModes:
     - ReadWriteOnce
-  volumeMode: Filesystem
+  volumeMode: Block
   resources:
     requests:
       storage: 1Gi
@@ -151,3 +164,8 @@ spec:
     matchLabels:
       name: restored-block-pv
 ```
+
+## Cleanup
+Deleting the PVC will not delete the underlying Hammerspace data due to the Retain policy.
+
+To reuse or clean up manually, make sure you unbind the PVC and manage the data in Hammerspace directly.

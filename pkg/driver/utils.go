@@ -18,10 +18,13 @@ package driver
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -29,6 +32,104 @@ import (
 
 	common "github.com/hammer-space/csi-plugin/pkg/common"
 )
+
+var (
+	maxRetries    int           = 5
+	retryInterval time.Duration = 1 * time.Second
+)
+
+func init() {
+	retryCountStr := os.Getenv("UNMOUNT_RETRY_COUNT")
+	if retryCountStr == "" {
+		retryCountStr = "5"
+	}
+	count, err := strconv.Atoi(retryCountStr)
+	if err != nil {
+		count = 5
+	}
+
+	retryIntervalStr := os.Getenv("UNMOUNT_RETRY_INTERVAL")
+	if retryIntervalStr == "" {
+		retryIntervalStr = "1s"
+	}
+	interval, err := time.ParseDuration(retryIntervalStr)
+	if err != nil {
+		interval = time.Second
+	}
+
+	maxRetries = count
+	retryInterval = interval
+}
+
+func IsBlockDevice(fileInfo os.FileInfo) bool {
+	mode := fileInfo.Mode()
+	return mode&os.ModeDevice != 0 && mode&os.ModeCharDevice == 0
+}
+
+// AttachLoopDeviceWithRetry binds a loop device to a filePath with retry support for EBUSY
+func AttachLoopDeviceWithRetry(filePath string, readOnly bool) (string, error) {
+	// Step 1: Check if file is already attached
+	output, err := exec.Command("losetup", "-j", filePath).CombinedOutput()
+	if err == nil && strings.TrimSpace(string(output)) != "" {
+		// Example output: "/dev/loop3: [12345]:123 (/path/to/file)"
+		fields := strings.Split(string(output), ":")
+		if len(fields) > 0 {
+			device := strings.TrimSpace(fields[0])
+			log.Infof("Backing file %s already attached to loop device %s", filePath, device)
+			return device, nil
+		}
+	}
+
+	// Step 2: Attach with retry if not already attached
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		flags := []string{"--find", "--show"}
+		if readOnly {
+			flags = append(flags, "-r")
+		}
+		flags = append(flags, filePath)
+
+		output, err := exec.Command("losetup", flags...).CombinedOutput()
+		deviceStr := strings.TrimSpace(string(output))
+
+		if err == nil && deviceStr != "" {
+			log.Infof("losetup attached file %s to %s", filePath, deviceStr)
+			return deviceStr, nil
+		}
+
+		log.Warnf("losetup attempt %d failed: %v - output: %s", i+1, err, string(output))
+
+		if strings.Contains(string(output), "resource busy") || strings.Contains(string(output), "device is busy") {
+			lastErr = fmt.Errorf("device busy on attempt %d: %w", i+1, err)
+			time.Sleep(retryInterval)
+			continue
+		}
+
+		return "", fmt.Errorf("losetup failed on attempt %d: %s, %w", i+1, string(output), err)
+	}
+
+	return "", fmt.Errorf("failed to attach loop device for %s after %d retries: %w", filePath, maxRetries, lastErr)
+}
+
+// CleanupLoopDevice detaches a loop device if it exists
+func CleanupLoopDevice(dev string) {
+	if _, err := os.Stat(dev); os.IsNotExist(err) {
+		log.Warnf("Loop device %s does not exist, skipping cleanup", dev)
+		return
+	}
+
+	for i := 0; i < maxRetries; i++ {
+		out, err := exec.Command("losetup", "-d", dev).CombinedOutput()
+		if err == nil {
+			log.Infof("Loop device %s detached successfully", dev)
+			return
+		}
+		log.Warnf("Attempt %d: Failed to detach loop device %s: %v. Output: %s", i+1, dev, err, string(out))
+		time.Sleep(retryInterval)
+	}
+
+	log.Errorf("Failed to detach loop device %s after %d retries", dev, maxRetries)
+}
 
 func IsValueInList(value string, list []string) bool {
 	for _, v := range list {

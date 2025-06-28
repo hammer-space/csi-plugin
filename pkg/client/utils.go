@@ -1,6 +1,7 @@
 package client
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
@@ -20,4 +21,18 @@ func SetCacheData(key string, value interface{}, cacheExpireTime int) {
 		cacheExpireTime = 60 // 1 min is default timeout
 	}
 	cache.Set(key, value, time.Duration(cacheExpireTime)*time.Second)
+}
+
+// GetRoundRobinOrderedList returns a round-robin ordered list of items
+func GetRoundRobinOrderedList(index *uint32, list []string) []string {
+	count := len(list)
+	if count == 0 {
+		return []string{}
+	}
+	start := int(atomic.AddUint32(index, 1)) % count
+	ordered := make([]string, 0, count)
+	for i := 0; i < count; i++ {
+		ordered = append(ordered, list[(start+i)%count])
+	}
+	return ordered
 }

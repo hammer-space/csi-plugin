@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+
+## 1.2.7
+### Fixed
+- Resolved an issue in `NodeGetVolumeStats` where excessive backend `GetShare` API calls were triggered for NFS volumes, causing SM log flooding. The function now uses `syscall.Statfs` directly on the volume mount path to obtain usage metrics, reducing API load.
+- Improved `CleanupLoopDevice` to retry loop device detachment up to 3 times with a 1-second interval, ensuring better reliability when devices are temporarily busy.
+
+### Added
+- Introduced support for configurable unmount retry behavior using environment variables (`UNMOUNT_RETRY_COUNT`, `UNMOUNT_RETRY_INTERVAL`), which can be injected via Kubernetes `ConfigMap`.
+- Enhanced FIP (Floating IP) selection logic to support **strict round-robin ordering** for multi-portal NFS mounts:
+  - The CSI driver now maintains a rotating index to evenly distribute data access across available portal IPs.
+  - This reduces hotspotting and improves throughput in clusters with multiple floating IPs.
+  - If an FQDN is configured and resolves to a reachable NFS endpoint, it is used directly; otherwise, the round-robin FIP selection is attempted in order.
+
 ## 1.2.6
 ### Fixed Bug
 - Fixed error where floating IP's is not being used. 

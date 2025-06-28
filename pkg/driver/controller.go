@@ -444,7 +444,7 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(
 	hsVolume *common.HSVolume,
 	backingShareName string) error {
 
-	//// Check if backing share exists
+	// Check if backing share exists
 	defer d.releaseVolumeLock(backingShareName)
 	d.getVolumeLock(backingShareName)
 
@@ -544,6 +544,11 @@ func (d *CSIDriver) CreateVolume(
 		}
 	}
 	volumePath := common.SharePathPrefix + backingShareName
+	var volID string = volumePath
+	if fileBacked {
+		// file-backed volumes live *within* the backing share
+		volID = fmt.Sprintf("%s/%s", volumePath, volumeName)
+	}
 
 	hsVolume := &common.HSVolume{
 		DeleteDelay:            vParams.DeleteDelay,
@@ -672,7 +677,7 @@ func (d *CSIDriver) CreateVolume(
 	resp := &csi.CreateVolumeResponse{
 		Volume: &csi.Volume{
 			CapacityBytes: hsVolume.Size,
-			VolumeId:      hsVolume.Path,
+			VolumeId:      volID,
 			VolumeContext: volContext,
 		},
 	}

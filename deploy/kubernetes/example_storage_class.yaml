@@ -7,14 +7,8 @@ metadata:
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: com.hammerspace.csi
-#mountOptions:
-# Only for debugging purposes
 parameters:
   fsType: "nfs"
-  # Optional, for use if we are supporting BlockVolumes. Auto-created if it does not exist. Never deleted by the driver
-  blockBackingShareName: k8s-block-storage
-  # Optional, for use if we are supporting file-backed Mount volumes. Auto-created if it does not exist. Never deleted by the driver
-  mountBackingShareName: k8s-file-storage
   # Objectives to set on shares in addition to HS cluster defaults
   objectives: "keep-online"
   # ';' seperated list of <subnet>,access,rootSquash
@@ -30,4 +24,6 @@ parameters:
   additionalMetadataTags: "storageClassName=hs-storage,fsType=nfs"
   # Ability to add a share description
   comment: "My share description"
-allowVolumeExpansion: true
+reclaimPolicy: Retain  # Options: Delete | Retain
+volumeBindingMode: Immediate  # Options: Immediate | WaitForFirstConsumer
+allowVolumeExpansion: true  # Options: true | false

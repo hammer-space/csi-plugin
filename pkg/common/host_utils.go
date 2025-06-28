@@ -527,6 +527,9 @@ func SetMetadataTags(localPath string, tags map[string]string) error {
 
 // resolveFQDN resolves the FQDN to an IP address
 func ResolveFQDN(fqdn string) (string, error) {
+	if fqdn == "" {
+		return "", errors.New("FQDN is empty")
+	}
 	ips, err := net.LookupIP(fqdn)
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve FQDN %s: %v", fqdn, err)
