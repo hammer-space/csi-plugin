@@ -23,7 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -34,6 +34,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/net/publicsuffix"
 	"google.golang.org/grpc/codes"
@@ -49,8 +50,7 @@ const (
 	taskPollIntervalCap = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
 )
 
-var wg sync.WaitGroup
-var mutex sync.Mutex
+var fipIndices sync.Map // map[string]*uint32
 
 type HammerspaceClient struct {
 	username   string
@@ -115,36 +115,43 @@ func (client *HammerspaceClient) GetPortalFloatingIp() (string, error) {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
-	var floatingIP string
 
+	addresses := make([]string, 0, len(clusters.PortalFloatingIps))
 	for _, p := range clusters.PortalFloatingIps {
-		fip := p.Address
-		wg.Add(1)
-		go func(fip string) {
-			defer wg.Done()
-			log.Infof("Goroutine started with fip: %s", fip)
-
-			// Check if NFS exports are available for the current floating IP
-			ok, err := common.CheckNFSExports(fip)
-			if err != nil {
-				log.Warnf("Could not get exports for data-portal at %s. Error: %v", fip, err)
-				return
-			}
-
-			// Update the floating IP if exports were found
-			if ok {
-				mutex.Lock()
-				floatingIP = fip
-				log.Infof("Updated floatingIP to: %s", floatingIP)
-				mutex.Unlock()
-			}
-		}(fip)
+		addresses = append(addresses, p.Address)
+	}
+	// If no floating IPs are found, return an error
+	if len(addresses) == 0 {
+		return "", fmt.Errorf("no floating IPs found")
 	}
 
-	// Keep the main goroutine running until all goroutines finish
-	wg.Wait()
-	log.Info("All goroutines finished")
-	return floatingIP, nil
+	// Use stable cluster identifier (e.g., name)
+	clusterKey := clusters.Name
+	if clusterKey == "" {
+		clusterKey = uuid.NewString() // fallback if name is empty
+	}
+
+	// Load or initialize atomic index for this cluster
+	val, _ := fipIndices.LoadOrStore(clusterKey, new(uint32))
+	index := val.(*uint32)
+
+	// Get round-robin ordered list based on atomic index
+	ordered := GetRoundRobinOrderedList(index, addresses)
+
+	// Strict sequential check — pick first valid FIP in round-robin order
+	for _, fip := range ordered {
+		ok, err := common.CheckNFSExports(fip)
+		if err != nil {
+			log.Warnf("Failed checking exports on FIP %s: %v", fip, err)
+			continue
+		}
+		if ok {
+			log.Infof("Selected FIP via strict round-robin: %s", fip)
+			return fip, nil
+		}
+	}
+	log.Warnf("No valid floating IPs found in round-robin order: %v", ordered)
+	return "", fmt.Errorf("no valid floating IPs found")
 }
 
 // GetDataPortals returns a list of operational data-portals
@@ -211,7 +218,7 @@ func (client *HammerspaceClient) EnsureLogin() error {
 		return err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	bodyString := string(body)
 	responseLog := log.WithFields(log.Fields{
 		"statusCode": resp.StatusCode,
@@ -243,7 +250,7 @@ func (client *HammerspaceClient) doRequest(req http.Request) (int, string, map[s
 		return 0, "", nil, err
 	}
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	bodyString := string(body)
 	responseLog := log.WithFields(log.Fields{
 		"statusCode":  resp.StatusCode,

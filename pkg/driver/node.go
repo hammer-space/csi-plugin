@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"syscall"
+	"unsafe"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
@@ -143,36 +144,22 @@ func (d *CSIDriver) publishFileBackedVolume(
 
 	// If no fsType specified, mount as a device
 	if fsType == "" {
-		deviceNumber, err := common.EnsureFreeLoopbackDeviceFile()
-		if err != nil {
-			log.Error(err.Error())
-			return err
-		}
-		deviceStr := fmt.Sprintf("/dev/loop%d", deviceNumber)
+		filePath := common.ShareStagingDir + volumePath
 
-		losetupFlags := []string{}
-		// is read only?
-		if readOnly {
-			losetupFlags = append(losetupFlags, "-r")
-		}
-		losetupFlags = append(losetupFlags, deviceStr)
-		losetupFlags = append(losetupFlags, filePath)
-		output, err := exec.Command("losetup", losetupFlags...).CombinedOutput()
+		deviceStr, err := AttachLoopDeviceWithRetry(filePath, readOnly)
 		if err != nil {
-			log.Errorf("issue setting up loop device: device=%s, filePath=%s, %s, %v",
-				deviceStr, filePath, output, err.Error())
-			exec.Command("losetup", "-d", deviceStr)
+			log.Errorf("failed to attach loop device: %v", err)
+			CleanupLoopDevice(deviceStr)
 			d.UnmountBackingShareIfUnused(backingShareName)
 			return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
 		}
 		log.Infof("File %s attached to %s", filePath, deviceStr)
 
-		// bind mount to target path
+		// Bind mount loop device to target path
 		err = common.BindMountDevice(deviceStr, targetPath)
 		if err != nil {
-			// clean up losetup
-			// FIXME, sometimes this command succeeds and doesnt do the detach, make a retry here
-			exec.Command("losetup", "-d", deviceStr)
+			log.Errorf("bind mount failed for %s: %v", deviceStr, err)
+			CleanupLoopDevice(deviceStr)
 			d.UnmountBackingShareIfUnused(backingShareName)
 			return err
 		}
@@ -318,25 +305,52 @@ func (d *CSIDriver) NodeUnpublishVolume(
 	d.getVolumeLock(req.GetVolumeId())
 
 	targetPath := req.GetTargetPath()
-	fi, err := os.Stat(targetPath)
+	fi, err := os.Lstat(targetPath)
 	if err != nil {
-		log.Infof("target path does not exist on this host, %s", targetPath)
-		return &csi.NodeUnpublishVolumeResponse{}, nil
+		if os.IsNotExist(err) {
+			log.Infof("target path does not exist on this host: %s", targetPath)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+		return nil, status.Errorf(codes.Internal, "error stating target path: %v", err)
+	}
+
+	// Resolve symlink before checking type
+	if fi.Mode()&os.ModeSymlink != 0 {
+		resolvedPath, err := filepath.EvalSymlinks(targetPath)
+		if err != nil {
+			log.Warnf("Broken symlink at %s: %v", targetPath, err)
+			// remove the symlink path
+			if rmErr := os.Remove(targetPath); rmErr != nil {
+				return nil, status.Errorf(codes.Internal, "failed to remove broken symlink: %v", rmErr)
+			}
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+
+		log.Infof("Resolved symlink targetPath=%s → %s", req.GetTargetPath(), resolvedPath)
+		targetPath = resolvedPath
+		fi, err = os.Stat(targetPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to stat resolved path: %v", err)
+		}
 	}
 
 	switch mode := fi.Mode(); {
-	case mode&os.ModeDevice != 0: // if target path is a device, it's block
-		err := d.unpublishFileBackedVolume(req.GetVolumeId(), targetPath)
-		if err != nil {
+	case IsBlockDevice(fi): // block device
+		log.Infof("Detected block device at target path %s", targetPath)
+		if err := d.unpublishFileBackedVolume(req.GetVolumeId(), targetPath); err != nil {
 			return nil, err
 		}
-	case mode.IsDir(): // if target path is a directory, it's filesystem
-		err := common.UnmountFilesystem(targetPath)
-		if err != nil {
+	case mode.IsDir(): // directory for mount volumes
+		log.Infof("Detected directory mount at target path %s", targetPath)
+		if err := common.UnmountFilesystem(targetPath); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	default:
-		return nil, status.Error(codes.InvalidArgument, common.TargetPathUnknownFiletype)
+		// Unknown file type, attempt cleanup
+		log.Warnf("Target path %s exists but is not a block device nor directory. Removing...", targetPath)
+		if err := os.Remove(targetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to remove unexpected target path: %v", err)
+		}
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
@@ -418,86 +432,81 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumePath)
 	}
 
-	// Check if volume is published at path
-	_, err := os.Stat(req.GetVolumePath())
+	// Check if path exists
+	info, err := os.Stat(req.GetVolumePath())
 	if err != nil {
+		log.Errorf("volume path not found: %s, err: %v", req.GetVolumePath(), err)
 		return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 	}
-	// Check if volume is on a backing share
-	isFileBacked := false
-	_, err = os.Stat(common.ShareStagingDir + req.GetVolumeId())
-	if err == nil {
-		isFileBacked = true
-	}
-	// TODO: Add reporting for block only volumes
-	if isFileBacked {
-		// Do statfs on the node of the mount point to get the actual usage. Executed automatically on the correct node
-		var st syscall.Statfs_t
-		err = syscall.Statfs(req.GetVolumePath(), &st)
+
+	// If it's a block device, use Stat_t
+	if IsBlockDevice(info) {
+		log.Infof("Detected block volume: %s", req.GetVolumePath())
+
+		file, err := os.Open(req.GetVolumePath())
 		if err != nil {
-			return nil, status.Error(codes.NotFound, common.FileNotFound)
+			return nil, status.Errorf(codes.Internal, "failed to open block device: %v", err)
 		}
-		// helpful to know the volume path on the nodes if troubleshooting is required
-		log.Infof("volume path is: %s", req.GetVolumePath())
+		defer file.Close()
 
-		// blocksize is typically 1024 - using st.Bsize in case it is not always true
-		// this math equals the df command output
-		total := st.Bsize * int64(st.Blocks)
-		available := st.Bsize * int64(st.Bavail)
-		used := st.Bsize * int64(st.Blocks-st.Bfree)
-		// report inodes
-		inodestotal := int64(st.Files)
-		inodesavail := int64(st.Ffree)
-		inodesused := int64(inodestotal - inodesavail)
+		// Get size using ioctl
+		var size int64
+		// BLKGETSIZE64: ioctl to get size in bytes for block devices
+		const BLKGETSIZE64 = 0x80081272
+		_, _, errno := syscall.Syscall(syscall.SYS_IOCTL, file.Fd(), BLKGETSIZE64, uintptr(unsafe.Pointer(&size)))
+		if errno != 0 {
+			return nil, status.Errorf(codes.Internal, "failed to get block size: %v", errno)
+		}
+
+		// CSI spec: for block volumes, 'used' and 'available' may be omitted.
+		// Reporting Available = 0 can be misinterpreted as disk full.
 		return &csi.NodeGetVolumeStatsResponse{
 			Usage: []*csi.VolumeUsage{
 				{
-					Unit:      csi.VolumeUsage_BYTES,
-					Available: available,
-					Total:     total,
-					Used:      used,
+					Unit:  csi.VolumeUsage_BYTES,
+					Total: size,
+					// Used and Available intentionally omitted per CSI spec
 				},
 				{
-					Unit:      csi.VolumeUsage_INODES,
-					Available: inodesavail,
-					Total:     inodestotal,
-					Used:      inodesused,
-				},
-			},
-		}, nil
-	} else {
-		// NFS backend
-		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-		share, err := d.hsclient.GetShare(volumeName)
-		if err != nil || share == nil {
-			return nil, status.Error(codes.NotFound, common.ShareNotFound)
-		}
-
-		available := share.Space.Available
-		used := share.Space.Used
-		total := share.Space.Total
-
-		inodes_available := share.Inodes.Available
-		inodes_used := share.Inodes.Used
-		inodes_total := share.Inodes.Total
-
-		return &csi.NodeGetVolumeStatsResponse{
-			Usage: []*csi.VolumeUsage{
-				{
-					Unit:      csi.VolumeUsage_BYTES,
-					Available: available,
-					Total:     total,
-					Used:      used,
-				},
-				{
-					Unit:      csi.VolumeUsage_INODES,
-					Available: inodes_available,
-					Total:     inodes_total,
-					Used:      inodes_used,
+					Unit: csi.VolumeUsage_INODES,
+					// All inode fields omitted (optional)
 				},
 			},
 		}, nil
 	}
+
+	// Default: File or NFS mount — use Statfs
+	var st syscall.Statfs_t
+	err = syscall.Statfs(req.GetVolumePath(), &st)
+	if err != nil {
+		log.Errorf("statfs failed on %s: %v", req.GetVolumePath(), err)
+		return nil, status.Error(codes.Internal, common.FileNotFound)
+	}
+
+	total := int64(st.Bsize) * int64(st.Blocks)
+	available := int64(st.Bsize) * int64(st.Bavail)
+	used := int64(st.Bsize) * int64(st.Blocks-st.Bfree)
+
+	inodestotal := int64(st.Files)
+	inodesavail := int64(st.Ffree)
+	inodesused := inodestotal - inodesavail
+
+	return &csi.NodeGetVolumeStatsResponse{
+		Usage: []*csi.VolumeUsage{
+			{
+				Unit:      csi.VolumeUsage_BYTES,
+				Available: available,
+				Total:     total,
+				Used:      used,
+			},
+			{
+				Unit:      csi.VolumeUsage_INODES,
+				Available: inodesavail,
+				Total:     inodestotal,
+				Used:      inodesused,
+			},
+		},
+	}, nil
 }
 
 func (d *CSIDriver) NodeExpandVolume(
