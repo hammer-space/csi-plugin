@@ -40,25 +40,24 @@ var (
 
 func init() {
 	retryCountStr := os.Getenv("UNMOUNT_RETRY_COUNT")
-	if retryCountStr == "" {
-		retryCountStr = "5"
-	}
-	count, err := strconv.Atoi(retryCountStr)
-	if err != nil {
-		count = 5
+	if retryCountStr != "" {
+		if count, err := strconv.Atoi(retryCountStr); err == nil && count >= 0 {
+			maxRetries = count
+		} else {
+			log.Warnf("Invalid UNMOUNT_RETRY_COUNT=%s; using default %d", retryCountStr, maxRetries)
+		}
 	}
 
 	retryIntervalStr := os.Getenv("UNMOUNT_RETRY_INTERVAL")
-	if retryIntervalStr == "" {
-		retryIntervalStr = "1s"
-	}
-	interval, err := time.ParseDuration(retryIntervalStr)
-	if err != nil {
-		interval = time.Second
+	if retryIntervalStr != "" {
+		if interval, err := time.ParseDuration(retryIntervalStr); err == nil && interval >= 0 {
+			retryInterval = interval
+		} else {
+			log.Warnf("Invalid UNMOUNT_RETRY_INTERVAL=%s; using default %s", retryIntervalStr, retryInterval)
+		}
 	}
 
-	maxRetries = count
-	retryInterval = interval
+	log.Infof("Unmount retry config: maxRetries=%d, retryInterval=%s", maxRetries, retryInterval)
 }
 
 func IsBlockDevice(fileInfo os.FileInfo) bool {
