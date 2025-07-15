@@ -5,6 +5,7 @@ go 1.17
 require (
 	github.com/ameade/spec v0.3.0 // - Apache 2.0 license
 	github.com/container-storage-interface/spec v1.2.0 // - Apache 2.0 license
+	github.com/google/uuid v1.5.0
 	github.com/jpillora/backoff v0.0.0-20180909062703-3050d21c67d7 // - MIT license
 	github.com/kr/pretty v0.1.0 // indirect; indirect - MIT license
 	github.com/kubernetes-csi/csi-test v2.2.0+incompatible
@@ -25,7 +26,6 @@ require (
 
 require (
 	github.com/golang/protobuf v1.5.0 // indirect
-	github.com/google/uuid v1.3.0 // indirect
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/konsorten/go-windows-terminal-sequences v1.0.1 // indirect
 	golang.org/x/text v0.3.0 // indirect
