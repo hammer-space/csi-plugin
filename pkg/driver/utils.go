@@ -41,7 +41,7 @@ var (
 func init() {
 	retryCountStr := os.Getenv("UNMOUNT_RETRY_COUNT")
 	if retryCountStr != "" {
-		if count, err := strconv.Atoi(retryCountStr); err == nil && count >= 0 && count <= 10 {
+		if count, err := strconv.Atoi(retryCountStr); err == nil && count >= 0 {
 			maxRetries = count
 		} else {
 			log.Warnf("Invalid UNMOUNT_RETRY_COUNT=%s; using default %d", retryCountStr, maxRetries)
@@ -50,10 +50,10 @@ func init() {
 
 	retryIntervalStr := os.Getenv("UNMOUNT_RETRY_INTERVAL")
 	if retryIntervalStr != "" {
-		if interval, err := time.ParseDuration(retryIntervalStr); err == nil && interval >= 100*time.Millisecond {
+		if interval, err := time.ParseDuration(retryIntervalStr); err == nil && interval >= 0 {
 			retryInterval = interval
 		} else {
-			log.Warnf("Invalid or too short UNMOUNT_RETRY_INTERVAL=%s; using default %s", retryIntervalStr, retryInterval)
+			log.Warnf("Invalid UNMOUNT_RETRY_INTERVAL=%s; using default %s", retryIntervalStr, retryInterval)
 		}
 	}
 
