@@ -1225,7 +1225,9 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context,
 	// Split into share name and backend snapshot name
 	splitSnapId := strings.SplitN(snapshotId, "|", 2)
 	if len(splitSnapId) != 2 {
-		return &csi.DeleteSnapshotResponse{}, nil
+		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
+			"[DeleteSnapshot] Invalid snapshot id %s, must be in the format <snapshot_name>|<path>",
+			snapshotId))
 	}
 	snapshotName, path := splitSnapId[0], splitSnapId[1]
 

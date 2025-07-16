@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - This reduces hotspotting and improves throughput in clusters with multiple floating IPs.
   - If an FQDN is configured and resolves to a reachable NFS endpoint, it is used directly; otherwise, the round-robin FIP selection is attempted in order.
 
+### Changed
+- **Production image**: Replaced CentOS 8 UBI base image with **Rocky Linux 9 UBI** for better long-term support and compatibility with modern Python 3 and security patches.
+- **Development image**: Updated `Dockerfile_dev` to use `golang:1.24-alpine`, removed CentOS dependencies, and transitioned to musl-based Alpine packages. Python `hstk` tool is now installed in a virtual environment to comply with PEP 668.
+
+
 ## 1.2.6
 ### Fixed Bug
 - Fixed error where floating IP's is not being used. 

@@ -3,9 +3,39 @@
 # Convenience image for testing the plugin
 # The local source code directory should be mapped to "/hammerspace-csi-plugin/"
 # via a docker volume (docker run -v /source-code/:/hammerspace-csi-plugin/
-FROM golang:1.21.1-alpine3.18
-RUN apk add --no-cache git make gcc libc-dev nfs-utils qemu-img xfsprogs e2fsprogs zfs btrfs-progs py-pip
-RUN pip install hstk
-RUN git clone https://github.com/rexray/gocsi --branch v1.2.2 /go/src/github.com/rexray/gocsi
-RUN cd /go/src/github.com/rexray/gocsi && make all
+
+# Example usage:
+# docker build -t csi-dev:latest -f Dockerfile_dev .
+# docker compose -f docker-compose-dev.yml up
+
+# ---------- Stage 1: Builder ----------
+FROM golang:1.24-alpine AS builder
+
+# Install required packages
+RUN apk add --no-cache \
+    git \
+    make \
+    gcc \
+    musl-dev \
+    nfs-utils \
+    qemu-img \
+    xfsprogs \
+    e2fsprogs \
+    zfs \
+    btrfs-progs \
+    py3-pip
+
+# Use pip3 (not deprecated pip) to install hstk globally
+RUN python3 -m venv /tmp/venv \
+ && /tmp/venv/bin/pip install --no-cache-dir hstk \
+ && ln -s /tmp/venv/bin/hstk /usr/local/bin/hstk
+
+# Clone and build gocsi tool (specific branch v1.2.2)
+RUN git clone --depth 1 --branch v1.2.2 https://github.com/rexray/gocsi /go/src/github.com/rexray/gocsi
+
+WORKDIR /go/src/github.com/rexray/gocsi
+
+RUN make all
+
+# Set working directory inside container for your plugin source
 WORKDIR /csi-plugin/
