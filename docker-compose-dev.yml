@@ -1,0 +1,18 @@
+
+services:
+  csi-dev:
+    image: csi-dev:latest # Ensure this image is built with the latest changes
+    container_name: csi-dev
+    privileged: true
+    cap_add:
+      - ALL
+      - SYS_ADMIN
+    volumes:
+      - /tmp:/tmp
+      - /dev:/dev
+      - /mnt/d/go-workspace/src/github.com/hammer-space:/csi-plugin # Adjust this path as necessary <your local path>:/csi-plugin
+      - ~/csi_sanity_params.yaml:/tmp/csi_sanity_params.yaml
+    env_file:
+      - ~/csi-env
+    stdin_open: true
+    tty: true
