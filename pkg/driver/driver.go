@@ -38,6 +38,9 @@ import (
 )
 
 type CSIDriver struct {
+	csi.UnimplementedControllerServer
+	csi.UnimplementedNodeServer
+	csi.UnimplementedIdentityServer
 	listener      net.Listener
 	server        *grpc.Server
 	wg            sync.WaitGroup

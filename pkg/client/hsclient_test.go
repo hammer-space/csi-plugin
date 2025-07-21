@@ -17,8 +17,9 @@ limitations under the License.
 package client
 
 import (
+	"context"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -65,7 +66,7 @@ func TestListShares(t *testing.T) {
 		fmt.Fprintf(w, fakeResponse)
 		w.WriteHeader(fakeResponseCode)
 	})
-	shares, err := hsclient.ListShares()
+	shares, err := hsclient.ListShares(context.Background())
 	if err != nil {
 		t.Error(err)
 	} else if len(shares) != 0 {
@@ -75,7 +76,7 @@ func TestListShares(t *testing.T) {
 
 	fakeResponse = fmt.Sprintf("[%s,%s]", FakeShareRoot, FakeShare1)
 
-	shares, err = hsclient.ListShares()
+	shares, err = hsclient.ListShares(context.Background())
 	if err != nil {
 		t.Error(err)
 	} else if len(shares) != 2 {
@@ -137,7 +138,7 @@ func TestListShares(t *testing.T) {
 	}
 
 	fakeResponseCode = 500
-	_, err = hsclient.ListShares()
+	_, err = hsclient.ListShares(context.Background())
 	if err != nil {
 		t.Logf("Expected error")
 		t.Fail()
@@ -155,7 +156,7 @@ func TestCreateShare(t *testing.T) {
 	Mux.HandleFunc(BasePath+"/shares", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Location", "http://fake_location/tasks/99184048-9390-4e68-92b8-d3ce6413372d")
 		w.WriteHeader(fakeResponseCode)
-		bodyString, _ := ioutil.ReadAll(r.Body)
+		bodyString, _ := io.ReadAll(r.Body)
 		equal, err := testutils.AreEqualJSON(string(bodyString), expectedCreateShareBody)
 		if err != nil {
 			t.Error(err)
@@ -186,7 +187,7 @@ func TestCreateShare(t *testing.T) {
          "shareSizeLimit":0,
          "exportOptions":[]}
     `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
-	err := hsclient.CreateShare("test",
+	err := hsclient.CreateShare(context.Background(), "test",
 		"/test", -1,
 		[]string{}, []common.ShareExportOptions{}, 0, "")
 	if err != nil {
@@ -208,7 +209,7 @@ func TestCreateShare(t *testing.T) {
 		}
 	})
 
-	err = hsclient.CreateShare("test",
+	err = hsclient.CreateShare(context.Background(), "test",
 		"/test",
 		-1, []string{"test-obj", "test-obj2"},
 		[]common.ShareExportOptions{},
@@ -231,7 +232,7 @@ func TestCreateShare(t *testing.T) {
          "shareSizeLimit":100,
          "exportOptions":[]}
     `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
-	err = hsclient.CreateShare("test",
+	err = hsclient.CreateShare(context.Background(), "test",
 		"/test",
 		100,
 		[]string{},
@@ -279,7 +280,7 @@ func TestCreateShare(t *testing.T) {
 			RootSquash:        true,
 		},
 	}
-	err = hsclient.CreateShare("test",
+	err = hsclient.CreateShare(context.Background(), "test",
 		"/test",
 		100,
 		[]string{},
@@ -305,7 +306,7 @@ func TestCreateShare(t *testing.T) {
          "shareSizeLimit":0,
          "exportOptions":[]}
     `, common.Version, common.CsiPluginName, common.Githash, common.CsiVersion)
-	err = hsclient.CreateShare("test", "/test", -1, []string{}, []common.ShareExportOptions{}, 0, "")
+	err = hsclient.CreateShare(context.Background(), "test", "/test", -1, []string{}, []common.ShareExportOptions{}, 0, "")
 	if err == nil {
 		t.Logf("Expected error")
 		t.Fail()

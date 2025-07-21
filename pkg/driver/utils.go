@@ -26,7 +26,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -165,8 +167,8 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string, hsVol *common.HSVolume) error {
-	backingShare, err := d.hsclient.GetShare(backingShareName)
+func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareName string, hsVol *common.HSVolume) error {
+	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "%s", err.Error())
 	}
@@ -174,7 +176,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string, hsVol *co
 		backingDir := common.ShareStagingDir + backingShare.ExportPath
 		// Mount backing share
 		if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
-			err := d.MountShareAtBestDataportal(backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
+			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
 				return err
@@ -189,8 +191,8 @@ func (d *CSIDriver) EnsureBackingShareMounted(backingShareName string, hsVol *co
 	return nil
 }
 
-func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, error) {
-	backingShare, err := d.hsclient.GetShare(backingShareName)
+func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShareName string) (bool, error) {
+	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil || backingShare == nil {
 		log.Errorf("unable to get share while checking UnmountBackingShareIfUnused. Err %v", err)
 		return false, err
@@ -233,13 +235,13 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(backingShareName string) (bool, 
 // If we have the IP's in list we use that IP only. We select the IP which response first rpcinfo command.
 // 3. If all above check is null of err use anvil IP.
 
-func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath string, mountFlags []string, fqdn string) error {
+func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportPath, targetPath string, mountFlags []string, fqdn string) error {
 	var err error
 	var fipaddr string = ""
 
 	log.Infof("Finding best host exporting %s", shareExportPath)
 
-	portals, err := d.hsclient.GetDataPortals(d.NodeID)
+	portals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
 		log.Errorf("Could not create list of data-portals, %v", err)
 	}
@@ -259,7 +261,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		}
 	} else {
 		// Always look for floating data portal IPs
-		fipaddr, err = d.hsclient.GetPortalFloatingIp()
+		fipaddr, err = d.hsclient.GetPortalFloatingIp(ctx)
 		if err != nil {
 			log.Errorf("Could not contact Anvil for floating IPs, %v", err)
 		}
@@ -361,4 +363,26 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 	}
 
 	return fmt.Errorf("could not mount to any data-portals")
+}
+
+func IsMountStale(targetPath string) (bool, error) {
+	cmd := exec.Command("df", "-T", targetPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Warnf("Stale mount suspected at %s: df failed with %v, output: %s", targetPath, err, string(output))
+		return true, nil // assume stale if `df` fails
+	}
+	return false, nil
+}
+
+func IsNFSVolume(cap *csi.VolumeCapability) bool {
+	if cap.GetMount() != nil {
+		// Treat as NFS or file-based
+		return true
+	}
+	return false
+}
+
+func IsNFSVolumeByID(volumeID string) bool {
+	return strings.HasPrefix(volumeID, "nfs-") // adjust to your volumeID pattern
 }

@@ -27,6 +27,10 @@ import (
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func init() {
@@ -39,6 +43,28 @@ func init() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.DebugLevel)
 	log.SetReportCaller(false)
+	// Initialize OpenTelemetry Tracer
+	if _, err := initTracer(); err != nil {
+		log.Fatalf("failed to init tracer: %v", err)
+	}
+}
+
+// Setup tracing
+func initTracer() (*sdktrace.TracerProvider, error) {
+	// Disable pretty print to reduce verbosity
+	exp, err := stdouttrace.New(
+	// stdouttrace.WithPrettyPrint(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+	)
+	otel.SetTracerProvider(tp)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	return tp, nil
 }
 
 func validateEnvironmentVars() {

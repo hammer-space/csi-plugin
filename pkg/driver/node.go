@@ -34,10 +34,7 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 )
 
-func (d *CSIDriver) NodeStageVolume(
-	ctx context.Context,
-	req *csi.NodeStageVolumeRequest) (
-	*csi.NodeStageVolumeResponse, error) {
+func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
@@ -54,10 +51,7 @@ func (d *CSIDriver) NodeStageVolume(
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) NodeUnstageVolume(
-	ctx context.Context,
-	req *csi.NodeUnstageVolumeRequest) (
-	*csi.NodeUnstageVolumeResponse, error) {
+func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
@@ -70,9 +64,7 @@ func (d *CSIDriver) NodeUnstageVolume(
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) publishShareBackedVolume(
-	exportPath,
-	targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
+func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, exportPath, targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
 
 	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
 	if err != nil {
@@ -87,6 +79,34 @@ func (d *CSIDriver) publishShareBackedVolume(
 	}
 
 	if !notMnt {
+		// Run stale mount check
+		stale, err := IsMountStale(targetPath)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed mount health check: %v", err)
+		}
+		if stale {
+			log.Warnf("Stale/hung mount detected at %s. Attempting lazy unmount...", targetPath)
+
+			unmountCmd := exec.Command("umount", "-l", targetPath)
+			output, err := unmountCmd.CombinedOutput()
+			if err != nil {
+				log.Errorf("Lazy unmount failed at %s: %v, output: %s", targetPath, err, string(output))
+				return status.Errorf(codes.Internal, "failed to clean up stale mount at %s", targetPath)
+			}
+
+			// Re-check mount state
+			notMnt, err = mount.New("").IsLikelyNotMountPoint(targetPath)
+			if err != nil {
+				log.Errorf("Post-unmount check failed at %s: %v", targetPath, err)
+				return status.Errorf(codes.Internal, "post-unmount validation failed")
+			}
+			if !notMnt {
+				log.Errorf("Mount point %s still appears mounted after lazy unmount", targetPath)
+				return status.Errorf(codes.Internal, "stale mount at %s could not be removed", targetPath)
+			}
+
+			log.Infof("Successfully cleaned up stale mount at %s", targetPath)
+		}
 		log.Debugf("Volume already published at %s", targetPath)
 		return nil
 	}
@@ -94,33 +114,61 @@ func (d *CSIDriver) publishShareBackedVolume(
 	if readOnly {
 		mountFlags = append(mountFlags, "ro")
 	}
-	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags, fqdn)
+	err = d.MountShareAtBestDataportal(ctx, exportPath, targetPath, mountFlags, fqdn)
 	return err
 }
 
-func (d *CSIDriver) publishFileBackedVolume(
-	backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
+func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
 	defer d.releaseVolumeLock(backingShareName)
 	d.getVolumeLock(backingShareName)
 
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	mounter := mount.New("")
+
+	notMnt, err := mounter.IsLikelyNotMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if fsType != "" {
-				if err := mount.New("").MakeDir(targetPath); err != nil {
-					return status.Error(codes.Internal, err.Error())
+				if err := os.MkdirAll(targetPath, 0750); err != nil {
+					return status.Error(codes.Internal, fmt.Sprintf("failed to create directory %s: %v", targetPath, err))
 				}
 			} else {
-				if err := mount.New("").MakeFile(targetPath); err != nil {
-					return status.Error(codes.Internal, err.Error())
+				file, err := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL, 0644)
+				if err != nil {
+					return status.Error(codes.Internal, fmt.Sprintf("failed to create file %s: %v", targetPath, err))
 				}
+				file.Close()
 			}
 			notMnt = true
 		} else {
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
+
 	if !notMnt {
+		stale, err := IsMountStale(targetPath)
+		if err != nil {
+			return status.Errorf(codes.Internal, "failed mount health check: %v", err)
+		}
+		if stale {
+			log.Warnf("Stale/hung mount detected at %s. Attempting lazy unmount...", targetPath)
+			unmountCmd := exec.Command("umount", "-l", targetPath)
+			output, err := unmountCmd.CombinedOutput()
+			if err != nil {
+				log.Errorf("Lazy unmount failed at %s: %v, output: %s", targetPath, err, string(output))
+				return status.Errorf(codes.Internal, "failed to clean up stale mount at %s", targetPath)
+			}
+
+			notMnt, err = mounter.IsLikelyNotMountPoint(targetPath)
+			if err != nil {
+				log.Errorf("Post-unmount check failed at %s: %v", targetPath, err)
+				return status.Errorf(codes.Internal, "post-unmount validation failed")
+			}
+			if !notMnt {
+				log.Errorf("Mount point %s still appears mounted after lazy unmount", targetPath)
+				return status.Errorf(codes.Internal, "stale mount at %s could not be removed", targetPath)
+			}
+			log.Infof("Successfully cleaned up stale mount at %s", targetPath)
+		}
 		log.Debugf("Volume already published at %s", targetPath)
 		return nil
 	}
@@ -133,8 +181,7 @@ func (d *CSIDriver) publishFileBackedVolume(
 	log.Infof("check publish file backed volume %v", hsVolume)
 
 	// Ensure the backing share is mounted
-	err = d.EnsureBackingShareMounted(backingShareName, hsVolume)
-	if err != nil {
+	if err := d.EnsureBackingShareMounted(ctx, backingShareName, hsVolume); err != nil {
 		return err
 	}
 
@@ -142,44 +189,35 @@ func (d *CSIDriver) publishFileBackedVolume(
 	log.Infof("Mounting file-backed volume at %s", targetPath)
 	filePath := common.ShareStagingDir + volumePath
 
-	// If no fsType specified, mount as a device
 	if fsType == "" {
-		filePath := common.ShareStagingDir + volumePath
-
 		deviceStr, err := AttachLoopDeviceWithRetry(filePath, readOnly)
 		if err != nil {
 			log.Errorf("failed to attach loop device: %v", err)
 			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(backingShareName)
+			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
 		}
 		log.Infof("File %s attached to %s", filePath, deviceStr)
 
-		// Bind mount loop device to target path
-		err = common.BindMountDevice(deviceStr, targetPath)
-		if err != nil {
+		if err := common.BindMountDevice(deviceStr, targetPath); err != nil {
 			log.Errorf("bind mount failed for %s: %v", deviceStr, err)
 			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(backingShareName)
+			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return err
 		}
 	} else {
 		if readOnly {
 			mountFlags = append(mountFlags, "ro")
 		}
-		err = common.MountFilesystem(filePath, targetPath, fsType, mountFlags)
-		if err != nil {
-			d.UnmountBackingShareIfUnused(backingShareName)
+		if err := common.MountFilesystem(filePath, targetPath, fsType, mountFlags); err != nil {
+			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return err
 		}
 	}
 	return nil
 }
 
-func (d *CSIDriver) NodePublishVolume(
-	ctx context.Context,
-	req *csi.NodePublishVolumeRequest) (
-	*csi.NodePublishVolumeResponse, error) {
+func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
@@ -220,7 +258,7 @@ func (d *CSIDriver) NodePublishVolume(
 	}
 	var err error
 	if fsType == "nfs" {
-		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly(), fqdn)
+		err = d.publishShareBackedVolume(ctx, req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly(), fqdn)
 	} else {
 		var backingShareName string
 		if volumeMode == "Block" {
@@ -230,7 +268,7 @@ func (d *CSIDriver) NodePublishVolume(
 		}
 		log.Infof("Found backing share %s for volume %s", backingShareName, req.GetVolumeId())
 
-		err = d.publishFileBackedVolume(
+		err = d.publishFileBackedVolume(ctx,
 			backingShareName, req.GetVolumeId(), req.GetTargetPath(), fsType, mountFlags, req.GetReadonly(), fqdn)
 
 	}
@@ -238,7 +276,7 @@ func (d *CSIDriver) NodePublishVolume(
 	return &csi.NodePublishVolumeResponse{}, err
 }
 
-func (d *CSIDriver) unpublishFileBackedVolume(
+func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context,
 	volumePath, targetPath string) error {
 
 	//determine backing share
@@ -278,7 +316,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(
 	}
 
 	// Unmount backing share if appropriate
-	unmounted, err := d.UnmountBackingShareIfUnused(backingShareName)
+	unmounted, err := d.UnmountBackingShareIfUnused(ctx, backingShareName)
 	if unmounted {
 		log.Infof("unmounted backing share, %s", backingShareName)
 	}
@@ -337,7 +375,7 @@ func (d *CSIDriver) NodeUnpublishVolume(
 	switch mode := fi.Mode(); {
 	case IsBlockDevice(fi): // block device
 		log.Infof("Detected block device at target path %s", targetPath)
-		if err := d.unpublishFileBackedVolume(req.GetVolumeId(), targetPath); err != nil {
+		if err := d.unpublishFileBackedVolume(ctx, req.GetVolumeId(), targetPath); err != nil {
 			return nil, err
 		}
 	case mode.IsDir(): // directory for mount volumes
@@ -399,7 +437,7 @@ func (d *CSIDriver) NodeGetInfo(ctx context.Context,
 	req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 
 	// Determine if this node is a data portal
-	dataPortals, err := d.hsclient.GetDataPortals(d.NodeID)
+	dataPortals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
 		log.Errorf("Could not list data-portals, %s", err.Error())
 	}
@@ -526,7 +564,7 @@ func (d *CSIDriver) NodeExpandVolume(
 	fileBacked := false
 
 	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(volumeName)
+	share, _ := d.hsclient.GetShare(ctx, volumeName)
 	if share != nil {
 		typeMount = true
 		if isMounted, _ := common.IsShareMounted(share.ExportPath); !isMounted {
@@ -538,7 +576,7 @@ func (d *CSIDriver) NodeExpandVolume(
 
 	//  Check if the specified backing share or file exists
 	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
+		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
 		if err != nil {
 			log.Error(err)
 		}

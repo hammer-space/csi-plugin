@@ -15,11 +15,12 @@ limitations under the License.
 package sanitytest
 
 import (
-	"github.com/hammer-space/csi-plugin/pkg/client"
-	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"net"
 	"os"
 	"testing"
+
+	"github.com/hammer-space/csi-plugin/pkg/client"
+	"github.com/hammer-space/csi-plugin/pkg/driver"
 
 	log "github.com/sirupsen/logrus"
 
@@ -29,7 +30,6 @@ import (
 var (
 	HSClient *client.HammerspaceClient
 )
-
 
 func Mkdir(targetPath string) (string, error) {
 	os.Mkdir(targetPath, 0755)
