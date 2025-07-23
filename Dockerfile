@@ -24,23 +24,12 @@ RUN make compile
 # ---------- Stage 2: Runtime ----------
 FROM rockylinux/rockylinux:9-ubi
 
-# Enable `devel` repo to access debug tools and dependencies
+# Enable `devel` repo to access libverto-libevent
 RUN dnf --nodocs --nobest -y install \
     dnf-plugins-core && \
     dnf config-manager --set-enabled devel && \
     dnf -y update && \
-    # Install curl to avoid issues with curl-minimal
-    dnf -y swap curl-minimal curl && \ 
     dnf -y install \
-        bpftrace \
-        perf \
-        iproute \
-        iputils \
-        bind-utils \
-        tcpdump \
-        lsof \
-        strace \
-        net-tools \
         python3-pip \
         libcom_err-devel \
         ca-certificates \
