@@ -436,6 +436,8 @@ func (client *HammerspaceClient) ListObjectiveNames(ctx context.Context) ([]stri
 }
 
 func (client *HammerspaceClient) ListVolumes(ctx context.Context) ([]common.VolumeResponse, error) {
+	// Get all base storage volumes
+	trace.SpanFromContext(ctx).AddEvent("Listing base storage volumes")
 	req, err := client.generateRequest(ctx, "GET", "/base-storage-volumes", "")
 	if err != nil {
 		log.Error(err)
@@ -454,10 +456,16 @@ func (client *HammerspaceClient) ListVolumes(ctx context.Context) ([]common.Volu
 	var volumes []common.VolumeResponse
 	err = json.Unmarshal([]byte(respBody), &volumes)
 	if err != nil {
+		trace.SpanFromContext(ctx).AddEvent("Error parsing volume JSON response", trace.WithAttributes(
+			attribute.String("response", respBody),
+			attribute.String("error", err.Error()),
+		))
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
 	log.Debug(fmt.Sprintf("Found %d volumes", len(volumes)))
-
+	trace.SpanFromContext(ctx).AddEvent("Received base storage volumes", trace.WithAttributes(
+		attribute.Int("count", len(volumes)),
+	))
 	return volumes, nil
 }
 
@@ -866,6 +874,11 @@ func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name strin
 
 func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, deleteDelay int64) error {
 	queryParams := "?delete-path=true"
+	log.Debugf("Deleting share: %s with delete delay %d", name, deleteDelay)
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.String("share.name", name),
+		attribute.Int64("share.delete_delay", deleteDelay),
+	)
 	if deleteDelay >= 0 {
 		queryParams = queryParams + "&delete-delay=" + strconv.Itoa(int(deleteDelay))
 	}
@@ -966,7 +979,10 @@ func (client *HammerspaceClient) DeleteShareSnapshot(ctx context.Context, shareN
 		fmt.Sprintf("/share-snapshots/snapshot-delete/%s/%s",
 			url.PathEscape(shareName), url.PathEscape(snapshotName)), "")
 	statusCode, _, _, err := client.doRequest(*req)
-
+	trace.SpanFromContext(ctx).SetAttributes(
+		attribute.String("share.name", shareName),
+		attribute.String("snapshot.name", snapshotName),
+	)
 	if err != nil {
 		return err
 	}

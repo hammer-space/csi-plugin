@@ -760,12 +760,10 @@ func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.S
 
 	deleteDelay := int64(-1)
 	if v, exists := share.ExtendedInfo["csi_delete_delay"]; exists {
-		if v > "0" {
-			deleteDelay, err = strconv.ParseInt(v, 10, 64)
-			if err != nil {
-				log.Warnf("csi_delete_delay extended info, %s, should be an integer, on share %s; falling back to cluster defaults",
-					v, share.Name)
-			}
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil {
+			deleteDelay = parsed
+		} else {
+			log.Warnf("csi_delete_delay extended info, %s, should be an integer, on share %s; falling back to cluster defaults", v, share.Name)
 		}
 	}
 	err = d.hsclient.DeleteShare(ctx, share.Name, deleteDelay)
