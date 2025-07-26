@@ -1,0 +1,94 @@
+# This file is part of the Hammerspace CSI Driver project.
+# It defines the RBAC roles and bindings for the CSI provisioner component.
+# The provisioner is responsible for creating and managing PersistentVolumes
+# based on PersistentVolumeClaims in Kubernetes.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: csi-provisioner
+  namespace: {{ .Values.namespace }}
+---
+# This ClusterRole defines the permissions required by the CSI provisioner.
+# It allows the provisioner to manage PersistentVolumes, PersistentVolumeClaims,
+# and other related resources in the Kubernetes cluster.
+# It also allows the provisioner to interact with storage classes and volume snapshots.
+# The ClusterRole is bound to the csi-provisioner ServiceAccount.
+# This ClusterRoleBinding binds the csi-provisioner ServiceAccount to the csi-provisioner ClusterRole.
+# This allows the provisioner to perform the actions defined in the ClusterRole.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# The ClusterRoleBinding is necessary for the provisioner to have the required permissions
+# to manage storage resources in the cluster.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is specifically for the provisioner to manage volume attachments.
+# It allows the provisioner to update the status of volume attachments.
+# This is necessary for the provisioner to properly manage the lifecycle of volumes
+# and ensure that they are correctly attached to nodes.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is specifically for the provisioner to manage volume attachment status.
+# It allows the provisioner to update the status of volume attachments.
+# This is necessary for the provisioner to properly manage the lifecycle of volumes
+# and ensure that they are correctly attached to nodes.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# The ClusterRoleBinding is necessary for the provisioner to have the required permissions
+# to manage storage resources in the cluster.
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: csi-provisioner
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "persistentvolumes", "persistentvolumeclaims", "nodes", "events", "endpoints", "secrets"]
+    verbs: ["list", "watch", "get", "create", "delete", "update", "patch"]
+  - apiGroups: ["storage.k8s.io", "snapshot.storage.k8s.io", "apiextensions.k8s.io"]
+    resources: ["storageclasses", "volumeattachments", "volumeattachments/status", "volumesnapshotcontents/status", "volumesnapshots", "volumesnapshotcontents", "volumesnapshotclasses", "customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+# This ClusterRoleBinding binds the csi-provisioner ServiceAccount to the csi-provisioner ClusterRole.
+# It allows the provisioner to perform the actions defined in the ClusterRole.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is necessary for the provisioner to have the required permissions
+# to manage storage resources in the cluster.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is specifically for the provisioner to manage volume attachments.
+# It allows the provisioner to update the status of volume attachments.
+# This is necessary for the provisioner to properly manage the lifecycle of volumes
+# and ensure that they are correctly attached to nodes.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is specifically for the provisioner to manage volume attachment status.
+# It allows the provisioner to update the status of volume attachments.
+# This is necessary for the provisioner to properly manage the lifecycle of volumes
+# and ensure that they are correctly attached to nodes.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csi-provisioner-binding
+subjects:
+  - kind: ServiceAccount
+    name: csi-provisioner
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner
+  apiGroup: rbac.authorization.k8s.io
+---
+# This ClusterRoleBinding is specifically for the provisioner to manage volume attachment status.
+# It allows the provisioner to update the status of volume attachments.
+# This is necessary for the provisioner to properly manage the lifecycle of volumes
+# and ensure that they are correctly attached to nodes.
+# The ClusterRoleBinding is created in the same namespace as the provisioner ServiceAccount.
+# This ClusterRoleBinding is necessary for the provisioner to have the required permissions
+# to manage storage resources in the cluster.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: csi-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: csi-provisioner
+    namespace: {{ .Values.namespace }}
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner
+  apiGroup: rbac.authorization.k8s.io
