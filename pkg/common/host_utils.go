@@ -39,6 +39,24 @@ import (
 
 const LOOP_CTL_GET_FREE = 0x4C82
 
+var (
+	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
+)
+
+func init() {
+	// Read environment variables for mount check timeout
+	mountCheckTimeoutStr := os.Getenv("MOUNT_CHECK_TIMEOUT")
+	if mountCheckTimeoutStr != "" {
+		if timeout, err := time.ParseDuration(mountCheckTimeoutStr); err == nil && timeout > 0 {
+			defaultMountCheckTimeout = timeout
+		} else {
+			log.Warnf("Invalid MOUNT_CHECK_TIMEOUT=%s; using default %s", mountCheckTimeoutStr, defaultMountCheckTimeout)
+		}
+	}
+
+	log.Infof("mountCheckTimeout=%s", defaultMountCheckTimeout)
+}
+
 func execCommandHelper(command string, args ...string) ([]byte, error) {
 	cmd := exec.Command(command, args...)
 	log.Debugf("Executing command: %v", cmd)
@@ -248,7 +266,7 @@ func DeleteFile(pathname string) error {
 
 func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	notMnt, err := SafeIsLikelyNotMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetPath, 0750); err != nil {
@@ -539,4 +557,27 @@ func ResolveFQDN(fqdn string) (string, error) {
 	}
 	// Use the first resolved IP address
 	return ips[0].String(), nil
+}
+
+// Wrapper function to check mount status safely
+func SafeIsLikelyNotMountPoint(path string) (bool, error) {
+	type result struct {
+		notMnt bool
+		err    error
+	}
+
+	resultChan := make(chan result, 1)
+	// Use provided timeout if set, otherwise default to 1 minute
+	to := defaultMountCheckTimeout
+	go func() {
+		notMnt, err := mount.New("").IsLikelyNotMountPoint(path)
+		resultChan <- result{notMnt: notMnt, err: err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res.notMnt, res.err
+	case <-time.After(to):
+		return false, context.DeadlineExceeded
+	}
 }

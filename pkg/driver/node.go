@@ -34,54 +34,85 @@ import (
 	"k8s.io/kubernetes/pkg/util/mount"
 )
 
-func (d *CSIDriver) NodeStageVolume(
-	ctx context.Context,
-	req *csi.NodeStageVolumeRequest) (
-	*csi.NodeStageVolumeResponse, error) {
+func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTarget := req.GetStagingTargetPath()
 
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing")
+	}
+	if stagingTarget == "" {
+		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
 	}
 
-	if req.GetStagingTargetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyStagingTargetPath)
+	// Create staging directory if it doesn't exist
+	if err := os.MkdirAll(stagingTarget, 0750); err != nil {
+		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", err)
 	}
 
-	if req.GetVolumeCapability() == nil {
-		return nil, status.Error(codes.InvalidArgument, common.NoCapabilitiesSupplied)
+	// Check if already mounted
+	notMounted, err := common.SafeIsLikelyNotMountPoint(stagingTarget)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, status.Errorf(codes.Internal, "Could not check mount point: %v", err)
+	}
+	if !notMounted {
+		// Already mounted
+		return &csi.NodeStageVolumeResponse{}, nil
+	}
+
+	mountOptions := []string{""} // Add any required NFS options here
+	fsType := req.GetVolumeCapability().GetMount().GetFsType()
+	log.Infof("Mounting volume %s at staging target %s with fsType %s", volumeID, stagingTarget, fsType)
+	if fsType == "nfs" || fsType == "" {
+		// Mount the NFS share
+		err = d.MountShareAtBestDataportal(volumeID, stagingTarget, mountOptions, req.GetVolumeContext()["fqdn"])
+		if err != nil {
+			log.Errorf("Failed to mount NFS share %s at %s: %v", volumeID, stagingTarget, err)
+		}
 	}
 
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) NodeUnstageVolume(
-	ctx context.Context,
-	req *csi.NodeUnstageVolumeRequest) (
-	*csi.NodeUnstageVolumeResponse, error) {
+func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTarget := req.GetStagingTargetPath()
 
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing")
+	}
+	if stagingTarget == "" {
+		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
 	}
 
-	if req.GetStagingTargetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyStagingTargetPath)
+	// Unmount if mounted
+	err := common.UnmountFilesystem(stagingTarget)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Infof("Staging target path %s does not exist, nothing to unmount", stagingTarget)
+			return &csi.NodeUnstageVolumeResponse{}, nil
+		}
+		return nil, status.Errorf(codes.Internal, "Failed to unmount staging target path %s: %v", stagingTarget, err)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) publishShareBackedVolume(
-	exportPath,
-	targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
-
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+func (d *CSIDriver) publishShareBackedVolume(exportPath, targetPath, stagingTargetPath string, mountFlags []string, readOnly bool, fqdn string) error {
+	// Check if target path exists and is not mounted
+	log.Infof("Publishing share-backed volume %s to target path %s", exportPath, targetPath)
+	notMnt, err := common.SafeIsLikelyNotMountPoint(targetPath)
 	if err != nil {
+		log.Warnf("Error checking mount status of %s: %v", targetPath, err)
+		// Create target path directory if it doesn't exist
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetPath, 0750); err != nil {
+				log.Errorf("Failed to create target path %s: %v", targetPath, err)
 				return status.Error(codes.Internal, err.Error())
 			}
 			notMnt = true
 		} else {
+			log.Errorf("Failed to check mount status of %s: %v", targetPath, err)
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
@@ -94,6 +125,26 @@ func (d *CSIDriver) publishShareBackedVolume(
 	if readOnly {
 		mountFlags = append(mountFlags, "ro")
 	}
+	// Bind mount from staging to target
+	if stagingTargetPath != "" && stagingTargetPath != targetPath {
+		log.Infof("Attempting bind mount from %s to %s", stagingTargetPath, targetPath)
+		err = common.BindMountDevice(stagingTargetPath, targetPath)
+		if err != nil {
+			log.Warnf("Initial bind mount from %s to %s failed: %v", stagingTargetPath, targetPath, err)
+		} else {
+			notMount, statErr := common.SafeIsLikelyNotMountPoint(targetPath)
+			if statErr != nil {
+				log.Warnf("Could not determine mount status of %s: %v", targetPath, statErr)
+			} else if notMount {
+				log.Warnf("Bind mount from %s to %s appears to have failed (target is not a mount point)", stagingTargetPath, targetPath)
+			} else {
+				log.Infof("Bind mount succeeded from %s to %s", stagingTargetPath, targetPath)
+				return nil
+			}
+		}
+	}
+
+	log.Infof("Bind mount didnt work for %s -> %s, trying to mount share directly", exportPath, targetPath)
 	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags, fqdn)
 	return err
 }
@@ -220,7 +271,7 @@ func (d *CSIDriver) NodePublishVolume(
 	}
 	var err error
 	if fsType == "nfs" {
-		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly(), fqdn)
+		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), req.StagingTargetPath, mountFlags, req.GetReadonly(), fqdn)
 	} else {
 		var backingShareName string
 		if volumeMode == "Block" {

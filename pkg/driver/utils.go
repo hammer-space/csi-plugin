@@ -241,7 +241,12 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 
 	portals, err := d.hsclient.GetDataPortals(d.NodeID)
 	if err != nil {
-		log.Errorf("Could not create list of data-portals, %v", err)
+		log.WithFields(log.Fields{
+			"share":   shareExportPath,
+			"target":  targetPath,
+			"Node_id": d.NodeID,
+		}).Errorf("Could not create list of data-portals")
+		return status.Errorf(codes.Internal, "could not create list of data-portals, %v", err)
 	}
 
 	extracted_endpoint, err := common.ResolveFQDN(fqdn)
@@ -317,9 +322,24 @@ func (d *CSIDriver) MountShareAtBestDataportal(shareExportPath, targetPath strin
 		}
 		err = common.MountShare(export, targetPath, mount_options)
 		if err != nil {
-			log.Infof("Could not mount via data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
+			log.WithFields(log.Fields{
+				"share":         shareExportPath,
+				"target":        targetPath,
+				"portal_name":   portal.Node.Name,
+				"portal_ip":     portal.Node.MgmtIpAddress.Address,
+				"portal":        portal.Uoid["uuid"],
+				"mount_options": mount_options,
+			}).Errorf("Could not mount share %s to %s ERR %v", shareExportPath, targetPath, err)
 		} else {
-			log.Infof("Mounted via data-portal, %s.", portal.Uoid["uuid"])
+			log.WithFields(log.Fields{
+				"share":         shareExportPath,
+				"target":        targetPath,
+				"portal_name":   portal.Node.Name,
+				"portal_ip":     portal.Node.MgmtIpAddress.Address,
+				"portal":        portal.Uoid["uuid"],
+				"mount_options": mount_options,
+			}).Debugf("Mounted share %s to %s via data-portal %s", shareExportPath, targetPath, portal.Node.Name)
+			// If mount is successful, return true
 			return true
 		}
 		return false
