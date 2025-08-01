@@ -34,10 +34,28 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/kubernetes/pkg/util/mount"
+	"k8s.io/mount-utils"
 )
 
 const LOOP_CTL_GET_FREE = 0x4C82
+
+var (
+	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
+)
+
+func init() {
+	// Read environment variables for mount check timeout
+	mountCheckTimeoutStr := os.Getenv("MOUNT_CHECK_TIMEOUT")
+	if mountCheckTimeoutStr != "" {
+		if timeout, err := time.ParseDuration(mountCheckTimeoutStr); err == nil && timeout > 0 {
+			defaultMountCheckTimeout = timeout
+		} else {
+			log.Warnf("Invalid MOUNT_CHECK_TIMEOUT=%s; using default %s", mountCheckTimeoutStr, defaultMountCheckTimeout)
+		}
+	}
+
+	log.Infof("mountCheckTimeout=%s", defaultMountCheckTimeout)
+}
 
 func execCommandHelper(command string, args ...string) ([]byte, error) {
 	cmd := exec.Command(command, args...)
@@ -95,15 +113,22 @@ func EnsureFreeLoopbackDeviceFile() (uint64, error) {
 
 func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) error {
 	mounter := mount.New("")
-	if exists, _ := mounter.ExistsPath(destfile); !exists {
-		err := os.MkdirAll(filepath.Dir(destfile), os.FileMode(0644))
-		if err == nil {
-			err = mounter.MakeFile(destfile)
-		}
+	// Check if the file already exists
+	if _, err := os.Stat(destfile); os.IsNotExist(err) {
+		// Make sure parent dir exists
+		err := os.MkdirAll(filepath.Dir(destfile), 0755) // Use 0755 for dirs, not 0644
 		if err != nil {
-			log.Errorf("could not make destination path for mount, %v", err)
+			log.Errorf("could not create parent directory: %v", err)
 			return status.Error(codes.Internal, err.Error())
 		}
+
+		// Create the file
+		f, err := os.OpenFile(destfile, os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			log.Errorf("could not create target file: %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		f.Close()
 	}
 
 	err := mounter.Mount(sourcefile, destfile, fsType, mountFlags)
@@ -138,15 +163,22 @@ func ExpandFilesystem(device, fsType string) error {
 
 func BindMountDevice(sourcefile, destfile string) error {
 	mounter := mount.New("")
-	if exists, _ := mounter.ExistsPath(destfile); !exists {
-		err := os.MkdirAll(filepath.Dir(destfile), os.FileMode(0644))
-		if err == nil {
-			err = mounter.MakeFile(destfile)
-		}
+	// Check if the file already exists
+	if _, err := os.Stat(destfile); os.IsNotExist(err) {
+		// Make sure parent dir exists
+		err := os.MkdirAll(filepath.Dir(destfile), 0755) // Use 0755 for dirs, not 0644
 		if err != nil {
-			log.Errorf("could not make destination path for bind mount, %v", err)
+			log.Errorf("could not create parent directory: %v", err)
 			return status.Error(codes.Internal, err.Error())
 		}
+
+		// Create the file
+		f, err := os.OpenFile(destfile, os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			log.Errorf("could not create target file: %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		f.Close()
 	}
 
 	err := mounter.Mount(sourcefile, destfile, "", []string{"bind"})
@@ -248,7 +280,7 @@ func DeleteFile(pathname string) error {
 
 func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	notMnt, err := SafeIsLikelyNotMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetPath, 0750); err != nil {
@@ -539,4 +571,65 @@ func ResolveFQDN(fqdn string) (string, error) {
 	}
 	// Use the first resolved IP address
 	return ips[0].String(), nil
+}
+
+// Wrapper function to check mount status safely
+func SafeIsLikelyNotMountPoint(path string) (bool, error) {
+	type result struct {
+		notMnt bool
+		err    error
+	}
+
+	resultChan := make(chan result, 1)
+	// Use provided timeout if set, otherwise default to 1 minute
+	to := defaultMountCheckTimeout
+	go func() {
+		notMnt, err := mount.New("").IsLikelyNotMountPoint(path)
+		resultChan <- result{notMnt: notMnt, err: err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res.notMnt, res.err
+	case <-time.After(to):
+		return false, context.DeadlineExceeded
+	}
+}
+
+// MakeEmptyRawFolder creates a folder at the specified path
+func MakeEmptyRawFolder(pathname string) error {
+	log.Debugf("checking folder '%s'", pathname)
+
+	// Check if directory exists
+	info, err := os.Stat(pathname)
+	if err == nil {
+		if !info.IsDir() {
+			log.Errorf("Path exists but is not a directory: %s", pathname)
+			return status.Error(codes.Internal, "path exists but is not a directory")
+		}
+		// Correct permissions if needed
+		err = os.Chmod(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("Failed to set correct permissions on %s: %v", pathname, err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Debugf("Directory already exists: %s", pathname)
+		return nil
+	}
+
+	// Create the directory if it does not exist
+	if os.IsNotExist(err) {
+		log.Debugf("Creating folder with path as -> %s", pathname)
+		err = os.MkdirAll(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("could not make folder, %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Debugf("Successfully created folder: %s", pathname)
+		return nil
+	}
+
+	// Handle unexpected errors
+	log.Errorf("Unexpected error checking folder: %v", err)
+	return status.Error(codes.Internal, err.Error())
 }

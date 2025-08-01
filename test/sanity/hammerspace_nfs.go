@@ -28,7 +28,7 @@ import (
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
+	log "github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo"
 
@@ -144,7 +144,7 @@ var _ = sanity.DescribeSanity("Hammerspace - NFS Volumes", func(sc *sanity.Sanit
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
-				log.Infof(string(output))
+				log.Infof("cat command output %s", string(output))
 				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", sc.Config.TargetPath+"/", key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())

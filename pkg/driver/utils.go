@@ -243,7 +243,12 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 
 	portals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
-		log.Errorf("Could not create list of data-portals, %v", err)
+		log.WithFields(log.Fields{
+			"share":   shareExportPath,
+			"target":  targetPath,
+			"Node_id": d.NodeID,
+		}).Errorf("Could not create list of data-portals")
+		return status.Errorf(codes.Internal, "could not create list of data-portals, %v", err)
 	}
 
 	extracted_endpoint, err := common.ResolveFQDN(fqdn)
@@ -319,9 +324,24 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		}
 		err = common.MountShare(export, targetPath, mount_options)
 		if err != nil {
-			log.Infof("Could not mount via data-portal, %s. Error: %v", portal.Uoid["uuid"], err)
+			log.WithFields(log.Fields{
+				"share":         shareExportPath,
+				"target":        targetPath,
+				"portal_name":   portal.Node.Name,
+				"portal_ip":     portal.Node.MgmtIpAddress.Address,
+				"portal":        portal.Uoid["uuid"],
+				"mount_options": mount_options,
+			}).Errorf("Could NOT mount share %s to %s ERR %v", shareExportPath, targetPath, err)
 		} else {
-			log.Infof("Mounted via data-portal, %s.", portal.Uoid["uuid"])
+			log.WithFields(log.Fields{
+				"share":         shareExportPath,
+				"target":        targetPath,
+				"portal_name":   portal.Node.Name,
+				"portal_ip":     portal.Node.MgmtIpAddress.Address,
+				"portal":        portal.Uoid["uuid"],
+				"mount_options": mount_options,
+			}).Debugf("Mounted share %s to %s via data-portal %s", shareExportPath, targetPath, portal.Node.Name)
+			// If mount is successful, return true
 			return true
 		}
 		return false
@@ -385,4 +405,25 @@ func IsNFSVolume(cap *csi.VolumeCapability) bool {
 
 func IsNFSVolumeByID(volumeID string) bool {
 	return strings.HasPrefix(volumeID, "nfs-") // adjust to your volumeID pattern
+}
+
+func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context) error {
+	mountpoint := "/mnt/hammerspace_root"
+	if isMounted(mountpoint) {
+		return nil
+	}
+	if err := os.MkdirAll(mountpoint, 0755); err != nil {
+		return err
+	}
+	err := d.MountShareAtBestDataportal(ctx, "/", mountpoint, nil, "")
+	if err != nil {
+		log.Errorf("Not able to mount root share to mount point %s", mountpoint)
+	}
+	return err
+}
+
+func isMounted(path string) bool {
+	cmd, err := common.ExecCommand("findmnt", "--target", path)
+	log.Debugf("find mount command output %s", cmd)
+	return err == nil
 }

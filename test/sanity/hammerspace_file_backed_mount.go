@@ -21,7 +21,6 @@ package sanitytest
 import (
 	"context"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -29,7 +28,7 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
+	log "github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo"
 
@@ -214,7 +213,7 @@ var _ = sanity.DescribeSanity("Hammerspace - File Backed Mount Volumes", func(sc
 			Expect(nodepubvol).NotTo(BeNil())
 
 			By("Read data from volume")
-			output, err = ioutil.ReadFile(sc.Config.TargetPath + "/testfile")
+			output, err = os.ReadFile(sc.Config.TargetPath + "/testfile")
 			Expect(err).NotTo(HaveOccurred())
 			Expect(output).To(Equal(testData))
 

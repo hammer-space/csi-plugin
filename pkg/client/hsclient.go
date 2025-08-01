@@ -610,7 +610,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		exportOptions = make([]common.ShareExportOptions, 0)
 	}
 	if deleteDelay >= 0 {
-		extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+		extendedInfo["csi_delete_delay"] = strconv.FormatInt(deleteDelay, 10)
 	}
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
@@ -675,22 +675,22 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	return nil
 }
 
-func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string,
-	exportPath string,
-	size int64, //size in bytes
-	objectives []string,
-	exportOptions []common.ShareExportOptions,
-	deleteDelay int64,
-	comment string,
-	snapshotPath string) error {
-	log.Debug("Creating share from snapshot: " + name)
+func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, snapshotPath string) error {
+	log.WithFields(log.Fields{
+		"name":          name,
+		"deleteDelay":   deleteDelay,
+		"exportOptions": exportOptions,
+		"exportPath":    exportPath,
+		"snapshotPath":  snapshotPath,
+	}).Infof("creating new share from snapshot")
+
 	extendedInfo := common.GetCommonExtendedInfo()
 
 	if exportOptions == nil { // send empty list to api req
 		exportOptions = make([]common.ShareExportOptions, 0)
 	}
 	if deleteDelay >= 0 {
-		extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+		extendedInfo["csi_delete_delay"] = strconv.FormatInt(deleteDelay, 10)
 	}
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
@@ -711,6 +711,10 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 	json.NewEncoder(shareString).Encode(share)
 
 	req, err := client.generateRequest(ctx, "POST", "/shares", shareString.String())
+	if err != nil {
+		log.Errorf("unable to genrate share create request with POST. Error %v", err)
+		return err
+	}
 	statusCode, _, respHeaders, err := client.doRequest(*req)
 
 	if err != nil {
@@ -738,7 +742,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 		}
 		if !success {
 			defer client.DeleteShare(ctx, share.Name, 0)
-			return errors.New("Share failed to create")
+			return errors.New("failed to create a share, delete share command issued")
 		}
 
 	} else {
@@ -880,7 +884,7 @@ func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, d
 		attribute.Int64("share.delete_delay", deleteDelay),
 	)
 	if deleteDelay >= 0 {
-		queryParams = queryParams + "&delete-delay=" + strconv.Itoa(int(deleteDelay))
+		queryParams = queryParams + "&delete-delay=" + strconv.FormatInt(deleteDelay, 10)
 	}
 	req, err := client.generateRequest(ctx, "DELETE", "/shares/"+url.PathEscape(name)+queryParams, "")
 	if err != nil {

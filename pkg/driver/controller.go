@@ -174,6 +174,37 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	return vParams, nil
 }
 
+func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) error {
+	// Check if backing share exists
+	d.getVolumeLock(backingShareName)
+	defer d.releaseVolumeLock(backingShareName)
+	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	if err != nil {
+		return status.Errorf(codes.Internal, "%s", err.Error())
+	}
+
+	// generate unique target path on host for setting file metadata
+	targetPath := common.ShareStagingDir + backingShare.ExportPath
+	deviceFile := targetPath + "/" + hsVolume.Name
+
+	// mount the share to create the directory
+	defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
+	err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume) // check if share is mounted
+	if err != nil {
+		log.Errorf("failed to ensure backing share is mounted, %v", err)
+		return err
+	}
+
+	// create NFS directory inside base share
+	err = common.MakeEmptyRawFolder(deviceFile)
+	if err != nil {
+		log.Errorf("failed to create backing folder for volume, %v", err)
+		return err
+	}
+
+	return nil
+}
+
 func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
 
 	// Check if the Mount Volume Exists
@@ -261,6 +292,14 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	if err != nil {
 		log.Warnf("failed to set additional metadata on share %v", err)
 	}
+
+	// create NFS directory inside base share
+	err = common.MakeEmptyRawFolder(targetPath + "/" + hsVolume.Name)
+	if err != nil {
+		log.Errorf("failed to create backing folder for volume, %v", err)
+		return err
+	}
+
 	return nil
 }
 
@@ -651,7 +690,17 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		log.Info("using snapshot as volume source")
 	}
 
-	if fileBacked {
+	log.Infof("Volume Mode=%s, fsType=%s, Block=%t, FileBacked=%t", volumeMode, fsType, blockRequested, fileBacked)
+	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
+		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		if err != nil {
+			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
+			return nil, status.Errorf(codes.Internal, "failed to ensure base NFS share (%s): %v", backingShareName, err)
+		}
+		// mark the NFS created folder as a backing share, so that it can be used as ID for volumeDelete
+		hsVolume.Path = common.SharePathPrefix + backingShareName + "/" + hsVolume.Name
+		volID = fmt.Sprintf("%s/%s", volumePath, volumeName)
+	} else if fileBacked {
 		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
@@ -675,9 +724,10 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	volContext["size"] = strconv.FormatInt(hsVolume.Size, 10)
 	volContext["mode"] = volumeMode
 
-	if volumeMode == "Block" {
+	switch volumeMode {
+	case "Block":
 		volContext["blockBackingShareName"] = hsVolume.BlockBackingShareName
-	} else if volumeMode == "Filesystem" && fsType != "nfs" {
+	case "Filesystem":
 		volContext["mountBackingShareName"] = hsVolume.MountBackingShareName
 		volContext["fsType"] = fsType
 	}
@@ -806,7 +856,28 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 
 }
 
-func (d *CSIDriver) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
+// ControllerGetVolume implements the ControllerServer interface for CSI.
+// This is a stub implementation; you should update it to provide actual logic as needed.
+func (c *CSIDriver) ControllerGetVolume(
+	ctx context.Context,
+	req *csi.ControllerGetVolumeRequest,
+) (*csi.ControllerGetVolumeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "ControllerGetVolume is not implemented")
+}
+
+// ControllerModifyVolume implements the ControllerServer interface for CSI.
+// This is a stub implementation; you should update it to provide actual logic as needed.
+func (c *CSIDriver) ControllerModifyVolume(
+	ctx context.Context,
+	req *csi.ControllerModifyVolumeRequest,
+) (*csi.ControllerModifyVolumeResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "ControllerGetVolume is not implemented")
+}
+
+func (d *CSIDriver) ControllerPublishVolume(
+	ctx context.Context,
+	req *csi.ControllerPublishVolumeRequest) (
+	*csi.ControllerPublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "ControllerPublishVolume not supported")
 }
 
@@ -1173,6 +1244,11 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	defer span.End()
 
 	// Check arguments
+	log.WithFields(log.Fields{
+		"Name":  req.Name,
+		"Param": req.SourceVolumeId,
+	}).Infof("Create snapshot request recived.")
+
 	if len(req.GetName()) == 0 {
 		return nil, status.Error(codes.InvalidArgument, common.EmptySnapshotId)
 	}
