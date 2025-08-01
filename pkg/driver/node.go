@@ -70,18 +70,21 @@ func (d *CSIDriver) NodeUnstageVolume(
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) publishShareBackedVolume(
-	exportPath,
-	targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
-
+func (d *CSIDriver) publishShareBackedVolume(exportPath, targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
+	// Check if target path exists and is not mounted
+	log.Infof("Publishing share-backed volume %s to target path %s", exportPath, targetPath)
 	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
 	if err != nil {
+		log.Warnf("Error checking mount status of %s: %v", targetPath, err)
+		// Create target path directory if it doesn't exist
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetPath, 0750); err != nil {
+				log.Errorf("Failed to create target path %s: %v", targetPath, err)
 				return status.Error(codes.Internal, err.Error())
 			}
 			notMnt = true
 		} else {
+			log.Errorf("Failed to check mount status of %s: %v", targetPath, err)
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
@@ -94,6 +97,7 @@ func (d *CSIDriver) publishShareBackedVolume(
 	if readOnly {
 		mountFlags = append(mountFlags, "ro")
 	}
+
 	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags, fqdn)
 	return err
 }

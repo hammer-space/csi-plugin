@@ -559,7 +559,7 @@ func (client *HammerspaceClient) CreateShare(name string,
 		exportOptions = make([]common.ShareExportOptions, 0)
 	}
 	if deleteDelay >= 0 {
-		extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+		extendedInfo["csi_delete_delay"] = strconv.FormatInt(deleteDelay, 10)
 	}
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
@@ -639,7 +639,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(name string,
 		exportOptions = make([]common.ShareExportOptions, 0)
 	}
 	if deleteDelay >= 0 {
-		extendedInfo["csi_delete_delay"] = strconv.Itoa(int(deleteDelay))
+		extendedInfo["csi_delete_delay"] = strconv.FormatInt(deleteDelay, 10)
 	}
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
@@ -824,7 +824,7 @@ func (client *HammerspaceClient) UpdateShareSize(name string, size int64) error 
 func (client *HammerspaceClient) DeleteShare(name string, deleteDelay int64) error {
 	queryParams := "?delete-path=true"
 	if deleteDelay >= 0 {
-		queryParams = queryParams + "&delete-delay=" + strconv.Itoa(int(deleteDelay))
+		queryParams = queryParams + "&delete-delay=" + strconv.FormatInt(deleteDelay, 10)
 	}
 	req, err := client.generateRequest("DELETE", "/shares/"+url.PathEscape(name)+queryParams, "")
 	if err != nil {
