@@ -55,10 +55,7 @@ func initTracer() (*sdktrace.TracerProvider, error) {
 	// Note: This is a custom ID generator that generates shorter IDs for spans
 	// It is not a standard OpenTelemetry ID generator, but it is used here for demonstration
 	log.Info("Creating TracerProvider with full ID generator")
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithIDGenerator(common.NewFullIDGenerator()),
-	)
-	log.Info("TracerProvider created with full ID generator")
+	tp := sdktrace.NewTracerProvider()
 	otel.SetTracerProvider(tp)
 	log.Info("OpenTelemetry TracerProvider set")
 	otel.SetTextMapPropagator(propagation.TraceContext{})

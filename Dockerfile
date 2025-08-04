@@ -30,6 +30,7 @@ RUN dnf --nodocs --nobest -y install \
     dnf config-manager --set-enabled devel && \
     dnf -y update && \
     dnf -y install \
+        util-linux \
         python3-pip \
         libcom_err-devel \
         ca-certificates \

@@ -56,7 +56,7 @@ spec:
       containers:
         - name: csi-provisioner
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-provisioner:v5.3.0
+          image: registry.k8s.io/sig-storage/csi-provisioner:v3.6.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--timeout=60s"  # Recommended as shares may take some time to create
@@ -69,7 +69,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-attacher
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-attacher:v4.9.0
+          image: registry.k8s.io/sig-storage/csi-attacher:v4.4.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -93,7 +93,7 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-resizer
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.14.0
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -110,7 +110,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: ravihammerspace/csi-plugin:v1.2.8
+          image: hammerspaceinc/csi-plugin:v1.2.8
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -185,8 +185,14 @@ rules:
     resources: ["secrets"]
     verbs: ["get", "list"]
   - apiGroups: ["snapshot.storage.k8s.io"]
-    resources: ["volumesnapshotclasses", "volumesnapshotcontents", "volumesnapshotcontents/status", "volumesnapshots",volumesnapshots/status" ]
-    verbs: [ "get", "list", "watch", "create", "update", "delete", "patch"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update"]
   - apiGroups: ["apiextensions.k8s.io"]
     resources: ["customresourcedefinitions"]
     verbs: ["create", "list", "watch", "delete"]
@@ -210,33 +216,7 @@ roleRef:
   kind: ClusterRole
   name: csi-provisioner
   apiGroup: rbac.authorization.k8s.io
----
-# csi-snapshot-cluster-role-binding
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: csi-snapshotter-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: csi-snapshotter-role
-subjects:
-- kind: ServiceAccount
-  name: csi-provisioner
-  namespace: kube-system
-
 #### Node service
----
-apiVersion: storage.k8s.io/v1
-kind: CSINode
-metadata:
-  name: csi-node
-spec:
-  drivers:
-  - name: com.hammerspace.csi
-    nodeID: "csi-node"
-    topologyKeys:
-      - "kubernetes.io/hostname"
 ---
 kind: DaemonSet
 apiVersion: apps/v1
@@ -257,7 +237,7 @@ spec:
       containers:
         - name: csi-resizer
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.14.0
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
@@ -269,7 +249,7 @@ spec:
               mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.14.0
+          image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.0
           lifecycle:
             preStop:
               exec:
@@ -302,7 +282,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: ravihammerspace/csi-plugin:v1.2.8
+          image: hammerspaceinc/csi-plugin:v1.2.8
           envFrom:
             - configMapRef:
                 name: csi-env-config

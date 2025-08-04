@@ -19,7 +19,6 @@ package driver
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -70,7 +69,7 @@ func IsBlockDevice(fileInfo os.FileInfo) bool {
 // AttachLoopDeviceWithRetry binds a loop device to a filePath with retry support for EBUSY
 func AttachLoopDeviceWithRetry(filePath string, readOnly bool) (string, error) {
 	// Step 1: Check if file is already attached
-	output, err := exec.Command("losetup", "-j", filePath).CombinedOutput()
+	output, err := common.ExecCommand("losetup", "-j", filePath)
 	if err == nil && strings.TrimSpace(string(output)) != "" {
 		// Example output: "/dev/loop3: [12345]:123 (/path/to/file)"
 		fields := strings.Split(string(output), ":")
@@ -90,7 +89,7 @@ func AttachLoopDeviceWithRetry(filePath string, readOnly bool) (string, error) {
 		}
 		flags = append(flags, filePath)
 
-		output, err := exec.Command("losetup", flags...).CombinedOutput()
+		output, err := common.ExecCommand("losetup", flags...)
 		deviceStr := strings.TrimSpace(string(output))
 
 		if err == nil && deviceStr != "" {
@@ -120,7 +119,7 @@ func CleanupLoopDevice(dev string) {
 	}
 
 	for i := 0; i < maxRetries; i++ {
-		out, err := exec.Command("losetup", "-d", dev).CombinedOutput()
+		out, err := common.ExecCommand("losetup", "-d", dev)
 		if err == nil {
 			log.Infof("Loop device %s detached successfully", dev)
 			return
@@ -175,7 +174,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	if backingShare != nil {
 		backingDir := common.ShareStagingDir + backingShare.ExportPath
 		// Mount backing share
-		if isMounted, _ := common.IsShareMounted(backingDir); !isMounted {
+		if isMounted := common.IsShareMounted(backingDir); !isMounted {
 			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
@@ -198,11 +197,11 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 		return false, err
 	}
 	mountPath := common.ShareStagingDir + backingShare.ExportPath
-	if isMounted, _ := common.IsShareMounted(mountPath); !isMounted {
+	if isMounted := common.IsShareMounted(mountPath); !isMounted {
 		return true, nil
 	}
 	// If any loopback devices are using the mount
-	output, err := exec.Command("losetup", "-a").CombinedOutput()
+	output, err := common.ExecCommand("losetup", "-a")
 	if err != nil {
 		return false, status.Errorf(codes.Internal,
 			"could not list backing files for loop devices, %v", err)
@@ -297,6 +296,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		} else {
 			// grab exports with showmount
 			exports, err := common.GetNFSExports(addr)
+			common.SetCacheData("NFS_EXPORTS", exports, 60*60) // keep the exports for an our before auto expire
 			if err != nil {
 				log.Infof("Could not get exports for data-portal at %s, %s. Error: %v", addr, portal.Uoid["uuid"], err)
 				return false
@@ -386,8 +386,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 }
 
 func IsMountStale(targetPath string) (bool, error) {
-	cmd := exec.Command("df", "-T", targetPath)
-	output, err := cmd.CombinedOutput()
+	output, err := common.ExecCommand("df", "-T", targetPath)
 	if err != nil {
 		log.Warnf("Stale mount suspected at %s: df failed with %v, output: %s", targetPath, err, string(output))
 		return true, nil // assume stale if `df` fails
@@ -408,17 +407,20 @@ func IsNFSVolumeByID(volumeID string) bool {
 }
 
 func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context) error {
-	mountpoint := "/mnt/hammerspace_root"
-	if isMounted(mountpoint) {
+	log.Debugf("Check if %s is already mounted", common.BaseBackingShareMountPath)
+	if isMounted(common.BaseBackingShareMountPath) {
 		return nil
 	}
-	if err := os.MkdirAll(mountpoint, 0755); err != nil {
+	log.Debugf("Create dir if %s is not already there.", common.BaseBackingShareMountPath)
+	if err := os.MkdirAll(common.BaseBackingShareMountPath, 0755); err != nil {
 		return err
 	}
-	err := d.MountShareAtBestDataportal(ctx, "/", mountpoint, nil, "")
+	log.Debugf("Calling mount share at best data portal to mount (/) on %s", common.BaseBackingShareMountPath)
+	err := d.MountShareAtBestDataportal(ctx, "/", common.BaseBackingShareMountPath, nil, "")
 	if err != nil {
-		log.Errorf("Not able to mount root share to mount point %s", mountpoint)
+		log.Errorf("Not able to mount root share to mount point %s", common.BaseBackingShareMountPath)
 	}
+	log.Debugf("Successfully mounted base (/) share at best data portal to mount point %s", common.BaseBackingShareMountPath)
 	return err
 }
 
@@ -426,4 +428,33 @@ func isMounted(path string) bool {
 	cmd, err := common.ExecCommand("findmnt", "--target", path)
 	log.Debugf("find mount command output %s", cmd)
 	return err == nil
+}
+
+// waitForPathReady waits until the given path exists and is a directory,
+// or until the context is done (e.g., timeout or cancellation).
+func (d *CSIDriver) WaitForPathReady(ctx context.Context, path string, pollInterval time.Duration) error {
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for path %s to be ready: %v", path, ctx.Err())
+		case <-ticker.C:
+			stat, err := os.Stat(path)
+			if err == nil && stat.IsDir() {
+				return nil // Path is ready
+			}
+
+			// If path does not exist, continue polling
+			if os.IsNotExist(err) {
+				continue
+			}
+
+			// Unexpected error — return immediately
+			if err != nil {
+				return fmt.Errorf("error checking path %s: %v", path, err)
+			}
+		}
+	}
 }

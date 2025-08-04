@@ -17,12 +17,7 @@ limitations under the License.
 package common
 
 import (
-	"context"
-	"crypto/rand"
 	"time"
-
-	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	trace "go.opentelemetry.io/otel/trace"
 )
 
 const (
@@ -50,8 +45,8 @@ var (
 	DefaultDataPortalMountPrefixes = [...]string{"/", "/mnt/data-portal", ""}
 	DataPortalMountPrefix          = ""
 	CommandExecTimeout             = 300 * time.Second // Seconds
-
-	UseAnvil bool
+	UseAnvil                       bool
+	BaseBackingShareMountPath      = "/var/lib/hammerspace/rootmount"
 )
 
 // Extended info to be set on every share created by the driver
@@ -63,26 +58,4 @@ func GetCommonExtendedInfo() map[string]string {
 		"csi_created_by_csi_version":     CsiVersion,
 	}
 	return extendedInfo
-}
-
-type fullIDGenerator struct{}
-
-func (g *fullIDGenerator) NewIDs(ctx context.Context) (trace.TraceID, trace.SpanID) {
-	var tid trace.TraceID
-	var sid trace.SpanID
-
-	_, _ = rand.Read(tid[:]) // Fill all 16 bytes
-	_, _ = rand.Read(sid[:]) // Fill all 8 bytes
-
-	return tid, sid
-}
-
-func (g *fullIDGenerator) NewSpanID(ctx context.Context, _ trace.TraceID) trace.SpanID {
-	var sid trace.SpanID
-	_, _ = rand.Read(sid[:]) // Fill all 8 bytes
-	return sid
-}
-
-func NewFullIDGenerator() sdktrace.IDGenerator {
-	return &fullIDGenerator{}
 }

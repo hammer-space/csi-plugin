@@ -36,7 +36,6 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	client "github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
@@ -214,11 +213,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	}
 	if share != nil {
 		if share.Size != hsVolume.Size {
-			return status.Errorf(
-				codes.AlreadyExists,
-				common.VolumeExistsSizeMismatch,
-				share.Size,
-				hsVolume.Size)
+			return status.Errorf(codes.AlreadyExists, common.VolumeExistsSizeMismatch, share.Size, hsVolume.Size)
 		}
 
 		if share.ShareState == "REMOVED" {
@@ -263,8 +258,8 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		if err != nil {
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
-	} else { // Create empty share
-		// Create the Mountvolume
+	} else {
+		// Share is not there, try creating a new share
 		err = d.hsclient.CreateShare(
 			ctx,
 			hsVolume.Name,
@@ -344,9 +339,13 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 }
 
 func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume) error {
-
+	log.WithFields(log.Fields{
+		"backingShare": backingShare,
+		"hsVolume":     hsVolume,
+	}).Debug("ensureDeviceFileExists is called.")
 	// Check if File Exists
 	hsVolume.Path = backingShare.ExportPath + "/" + hsVolume.Name
+	log.Debugf("checking if file exist %s", hsVolume.Path)
 	file, err := d.hsclient.GetFile(ctx, hsVolume.Path)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
@@ -382,7 +381,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		}
 	} else {
 		// Create empty device file
-		//// Mount Backing Share
+		// Mount Backing Share
 
 		defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
 		err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume) // check if share is mounted
@@ -390,9 +389,8 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
 		}
-
-		//// Create an empty file of the correct size
-
+		log.Debugf("ensureDeviceFileExists mounted backing share %s", backingShare.Name)
+		// Create an empty file of the correct size
 		err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
 		if err != nil {
 			log.Errorf("failed to create backing file for volume, %v", err)
@@ -400,6 +398,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		}
 
 		// Add filesystem
+		log.Debugf("ensureDeviceFileExists created empty raw file over backing share %s and path %s", backingShare.Name, deviceFile)
 		if hsVolume.FSType != "" {
 			err = common.FormatDevice(deviceFile, hsVolume.FSType)
 			if err != nil {
@@ -407,6 +406,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 				return err
 			}
 		}
+		log.Debugf("ensureDeviceFileExists formated file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
 	b := &backoff.Backoff{
@@ -428,6 +428,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 			break
 		}
 	}
+
 	if !backingFileExists {
 		log.Errorf("backing file failed to show up in API after 10 minutes")
 		return err
@@ -452,16 +453,18 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 		dur := b.Duration()
 		time.Sleep(dur)
 		// Wait for file to exist on metadata server
+		log.Debugf("Checking existance of file %s", hsVolume.Path)
 		backingFileExists, err = d.hsclient.DoesFileExist(ctx, hsVolume.Path)
 		if err != nil {
-			log.Infof("Error checking file existence: %v\n", err)
+			log.Warnf("Error checking file existence: %v", err)
 			time.Sleep(time.Second)
 			continue
 		}
 		if backingFileExists {
+			log.Debugf("Successfully found backing file %s", hsVolume.Path)
 			break
 		}
-		log.Infof("File does not exist yet: %s\n", hsVolume.Path)
+		log.Errorf("File does not exist yet: %s", hsVolume.Path)
 	}
 
 	if !backingFileExists {
@@ -485,10 +488,12 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 	}
 }
 
-func (d *CSIDriver) ensureFileBackedVolumeExists(
-	ctx context.Context,
-	hsVolume *common.HSVolume,
-	backingShareName string) error {
+func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume, backingShareName string) error {
+
+	log.WithFields(log.Fields{
+		"backingShareName": backingShareName,
+		"hsVolume":         hsVolume,
+	}).Debugf("ensureFileBackedVolumeExists is called.")
 
 	// Check if backing share exists
 	defer d.releaseVolumeLock(backingShareName)
@@ -498,7 +503,7 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
-
+	log.Debugf("Backing share existed %s", backingShareName)
 	err = d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
 
 	return err
@@ -618,7 +623,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 
 	// if it's file backed, we should check capacity of backing share
 	if requestedSize > 0 {
-		freeCapacity, err := client.GetCacheData("FREE_CAPACITY")
+		freeCapacity, err := common.GetCacheData("FREE_CAPACITY")
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -647,7 +652,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 
 	// Check if objectives exist on the cluster
 	var clusterObjectiveNames []string
-	cachedObjectiveList, err := client.GetCacheData("OBJECTIVE_LIST_NAMES")
+	cachedObjectiveList, err := common.GetCacheData("OBJECTIVE_LIST_NAMES")
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -787,7 +792,7 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
-		//// Delete File
+		// Delete File
 		volumeName := GetVolumeNameFromPath(filepath)
 		err = common.DeleteFile(destination + "/" + volumeName)
 		if err != nil {
@@ -858,33 +863,21 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 
 // ControllerGetVolume implements the ControllerServer interface for CSI.
 // This is a stub implementation; you should update it to provide actual logic as needed.
-func (c *CSIDriver) ControllerGetVolume(
-	ctx context.Context,
-	req *csi.ControllerGetVolumeRequest,
-) (*csi.ControllerGetVolumeResponse, error) {
+func (c *CSIDriver) ControllerGetVolume(ctx context.Context, req *csi.ControllerGetVolumeRequest) (*csi.ControllerGetVolumeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "ControllerGetVolume is not implemented")
 }
 
 // ControllerModifyVolume implements the ControllerServer interface for CSI.
 // This is a stub implementation; you should update it to provide actual logic as needed.
-func (c *CSIDriver) ControllerModifyVolume(
-	ctx context.Context,
-	req *csi.ControllerModifyVolumeRequest,
-) (*csi.ControllerModifyVolumeResponse, error) {
+func (c *CSIDriver) ControllerModifyVolume(ctx context.Context, req *csi.ControllerModifyVolumeRequest) (*csi.ControllerModifyVolumeResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "ControllerGetVolume is not implemented")
 }
 
-func (d *CSIDriver) ControllerPublishVolume(
-	ctx context.Context,
-	req *csi.ControllerPublishVolumeRequest) (
-	*csi.ControllerPublishVolumeResponse, error) {
+func (d *CSIDriver) ControllerPublishVolume(ctx context.Context, req *csi.ControllerPublishVolumeRequest) (*csi.ControllerPublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "ControllerPublishVolume not supported")
 }
 
-func (d *CSIDriver) ControllerUnpublishVolume(
-	ctx context.Context,
-	req *csi.ControllerUnpublishVolumeRequest) (
-	*csi.ControllerUnpublishVolumeResponse, error) {
+func (d *CSIDriver) ControllerUnpublishVolume(ctx context.Context, req *csi.ControllerUnpublishVolumeRequest) (*csi.ControllerUnpublishVolumeResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "ControllerUnpublishVolume not supported")
 }
 

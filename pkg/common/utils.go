@@ -1,13 +1,11 @@
-package client
+package common
 
 import (
 	"sync/atomic"
 	"time"
-
-	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
-var cache = common.CsiCache()
+var cache = CsiCache()
 
 func GetCacheData(key string) (interface{}, error) {
 	if cachedData, ok := cache.Get(key); ok {

@@ -150,7 +150,7 @@ func (client *HammerspaceClient) GetPortalFloatingIp(ctx context.Context) (strin
 	index := val.(*uint32)
 
 	// Get round-robin ordered list based on atomic index
-	ordered := GetRoundRobinOrderedList(index, addresses)
+	ordered := common.GetRoundRobinOrderedList(index, addresses)
 
 	// Strict sequential check — pick first valid FIP in round-robin order
 	for _, fip := range ordered {
@@ -416,7 +416,7 @@ func (client *HammerspaceClient) ListObjectives(ctx context.Context) ([]common.C
 	}
 	log.Debug(fmt.Sprintf("Found %d objectives", len(objs)))
 	// set free capacity to cache expire in 5 min
-	SetCacheData("OBJECTIVE_LIST", objs, 60*5)
+	common.SetCacheData("OBJECTIVE_LIST", objs, 60*5)
 	return objs, nil
 }
 
@@ -431,7 +431,7 @@ func (client *HammerspaceClient) ListObjectiveNames(ctx context.Context) ([]stri
 		objectiveNames[i] = o.Name
 	}
 	// set free capacity to cache expire in 5 min
-	SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
+	common.SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
 	return objectiveNames, nil
 }
 
@@ -1117,7 +1117,7 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity(ctx context.Context
 		log.Error("Error parsing JSON response: " + err.Error())
 	}
 	// set free capacity to cache expire in 5 min
-	SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
+	common.SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
 
 	free := cluster.Capacity["free"]
 	if err != nil {

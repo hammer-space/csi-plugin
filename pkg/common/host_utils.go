@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -257,7 +258,7 @@ func FormatDevice(device, fsType string) error {
 }
 
 func DeleteFile(pathname string) error {
-	log.Infof("deleting file '%s'", pathname)
+	log.Infof("deleting all data from path '%s'", pathname)
 
 	// Check if the file exists
 	if _, err := os.Stat(pathname); err != nil {
@@ -269,30 +270,47 @@ func DeleteFile(pathname string) error {
 		// If there was an error other than the file not existing, return it
 		return err
 	}
-
+	// Dont remove if path is /
+	if pathname == "/" {
+		return status.Error(codes.Internal, "Cannot remove path name '/' recheck or try manually.")
+	}
+	// Dont remove if path match a share path( wont be the case but just being careful)
+	exports, _ := GetCacheData("NFS_EXPORTS")
+	if exports != nil {
+		exportList, ok := exports.([]string)
+		if ok {
+			if slices.Contains(exportList, pathname) {
+				return status.Error(codes.Internal, "Cannot remove export path. Recheck or try manually.")
+			}
+		}
+	}
 	// Delete the file
-	if err := os.Remove(pathname); err != nil {
+	if err := os.RemoveAll(pathname); err != nil {
+		log.Errorf("Error while deleting data from path %s", pathname)
 		return err
 	}
+
+	log.Debugf("successfully deleted '%s'", pathname)
 
 	return nil
 }
 
 func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
-	notMnt, err := SafeIsLikelyNotMountPoint(targetPath)
+	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(targetPath, 0750); err != nil {
 				return status.Error(codes.Internal, err.Error())
 			}
-			notMnt = true
+			mounted = false
 		} else {
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
 
-	if !notMnt {
+	if mounted {
+		log.Infof("Share already mounted, sourcepath %s, targetPath %s", sourcePath, targetPath)
 		return nil
 	}
 
@@ -487,46 +505,45 @@ func CheckNFSExports(address string) (bool, error) {
 	}
 }
 
-func IsShareMounted(targetPath string) (bool, error) {
-	notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath)
-
+func IsShareMounted(targetPath string) bool {
+	mounter := mount.New("")
+	isMounted, err := mounter.IsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, status.Error(codes.NotFound, EmptyTargetPath)
+			log.Errorf("Path not exist, %s", EmptyTargetPath)
+			return false
 		} else {
-			return false, status.Error(codes.Internal, err.Error())
+			log.Errorf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
+			return false
 		}
 	}
-	if notMnt {
-		return false, nil
-	}
-	return true, nil
+	log.Debugf("Target path %s isMounted %t", targetPath, isMounted)
+	return true
 }
 
 func UnmountFilesystem(targetPath string) error {
+	log.Infof("UnmountFilesystem is called with targetPath %s", targetPath)
 	mounter := mount.New("")
 
-	isMounted, err := IsShareMounted(targetPath)
+	isMounted := IsShareMounted(targetPath)
 
-	if err != nil {
-		log.Error(err.Error())
-		return status.Error(codes.Internal, err.Error())
-	}
 	if !isMounted {
+		log.Debugf("Target path %s is not mounted so return without clean up.", targetPath)
 		return nil
 	}
 
-	err = mounter.Unmount(targetPath)
+	err := mounter.Unmount(targetPath)
 	if err != nil {
-		log.Error(err.Error())
+		log.Errorf("Error while unmounting target path %s, Error %v", targetPath, err.Error())
 		return status.Error(codes.Internal, err.Error())
 	}
 	// delete target path
 	err = os.Remove(targetPath)
 	if err != nil {
-		log.Errorf("could not remove target path, %v", err)
+		log.Errorf("Error while removing target path %s. Could not remove target path due to %v", targetPath, err)
 		return status.Error(codes.Internal, err.Error())
 	}
+	log.Debugf("Successfully unmounted and deleted target dir %s", targetPath)
 	return nil
 }
 
@@ -574,23 +591,23 @@ func ResolveFQDN(fqdn string) (string, error) {
 }
 
 // Wrapper function to check mount status safely
-func SafeIsLikelyNotMountPoint(path string) (bool, error) {
+func SafeIsMountPoint(path string) (bool, error) {
 	type result struct {
-		notMnt bool
-		err    error
+		mounted bool
+		err     error
 	}
 
 	resultChan := make(chan result, 1)
 	// Use provided timeout if set, otherwise default to 1 minute
 	to := defaultMountCheckTimeout
 	go func() {
-		notMnt, err := mount.New("").IsLikelyNotMountPoint(path)
-		resultChan <- result{notMnt: notMnt, err: err}
+		mounted, err := mount.New("").IsMountPoint(path)
+		resultChan <- result{mounted: mounted, err: err}
 	}()
 
 	select {
 	case res := <-resultChan:
-		return res.notMnt, res.err
+		return res.mounted, res.err
 	case <-time.After(to):
 		return false, context.DeadlineExceeded
 	}
@@ -632,4 +649,13 @@ func MakeEmptyRawFolder(pathname string) error {
 	// Handle unexpected errors
 	log.Errorf("Unexpected error checking folder: %v", err)
 	return status.Error(codes.Internal, err.Error())
+}
+
+func UnmountFilesystemWithoutDelete(shareName string) error {
+	mounter := mount.New("")
+	err := mounter.Unmount(shareName)
+	if err != nil {
+
+	}
+	return err
 }

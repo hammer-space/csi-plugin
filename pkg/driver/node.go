@@ -175,19 +175,19 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 	}
 	log.Debugf("Checking is staging target is already mounted.")
 	// Check if already mounted
-	notMounted, err := common.SafeIsLikelyNotMountPoint(stagingTarget)
+	mounted, err := common.SafeIsMountPoint(stagingTarget)
 	if err != nil && !os.IsNotExist(err) {
 		log.Errorf("error while checking staging target mount")
 		return nil, status.Errorf(codes.Internal, "Could not check mount point: %v", err)
 	}
 
-	if !notMounted {
+	if mounted {
 		log.Debugf("Node staging path already mounted.")
 		// Already mounted
 		return &csi.NodeStageVolumeResponse{}, nil
 	}
 
-	log.Infof("Mounting volume /mnt/hammerspace_root%s at staging target %s", volumeID, stagingTarget)
+	log.Infof("Mounting volume  %s at staging target %s", volumeID, stagingTarget)
 
 	// 1. Ensure the root NFS export is mounted once per node
 	if err := d.EnsureRootExportMounted(ctx); err != nil {
@@ -212,10 +212,18 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 	err := common.UnmountFilesystem(stagingTarget)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Infof("Staging target path %s does not exist, nothing to unmount", stagingTarget)
-			return &csi.NodeUnstageVolumeResponse{}, nil
+			log.Warnf("Staging target path %s does not exist, nothing to unmount", stagingTarget)
 		}
-		return nil, status.Errorf(codes.Internal, "Failed to unmount staging target path %s: %v", stagingTarget, err)
+		log.Warnf("Failed to unmount staging target path %s: %v", stagingTarget, err)
+	}
+
+	csiNodeStagingVolumePath := filepath.Join(common.BaseBackingShareMountPath, volumeID)
+	err = common.UnmountFilesystem(csiNodeStagingVolumePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warnf("csiNodeStagingVolumePath %s does not exist, nothing to unmount", csiNodeStagingVolumePath)
+		}
+		log.Warnf("Failed to unmount csiNodeStagingVolumePath %s: %v", csiNodeStagingVolumePath, err)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -410,7 +418,7 @@ func (d *CSIDriver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVol
 	share, _ := d.hsclient.GetShare(ctx, volumeName)
 	if share != nil {
 		typeMount = true
-		if isMounted, _ := common.IsShareMounted(share.ExportPath); !isMounted {
+		if isMounted := common.IsShareMounted(share.ExportPath); !isMounted {
 			return nil, status.Error(codes.FailedPrecondition, common.ShareNotMounted)
 		}
 	} else {
