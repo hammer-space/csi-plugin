@@ -22,7 +22,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -129,12 +128,11 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			}
 			for key, value := range additionalMetadataTags {
 				// Check the file exists
-				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir+vol.GetVolume().GetVolumeId()))
+				_, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir+vol.GetVolume().GetVolumeId()))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
-				log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir+vol.GetVolume().GetVolumeId(), key))
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir+vol.GetVolume().GetVolumeId(), key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -144,7 +142,7 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			By("Write data to volume")
 			//sc.Config.TargetPath
 			testData := []byte("test_data")
-			err = ioutil.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("expand the volume")
@@ -216,7 +214,7 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			Expect(output).To(Equal(testData))
 
 			By("Ensure write data to volume fails")
-			err = ioutil.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
 			Expect(err).To(HaveOccurred())
 
 			By("unpublish the volume from alt location")

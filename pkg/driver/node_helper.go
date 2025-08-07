@@ -7,15 +7,16 @@ import (
 	"strings"
 	"time"
 
+	"context"
+
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
 // Mount share and attach it
-func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
+func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string) error {
 
 	mounted, err := common.SafeIsMountPoint(targetPath)
 	log.Debugf("Checking if target is a already a mount point %s", targetPath)
@@ -42,8 +43,8 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 	// Bind mount from staging to target
 	/** eg: The belwo should be:
 	/usr/bin/mount --bind
-	/mnt/hammerspace_root/aiml/
-	/var/lib/kubelet/pods/bbab7dff-b679-4315-9de0-cf1484b4d11d/volumes/kubernetes.io~csi/aiml-base-pv/mount.
+	/mnt/hammerspace_root/share1/
+	/var/lib/kubelet/pods/bbab7dff-b679-4315-9de0-cf1484b4d11d/volumes/kubernetes.io~csi/share1-base-pv/mount.
 
 	* This is the same thing as with "autofs": if you do "/net/foo" as opposed to "/net/foo/" you won't trigger the automounter.
 	This is by design, so that readdir() and "ls -l" won't trigger an automtic automount of everything in the directory.
@@ -53,7 +54,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		sourcePath += "/"
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 
 	if err := d.WaitForPathReady(ctx, sourcePath, 500*time.Millisecond); err != nil {
@@ -61,8 +62,8 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		return status.Errorf(codes.Internal, "volume path %s not ready: %v", sourcePath, err)
 	}
 
-	out, err := common.ExecCommand("mount", "--bind", sourcePath, targetPath)
-	if err != nil {
+	if err := common.BindMountDevice(sourcePath, targetPath); err != nil {
+		log.Errorf("bind mount failed for %s: %v", targetPath, err)
 		return err
 	}
 	log.Debugf("Bind mount is success, from source (%s) to target (%s)", sourcePath, targetPath)
@@ -74,7 +75,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 	} else if !mounted {
 		log.Warnf("Bind mount from %s to %s appears to have failed (target is not a mount point)", sourcePath, targetPath)
 	} else {
-		log.Infof("Bind mount succeeded from %s to %s. Output %v", sourcePath, targetPath, out)
+		log.Infof("Bind mount succeeded from %s to %s.", sourcePath, targetPath)
 		return nil
 	}
 
@@ -83,7 +84,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 }
 
 // Check base pv exist as backingShareName and create path with backingShareName/exportPath attach to target path
-func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backingShareName, exportPath, targetPath, stagingTargetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
+func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backingShareName, exportPath, targetPath, fsType string, mountFlags []string, fqdn string) error {
 	defer d.releaseVolumeLock(backingShareName)
 	d.getVolumeLock(backingShareName)
 

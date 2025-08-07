@@ -109,6 +109,7 @@ func EnsureFreeLoopbackDeviceFile() (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not get free loop device: %w", err)
 	}
+	log.Debugf("recived free device number %d", dev)
 	return uint64(dev), nil
 }
 
@@ -257,41 +258,69 @@ func FormatDevice(device, fsType string) error {
 	return nil
 }
 
+// os.Stat(path) hang some time, so to avoid just waiting to it come back just fail this
+func statWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	result := make(chan struct {
+		info os.FileInfo
+		err  error
+	}, 1)
+
+	go func() {
+		info, err := os.Stat(path)
+		result <- struct {
+			info os.FileInfo
+			err  error
+		}{info, err}
+	}()
+
+	select {
+	case res := <-result:
+		return res.info, res.err
+	case <-ctx.Done():
+		return nil, errors.New("os.Stat timed out")
+	}
+}
+
 func DeleteFile(pathname string) error {
 	log.Infof("deleting all data from path '%s'", pathname)
 
-	// Check if the file exists
-	if _, err := os.Stat(pathname); err != nil {
-		// If the file does not exist, return without an error
-		if os.IsNotExist(err) {
-			log.Errorf("file '%s' does not exist", pathname)
-			return nil
-		}
-		// If there was an error other than the file not existing, return it
-		return err
-	}
-	// Dont remove if path is /
+	// Don't allow deleting root
 	if pathname == "/" {
-		return status.Error(codes.Internal, "Cannot remove path name '/' recheck or try manually.")
+		return status.Error(codes.Internal, "Cannot remove path name '/' — recheck or try manually.")
 	}
-	// Dont remove if path match a share path( wont be the case but just being careful)
+
+	// Optional: protect NFS export paths
 	exports, _ := GetCacheData("NFS_EXPORTS")
 	if exports != nil {
 		exportList, ok := exports.([]string)
 		if ok {
 			if slices.Contains(exportList, pathname) {
-				return status.Error(codes.Internal, "Cannot remove export path. Recheck or try manually.")
+				return status.Error(codes.Internal, "Cannot remove export path — recheck or try manually.")
 			}
 		}
 	}
-	// Delete the file
+
+	// Check if file exists with timeout
+	_, err := statWithTimeout(pathname, 30*time.Second)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Warnf("file '%s' does not exist", pathname)
+			return nil
+		}
+		log.Errorf("error accessing file '%s': %v", pathname, err)
+		return err
+	}
+
+	// Remove the file or directory
 	if err := os.RemoveAll(pathname); err != nil {
-		log.Errorf("Error while deleting data from path %s", pathname)
+		log.Errorf("error while deleting data from path '%s': %v", pathname, err)
 		return err
 	}
 
 	log.Debugf("successfully deleted '%s'", pathname)
-
 	return nil
 }
 
@@ -374,8 +403,8 @@ func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
 }
 
 func GetNFSExports(address string) ([]string, error) {
-	// Create a context with timeout of 30 seconds
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create a context with timeout of 5min
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // 5 min timeout
 	defer cancel()
 
 	// Execute the command within the context
@@ -469,8 +498,8 @@ func checkIPType(ipAddress string) (string, error) {
 }
 
 func CheckNFSExports(address string) (bool, error) {
-	// Create a context with timeout of 30 seconds
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create a context with timeout of 5 min
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	log.Infof("Checking floating ip %s", address)
@@ -510,15 +539,15 @@ func IsShareMounted(targetPath string) bool {
 	isMounted, err := mounter.IsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			log.Errorf("Path not exist, %s", EmptyTargetPath)
+			log.Warnf("Check [IsShareMounted] target path is empty, %s", EmptyTargetPath)
 			return false
 		} else {
-			log.Errorf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
+			log.Warnf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
 			return false
 		}
 	}
 	log.Debugf("Target path %s isMounted %t", targetPath, isMounted)
-	return true
+	return isMounted
 }
 
 func UnmountFilesystem(targetPath string) error {
@@ -528,15 +557,16 @@ func UnmountFilesystem(targetPath string) error {
 	isMounted := IsShareMounted(targetPath)
 
 	if !isMounted {
-		log.Debugf("Target path %s is not mounted so return without clean up.", targetPath)
+		log.Warnf("Target path %s is not mounted so return without clean up.", targetPath)
 		return nil
 	}
-
+	log.Debugf("Found mounted target dir %s", targetPath)
 	err := mounter.Unmount(targetPath)
 	if err != nil {
 		log.Errorf("Error while unmounting target path %s, Error %v", targetPath, err.Error())
 		return status.Error(codes.Internal, err.Error())
 	}
+	log.Debugf("Successfully unmounted target dir %s", targetPath)
 	// delete target path
 	err = os.Remove(targetPath)
 	if err != nil {
@@ -649,13 +679,4 @@ func MakeEmptyRawFolder(pathname string) error {
 	// Handle unexpected errors
 	log.Errorf("Unexpected error checking folder: %v", err)
 	return status.Error(codes.Internal, err.Error())
-}
-
-func UnmountFilesystemWithoutDelete(shareName string) error {
-	mounter := mount.New("")
-	err := mounter.Unmount(shareName)
-	if err != nil {
-
-	}
-	return err
 }

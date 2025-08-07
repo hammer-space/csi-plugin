@@ -63,7 +63,7 @@ func TestListShares(t *testing.T) {
 	fakeResponseCode := 200
 
 	Mux.HandleFunc(BasePath+"/shares", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, fakeResponse)
+		io.WriteString(w, fakeResponse)
 		w.WriteHeader(fakeResponseCode)
 	})
 	shares, err := hsclient.ListShares(context.Background())
@@ -166,10 +166,10 @@ func TestCreateShare(t *testing.T) {
 		}
 	})
 
-	fakeTaskResponse := fmt.Sprintf("%s", FakeTaskCompleted)
+	fakeTaskResponse := FakeTaskCompleted
 	fakeTaskResponseCode := 200
 	Mux.HandleFunc(BasePath+"/tasks/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, fakeTaskResponse)
+		io.WriteString(w, fakeTaskResponse)
 		w.WriteHeader(fakeTaskResponseCode)
 	})
 
@@ -292,7 +292,7 @@ func TestCreateShare(t *testing.T) {
 
 	// test share creation fails on backend
 	t.Log("Test Share Creation Fails")
-	fakeTaskResponse = fmt.Sprintf("%s", FakeTaskFailed)
+	fakeTaskResponse = FakeTaskFailed
 	expectedCreateShareBody = fmt.Sprintf(`
         {"name":"test",
          "path":"/test",

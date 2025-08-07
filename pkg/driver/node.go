@@ -23,13 +23,16 @@ import (
 	"syscall"
 	"unsafe"
 
+	"context"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
+
+const markerRoot = "/var/lib/hammerspace/volumes"
 
 func (d *CSIDriver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 
@@ -157,6 +160,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolu
 func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
 	stagingTarget := req.GetStagingTargetPath()
+	volumeCapability := req.GetVolumeCapability()
 
 	if volumeID == "" {
 		return nil, status.Error(codes.InvalidArgument, "Volume ID missing")
@@ -164,35 +168,34 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 	if stagingTarget == "" {
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
 	}
+	if volumeCapability == nil {
+		return nil, status.Error(codes.InvalidArgument, "VolumeCapability must be provided")
+	}
+
 	log.WithFields(log.Fields{
 		"volume_id":      volumeID,
 		"staging_target": stagingTarget,
-	}).Debug("NodeStageVolume creating staging directory")
+	}).Debug("NodeStageVolume will only stage hammerspace root share to use bind on future publish call.")
 
-	// Create staging directory if it doesn't exist
-	if err := os.MkdirAll(stagingTarget, 0750); err != nil {
-		return nil, status.Errorf(codes.Internal, "Failed to create staging target path: %v", err)
-	}
-	log.Debugf("Checking is staging target is already mounted.")
-	// Check if already mounted
-	mounted, err := common.SafeIsMountPoint(stagingTarget)
-	if err != nil && !os.IsNotExist(err) {
-		log.Errorf("error while checking staging target mount")
-		return nil, status.Errorf(codes.Internal, "Could not check mount point: %v", err)
-	}
+	// Step 1: Create a marker file for each new volume comming in.
+	// Create marker for this volume
+	marker := filepath.Join(markerRoot, volumeID+".marker")
 
-	if mounted {
-		log.Debugf("Node staging path already mounted.")
-		// Already mounted
-		return &csi.NodeStageVolumeResponse{}, nil
+	if err := os.MkdirAll(marker, 0755); err != nil {
+		log.Warnf("Failed to create marker root directory %s: %v", markerRoot, err)
+	}
+	err := os.WriteFile(marker, []byte(""), 0644)
+	if err != nil {
+		log.Warnf("Not able to create marker file path %s err %v", marker, err)
 	}
 
-	log.Infof("Mounting volume  %s at staging target %s", volumeID, stagingTarget)
-
-	// 1. Ensure the root NFS export is mounted once per node
-	if err := d.EnsureRootExportMounted(ctx); err != nil {
+	// Step 2: Ensure the root NFS export is mounted once per node
+	// EnsureRootExportMounted function will do a mount check before mounting or creating dir.
+	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
 		return nil, status.Errorf(codes.Internal, "root export mount failed: %v", err)
 	}
+
+	log.Infof("[NodeStageVolume] completed mounting base HS share.")
 
 	return &csi.NodeStageVolumeResponse{}, nil
 }
@@ -208,22 +211,24 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
 	}
 
-	// Unmount if mounted
-	err := common.UnmountFilesystem(stagingTarget)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Warnf("Staging target path %s does not exist, nothing to unmount", stagingTarget)
-		}
-		log.Warnf("Failed to unmount staging target path %s: %v", stagingTarget, err)
-	}
+	log.WithFields(log.Fields{
+		"volume_id":      volumeID,
+		"staging_target": stagingTarget,
+	}).Debug("NodeUnstageVolume will remove the any volume mounted counter, and at last delete base hs mount.")
 
-	csiNodeStagingVolumePath := filepath.Join(common.BaseBackingShareMountPath, volumeID)
-	err = common.UnmountFilesystem(csiNodeStagingVolumePath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Warnf("csiNodeStagingVolumePath %s does not exist, nothing to unmount", csiNodeStagingVolumePath)
-		}
-		log.Warnf("Failed to unmount csiNodeStagingVolumePath %s: %v", csiNodeStagingVolumePath, err)
+	// Step 1: Remove volume marker unstage request comes in.
+	marker := filepath.Join(markerRoot, volumeID+".marker")
+
+	// 1. Delete marker.txt for this volume
+	log.Debugf("Removing volume marker %s", marker)
+	_ = os.Remove(marker)
+	log.Debugf("Removed volume marker %s", marker)
+	// 2. If marker tree is now empty, clean up root
+	if !IsAnyVolumeStillMounted(markerRoot) {
+		// if no volume are mounted
+		log.Debugf("No volume marker is present on this node. Remove root mount as well..")
+		_ = os.RemoveAll(markerRoot)
+		_ = common.UnmountFilesystem(common.BaseBackingShareMountPath)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
@@ -281,12 +286,12 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 
 	// For NFS
 	if fsType == "nfs" && backingShareName == "" {
-		err := d.publishShareBackedVolume(ctx, volume_id, targetPath, mountFlags, readOnly, volumeContext["fqdn"])
+		err := d.publishShareBackedVolume(ctx, volume_id, targetPath)
 		if err != nil {
 			return nil, err
 		}
 	} else if fsType == "nfs" && backingShareName != "" {
-		err := d.publishShareBackedDirBasedVolume(ctx, backingShareName, volume_id, targetPath, req.StagingTargetPath, fsType, mountFlags, readOnly, volumeContext["fqdn"])
+		err := d.publishShareBackedDirBasedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, volumeContext["fqdn"])
 		if err != nil {
 			return nil, err
 		}

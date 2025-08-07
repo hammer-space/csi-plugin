@@ -473,7 +473,7 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 	// Get all shares
 	shares, err := client.ListShares(ctx)
 	if err != nil || shares == nil {
-		log.Error(err)
+		log.Errorf("Error while fetching list of shares. Err %v", err)
 		return nil, err
 	}
 
@@ -494,6 +494,12 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 			return nil, err
 		}
 
+		// assume no snapshot is there if shareFile is nil
+		if shareFile == nil {
+			log.Warnf("GetFile returned nil for path %s without error", shareSnapshotDir)
+			continue
+		}
+
 		// Iterate over the snapshots in the /.snapshot/ directory
 		for _, snapshotFile := range shareFile.Children {
 			snapshot := common.SnapshotResponse{
@@ -505,7 +511,10 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 			}
 
 			// Filter by snapshot_id if provided
-			if snapshot_id != "" && snapshot.Id != snapshot_id {
+			if snapshot_id != "" {
+				if snapshot.Id == snapshot_id {
+					return []common.SnapshotResponse{snapshot}, nil
+				}
 				continue
 			}
 

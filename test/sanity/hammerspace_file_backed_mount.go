@@ -28,7 +28,6 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	log "github.com/sirupsen/logrus"
 
 	. "github.com/onsi/ginkgo"
 
@@ -138,12 +137,11 @@ var _ = sanity.DescribeSanity("Hammerspace - File Backed Mount Volumes", func(sc
 			}
 			for key, value := range additionalMetadataTags {
 				// Check the file exists
-				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir+vol.GetVolume().GetVolumeId()))
+				_, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir+vol.GetVolume().GetVolumeId()))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
-				log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir+vol.GetVolume().GetVolumeId(), key))
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir+vol.GetVolume().GetVolumeId(), key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}

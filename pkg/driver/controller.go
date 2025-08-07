@@ -30,9 +30,10 @@ import (
 	timestamp "google.golang.org/protobuf/types/known/timestamppb"
 	"k8s.io/kubernetes/pkg/util/slice"
 
+	"context"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -278,7 +279,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	// generate unique target path on host for setting file metadata
 	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	defer common.UnmountFilesystem(targetPath)
-	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
+	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
@@ -321,11 +322,15 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
-
+		log.Infof("Checking if get share response back non nil share.")
+		if share == nil {
+			log.Errorf("Error while creating share from ensure backing share exist method.")
+			return nil, fmt.Errorf("requested share [%s] not found", backingShareName)
+		}
 		// generate unique target path on host for setting file metadata
 		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(targetPath)
-		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.ClientMountOptions, false, hsVolume.FQDN)
+		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
@@ -343,9 +348,11 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		"backingShare": backingShare,
 		"hsVolume":     hsVolume,
 	}).Debug("ensureDeviceFileExists is called.")
-	// Check if File Exists
+
 	hsVolume.Path = backingShare.ExportPath + "/" + hsVolume.Name
 	log.Debugf("checking if file exist %s", hsVolume.Path)
+
+	// Step 1: Check if file already exists in metadata
 	file, err := d.hsclient.GetFile(ctx, hsVolume.Path)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
@@ -361,6 +368,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		return nil
 	}
 
+	// Step 2: Validate size and capacity
 	if hsVolume.Size <= 0 {
 		return status.Error(codes.InvalidArgument, common.BlockVolumeSizeNotSpecified)
 	}
@@ -370,27 +378,28 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 	}
 
 	backingDir := common.ShareStagingDir + backingShare.ExportPath
-
 	deviceFile := backingDir + "/" + hsVolume.Name
+
+	// Step 3: Create file from snapshot or empty
 	if hsVolume.SourceSnapPath != "" {
-		// Create from snapshot
+		// Restore from snapshot
 		err := d.hsclient.RestoreFileSnapToDestination(ctx, hsVolume.SourceSnapPath, hsVolume.Path)
 		if err != nil {
 			log.Errorf("Failed to restore from snapshot, %v", err)
 			return status.Error(codes.NotFound, common.UnknownError)
 		}
 	} else {
-		// Create empty device file
-		// Mount Backing Share
-
+		// Create empty file
 		defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
-		err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume) // check if share is mounted
+
+		err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
 		}
+
 		log.Debugf("ensureDeviceFileExists mounted backing share %s", backingShare.Name)
-		// Create an empty file of the correct size
+
 		err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
 		if err != nil {
 			log.Errorf("failed to create backing file for volume, %v", err)
@@ -406,41 +415,23 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 				return err
 			}
 		}
-		log.Debugf("ensureDeviceFileExists formated file %s, with fstype %s", deviceFile, hsVolume.FSType)
+		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
-	b := &backoff.Backoff{
-		Max:    2 * time.Second,
-		Factor: 1.5,
-		Jitter: true,
-	}
-	startTime := time.Now()
-	var backingFileExists bool
-	for time.Since(startTime) < (10 * time.Minute) {
-		dur := b.Duration()
-		time.Sleep(dur)
-		output, err := common.ExecCommand("ls", deviceFile)
-		log.Infof("file exist -> %s", string(output))
-		if err != nil {
-			time.Sleep(time.Second)
-		} else {
-			backingFileExists = true
-			break
-		}
-	}
+	// Step 4: Use a fresh context to apply metadata
+	metadataCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
 
-	if !backingFileExists {
-		log.Errorf("backing file failed to show up in API after 10 minutes")
-		return err
+	err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
+	if err != nil {
+		log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
 	}
-
-	go d.applyObjectiveAndMetadata(ctx, backingShare, hsVolume, deviceFile)
 
 	return nil
 }
 
 // ensure from hs system /share/file exist to apply objective and metadata
-func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) {
+func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
 	b := &backoff.Backoff{
 		Max:    5 * time.Second,
 		Factor: 1.5,
@@ -464,12 +455,12 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 			log.Debugf("Successfully found backing file %s", hsVolume.Path)
 			break
 		}
-		log.Errorf("File does not exist yet: %s", hsVolume.Path)
+		log.Warnf("File does not exist yet: %s", hsVolume.Path)
 	}
 
 	if !backingFileExists {
 		log.Errorf("backing file failed to show up in API after 10 minutes")
-		return
+		return err
 	}
 
 	if len(hsVolume.Objectives) > 0 {
@@ -477,7 +468,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 		err = d.hsclient.SetObjectives(ctx, backingShare.Name, filePath, hsVolume.Objectives, true)
 		if err != nil {
 			log.Errorf("failed to set objectives on backing file for volume: %v\n", err)
-			return
+			return err
 		}
 	}
 
@@ -486,6 +477,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 	if err != nil {
 		log.Errorf("Failed to set additional metadata on backing file for volume: %v\n", err)
 	}
+	return err
 }
 
 func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume, backingShareName string) error {
@@ -513,7 +505,6 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/CreateVolume", trace.WithAttributes(
 		attribute.String("volume_name", req.Name),
-		attribute.Int64("requested_size", req.CapacityRange.LimitBytes),
 	))
 	defer span.End()
 
@@ -1088,7 +1079,7 @@ func (d *CSIDriver) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest
 
 	vlist, err := d.hsclient.ListVolumes(ctx)
 	if err != nil {
-		return nil, status.Error(codes.Internal, fmt.Sprintf("ListVolumes failed with error %v", err))
+		return nil, status.Error(codes.Internal, fmt.Sprintf("ListVolumes failed: %v", err))
 	}
 
 	ventries := make([]*csi.ListVolumesResponse_Entry, 0, len(vlist))
@@ -1308,17 +1299,15 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 	))
 	defer span.End()
 
-	//  If the snapshot is not specified, return error
-	if len(req.SnapshotId) == 0 {
+	snapshotId := req.GetSnapshotId()
+	if len(snapshotId) == 0 {
 		return nil, status.Error(codes.InvalidArgument, common.EmptySnapshotId)
 	}
-	snapshotId := req.GetSnapshotId()
-	// Split into share name and backend snapshot name
+
 	splitSnapId := strings.SplitN(snapshotId, "|", 2)
 	if len(splitSnapId) != 2 {
-		return nil, status.Error(codes.InvalidArgument, fmt.Sprintf(
-			"[DeleteSnapshot] Invalid snapshot id %s, must be in the format <snapshot_name>|<path>",
-			snapshotId))
+		log.Warnf("DeleteSnapshot: malformed snapshot ID %s; treating as success (idempotent)", snapshotId)
+		return &csi.DeleteSnapshotResponse{}, nil
 	}
 	snapshotName, path := splitSnapId[0], splitSnapId[1]
 
@@ -1326,18 +1315,20 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 
 	shareName := GetVolumeNameFromPath(path)
 
+	var err error
 	if shareName != "" {
-		// delete if it's a share snap
-		err := d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
+		err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
 	} else {
-		// delete if it's a file snap
-		err := d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
-		if err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
+		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+	}
+
+	if err != nil {
+		// https://github.com/container-storage-interface/spec/blob/master/spec.md#controller-deletesnapshot
+		if strings.Contains(err.Error(), "not found") {
+			log.Infof("DeleteSnapshot: snapshot %s not found, treating as success", snapshotId)
+			return &csi.DeleteSnapshotResponse{}, nil
 		}
+		return nil, status.Error(codes.Internal, err.Error())
 	}
 
 	// Delete snapshot
@@ -1364,6 +1355,13 @@ func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReq
 	backendSnapshots, err := d.hsclient.ListSnapshots(ctx, req.SnapshotId, req.SourceVolumeId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	if backendSnapshots == nil {
+		log.Infof("No snapshot found backendSnapshots %v", backendSnapshots)
+		return &csi.ListSnapshotsResponse{
+			Entries: snapshots,
+		}, nil
 	}
 
 	// Apply filtering based on snapshot_id and source_volume_id
