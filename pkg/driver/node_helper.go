@@ -24,7 +24,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		log.Warnf("Error while checking target path is a mount point %s %v", targetPath, err)
 		if os.IsNotExist(err) {
 			log.Debugf("File dosent exist for target path %s", targetPath)
-			if err := os.MkdirAll(targetPath, 0750); err != nil {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
 				log.Errorf("Error while making target path, %s", targetPath)
 				return status.Error(codes.Internal, err.Error())
 			}
@@ -247,7 +247,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, volumePath, t
 	log.Infof("found device %s for mount %s", lodevice, targetPath)
 
 	// Remove bind mount
-	output, err := common.ExecCommand("umount", "-f", targetPath)
+	output, err := common.ExecCommand("umount", targetPath)
 	if err != nil {
 		log.Errorf("could not remove bind mount, %s", err)
 		return status.Error(codes.Internal, err.Error())

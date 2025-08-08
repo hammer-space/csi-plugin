@@ -277,24 +277,25 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		}
 	}
 	// generate unique target path on host for setting file metadata
+	// mount -t nfs 10:200.../share1 /tmp/metadata-mounts/share1
 	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
+	log.Debugf("Creating empty folder with path %s", targetPath)
+
 	defer common.UnmountFilesystem(targetPath)
+
+	log.Debugf("Created empty folder with path %s", targetPath)
 	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
+	log.Debugf("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
+
 	// The hs client expects a trailing slash for directories
 	err = common.SetMetadataTags(targetPath+"/", hsVolume.AdditionalMetadataTags)
 	if err != nil {
 		log.Warnf("failed to set additional metadata on share %v", err)
 	}
-
-	// create NFS directory inside base share
-	err = common.MakeEmptyRawFolder(targetPath + "/" + hsVolume.Name)
-	if err != nil {
-		log.Errorf("failed to create backing folder for volume, %v", err)
-		return err
-	}
+	log.Debugf("Apply metadata finshed on published share backed volume %s", targetPath)
 
 	return nil
 }
@@ -530,11 +531,9 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	snap := cs.GetSnapshot()
 
 	// Get volumeMode
-	var volumeMode string
-	var blockRequested bool
-	var filesystemRequested bool
-	var fileBacked bool
-	var fsType string
+	var fsType, volumeMode string
+	var blockRequested, filesystemRequested, fileBacked bool
+
 	for _, cap := range req.VolumeCapabilities {
 		switch cap.AccessType.(type) {
 		case *csi.VolumeCapability_Block:
@@ -628,7 +627,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 				return nil, status.Error(codes.Internal, "unexpected type for free capacity")
 			}
 		} else {
-			log.Infof("getting free capacity from api response")
+			log.Infof("getting free capacity from (/cntl/state) api response")
 			// Call your function to get the free capacity from the API response here
 			available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
 			if err != nil {
@@ -661,9 +660,14 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	}
 
 	for _, o := range vParams.Objectives {
+		log.Debugf("Checking for objective inside the objective list.")
 		if !IsValueInList(o, clusterObjectiveNames) {
+			log.WithFields(log.Fields{
+				"Supllied objective list": clusterObjectiveNames,
+			}).Errorf("No objective found in objective list")
 			return nil, status.Errorf(codes.InvalidArgument, common.InvalidObjectiveNameDoesNotExist, o)
 		}
+		log.Debugf("Found objective supplied in Storage class objective params.")
 	}
 
 	// Create Volume
@@ -687,7 +691,10 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	}
 
 	log.Infof("Volume Mode=%s, fsType=%s, Block=%t, FileBacked=%t", volumeMode, fsType, blockRequested, fileBacked)
+
 	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
+		// This function is called when user want new nfs share inside one base share
+		log.Debugf("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
 		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
@@ -697,18 +704,21 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		hsVolume.Path = common.SharePathPrefix + backingShareName + "/" + hsVolume.Name
 		volID = fmt.Sprintf("%s/%s", volumePath, volumeName)
 	} else if fileBacked {
+		// This function will be called in case of Block and File backed share
+		log.Debugf("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
 		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
 		}
 
 	} else {
-		// TODO/FIXME: create from snapshot
-		// Workaround:
-		// create new share (with weird path)
-		// restore snap to weird path
-		// move weird path to proper location
-		// NOTE: Expect this to change when we change restore from snapshot in the core product.
+		// NOTE
+		// No way in product to restore snapshot of one share to restore to another share.
+		// The way we are going to achive this to make NFS share inside some base share dir (eg- k8s-nfs-share)
+		// In that case all new created share will have path like /k8s-nfs-share/pvc-csi-uuid
+		// Then we create snapshot of that share /pvc-csi-uuid which will be inside /k8s-nfs-share/.snapshot
+		// Then restore the snapshot to the new created share from snapshot content source.
+		log.Debugf("Creating share for NFS volume with path %s", hsVolume.Path)
 		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
 		if err != nil {
 			return nil, err

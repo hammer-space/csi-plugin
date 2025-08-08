@@ -329,7 +329,7 @@ func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetPath, 0750); err != nil {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
 				return status.Error(codes.Internal, err.Error())
 			}
 			mounted = false

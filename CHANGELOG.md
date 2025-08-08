@@ -9,9 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.2.8]
 ### Added
-- Added OpenTelemetry-based tracing to all API calls using standard W3C `traceparent` propagation.
-- Injected trace ID into all HTTP headers for communication with Hammerspace REST API.
-- Configured `otel.TracerProvider` with `hammerspace-csi` instrumentation scope for better observability.
+ - OpenTelemetry Tracing: Integrated OpenTelemetry-based tracing across all API calls using standard W3C traceparent propagation.
+ - Injected trace ID into all HTTP headers for REST API communication with Hammerspace.
+ - Configured otel.TracerProvider using the hammerspace-csi instrumentation scope for enhanced observability and trace correlation.
+ - NFS Root Share Mounting: Introduced support for mounting a root share for NFS-backed volumes.
+ - Volumes now use bind mounts from this root instead of individual share mounts per volume.
+ - mountBackingShareName Parameter: Added support for mountBackingShareName in the NFS storage class.
+
+ - When specified, the actual NFS volume directories will be created inside this parent share.
+ - Improved Logging: Added more detailed log messages throughout the CSI plugin for better operational clarity and troubleshooting.
+
+### Changed
+ - Mount Behavior for Volume Types:
+   - For NFS volumes, the plugin mounts a single root share once per node and uses bind mounts per volume.
+
+   - For file-backed and block volumes, the CSI driver continues to mount the share defined in the storage class and then perform bind mounts as before.
 
 ### Fixed
 - Ensured trace ID is not dropped during API retries or chained calls.
