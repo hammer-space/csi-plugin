@@ -20,7 +20,7 @@ unittest:
 
 sanity:
 	@echo "==> Running sanity functional tests"
-	@env go test -timeout=0 -v -run="TestSanity" ./...
+	@env GO111MODULE=on go test -timeout=0 -v ./test/sanity/...
 
 build-dev:
 	@echo "==> Building Docker Image for Dev Image"

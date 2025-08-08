@@ -17,6 +17,8 @@ limitations under the License.
 package driver
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path"
@@ -496,4 +498,15 @@ func IsAnyVolumeStillMounted(baseMarkerDir string) bool {
 	}
 
 	return false
+}
+
+func GetHashedMarkerPath(baseDir, stagePath string) string {
+	h := sha256.New()
+	h.Write([]byte(stagePath))
+	hashStr := hex.EncodeToString(h.Sum(nil))
+
+	// Instead of putting marker as a file named ".marker" inside hash directory,
+	// create a file named "<hash>.marker" directly inside baseDir
+	markerFile := filepath.Join(baseDir, hashStr+".marker")
+	return markerFile
 }

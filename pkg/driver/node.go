@@ -179,11 +179,12 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	// Step 1: Create a marker file for each new volume comming in.
 	// Create marker for this volume
-	marker := filepath.Join(markerRoot, volumeID+".marker")
-
-	if err := os.MkdirAll(marker, 0755); err != nil {
+	if err := os.MkdirAll(markerRoot, 0755); err != nil {
 		log.Warnf("Failed to create marker root directory %s: %v", markerRoot, err)
 	}
+
+	marker := GetHashedMarkerPath(markerRoot, stagingTarget)
+
 	err := os.WriteFile(marker, []byte(""), 0644)
 	if err != nil {
 		log.Warnf("Not able to create marker file path %s err %v", marker, err)
@@ -217,7 +218,7 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 	}).Debug("NodeUnstageVolume will remove the any volume mounted counter, and at last delete base hs mount.")
 
 	// Step 1: Remove volume marker unstage request comes in.
-	marker := filepath.Join(markerRoot, volumeID+".marker")
+	marker := GetHashedMarkerPath(markerRoot, stagingTarget)
 
 	// 1. Delete marker.txt for this volume
 	log.Debugf("Removing volume marker %s", marker)
@@ -296,8 +297,14 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			return nil, err
 		}
 	} else {
+		log.WithFields(log.Fields{
+			"Backing share": backingShareName,
+			"Volume_id":     volume_id,
+			"Traget Path":   targetPath,
+		}).Info("Starting node publish volume file backed.")
 		err := d.publishFileBackedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, readOnly, volumeContext["fqdn"])
 		if err != nil {
+			log.Errorf("Error while running publishFileBackedVolume.")
 			return nil, err
 		}
 	}

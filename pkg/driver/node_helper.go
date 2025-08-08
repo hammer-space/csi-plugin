@@ -147,8 +147,10 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 	defer d.releaseVolumeLock(backingShareName)
 	d.getVolumeLock(backingShareName)
 
+	log.Debugf("Recived publish file backed volume request.")
 	mounted, err := common.SafeIsMountPoint(targetPath)
 	if err != nil {
+		log.Errorf("Some error while checking valid mount point")
 		if os.IsNotExist(err) {
 			// Path does not exist
 			if fsType != "" {
