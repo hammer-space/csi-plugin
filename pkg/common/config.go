@@ -47,6 +47,7 @@ var (
 	CommandExecTimeout             = 300 * time.Second // Seconds
 	UseAnvil                       bool
 	BaseBackingShareMountPath      = "/var/lib/hammerspace/rootmount"
+	BaseVolumeMarkerSourcePath     = "/var/lib/hammerspace/volumes"
 )
 
 // Extended info to be set on every share created by the driver

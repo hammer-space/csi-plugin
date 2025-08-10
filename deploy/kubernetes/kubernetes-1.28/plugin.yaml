@@ -110,7 +110,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.8
+          image: hammerspaceinc/csi-plugin:v1.2.8-rc
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -282,7 +282,7 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.8
+          image: hammerspaceinc/csi-plugin:v1.2.8-rc
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -321,6 +321,9 @@ spec:
             - name: mountpoint-dir
               mountPath: /var/lib/kubelet/
               mountPropagation: Bidirectional
+            - name: rootshare-dir
+              mountPath: /var/lib/hammerspace/
+              mountPropagation: Bidirectional
             - name: dev-dir
               mountPath: /dev
             - name: staging-dir
@@ -334,6 +337,9 @@ spec:
         - name: mountpoint-dir
           hostPath:
             path: /var/lib/kubelet/
+        - name: rootshare-dir
+          hostPath:
+            path: /var/lib/hammerspace/
         - name: registration-dir
           hostPath:
             path: /var/lib/kubelet/plugins_registry/

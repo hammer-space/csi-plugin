@@ -439,12 +439,28 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	if err := os.MkdirAll(baseRootDirPath, 0755); err != nil {
 		return err
 	}
-	log.Debugf("Calling mount share at best data portal to mount (/) on %s", baseRootDirPath)
-	err := d.MountShareAtBestDataportal(ctx, "/", baseRootDirPath, nil, "")
+	// Step 1 - Get Anvil IP
+	anvilEndpointIP, err := d.hsclient.GetAnvilPortal()
 	if err != nil {
-		log.Errorf("Not able to mount root share to mount point %s. Error %v", baseRootDirPath, err)
-		return err
+		log.Errorf("Not able to extract anvil endpoint. Err %v", err)
 	}
+	// Step 2 - Use export ip and path to mount root with 4.2 only.
+	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", "", baseRootDirPath)
+	var mountOption []string
+	mountOption = append(mountOption, "nfsvers=4.2")
+	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, mountOption)
+	if err != nil {
+		log.Errorf("Unable to mount root share via 4.2 using anvil IP. %v", err)
+
+		// Step 3 - Use fallback
+		log.Debugf("Call for mount root share with anvil IP and 4.2 FAILED, now will do a fallback try with other data portals, with fallback to 4.2 and v3")
+		err = d.MountShareAtBestDataportal(ctx, "/", baseRootDirPath, nil, "")
+		if err != nil {
+			log.Errorf("Not able to mount root share to mount point %s. Error %v", baseRootDirPath, err)
+			return err
+		}
+	}
+
 	log.Debugf("Successfully mounted base (/) share at best data portal to mount point %s", baseRootDirPath)
 	return err
 }
@@ -500,9 +516,9 @@ func IsAnyVolumeStillMounted(baseMarkerDir string) bool {
 	return false
 }
 
-func GetHashedMarkerPath(baseDir, stagePath string) string {
+func GetHashedMarkerPath(baseDir, volmeID string) string {
 	h := sha256.New()
-	h.Write([]byte(stagePath))
+	h.Write([]byte(volmeID))
 	hashStr := hex.EncodeToString(h.Sum(nil))
 
 	// Instead of putting marker as a file named ".marker" inside hash directory,

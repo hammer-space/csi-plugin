@@ -17,28 +17,34 @@ import (
 
 // Mount share and attach it
 func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string) error {
+	// Step 1 create a targetpath
+	log.Debugf("Check if target path exist. %s", targetPath)
+	if _, err := os.Stat(targetPath); err != nil {
+		log.Debugf("Target path does not exist creating it. %s", targetPath)
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
+				return fmt.Errorf("failed to create target path: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to stat target path: %w", err)
+		}
+	}
 
+	// Step 2 check if this is already a mount point
+	log.Debugf("Target path exist check if it already a mount point")
 	mounted, err := common.SafeIsMountPoint(targetPath)
 	log.Debugf("Checking if target is a already a mount point %s", targetPath)
 	if err != nil {
 		log.Warnf("Error while checking target path is a mount point %s %v", targetPath, err)
-		if os.IsNotExist(err) {
-			log.Debugf("File dosent exist for target path %s", targetPath)
-			if err := os.MkdirAll(targetPath, 0755); err != nil {
-				log.Errorf("Error while making target path, %s", targetPath)
-				return status.Error(codes.Internal, err.Error())
-			}
-			mounted = false
-		} else {
-			return status.Error(codes.Internal, err.Error())
-		}
+		return status.Error(codes.Internal, err.Error())
 	}
 
-	// notMnt with not is mounted
+	// Step 3 check is mounted return
 	if mounted {
-		log.Debugf("Volume already published at %s", targetPath)
+		log.Debugf("Volume (%s) already published at %s", volumeId, targetPath)
 		return nil
 	}
+	// Step 4 if not mounted created a mount point
 
 	// Bind mount from staging to target
 	/** eg: The belwo should be:

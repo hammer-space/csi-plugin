@@ -32,8 +32,6 @@ import (
 	"google.golang.org/grpc/status"
 )
 
-const markerRoot = "/var/lib/hammerspace/volumes"
-
 func (d *CSIDriver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 
 	// Determine if this node is a data portal
@@ -179,11 +177,11 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	// Step 1: Create a marker file for each new volume comming in.
 	// Create marker for this volume
-	if err := os.MkdirAll(markerRoot, 0755); err != nil {
-		log.Warnf("Failed to create marker root directory %s: %v", markerRoot, err)
+	if err := os.MkdirAll(common.BaseVolumeMarkerSourcePath, 0755); err != nil {
+		log.Warnf("Failed to create marker root directory %s: %v", common.BaseVolumeMarkerSourcePath, err)
 	}
 
-	marker := GetHashedMarkerPath(markerRoot, stagingTarget)
+	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
 
 	err := os.WriteFile(marker, []byte(""), 0644)
 	if err != nil {
@@ -218,17 +216,17 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 	}).Debug("NodeUnstageVolume will remove the any volume mounted counter, and at last delete base hs mount.")
 
 	// Step 1: Remove volume marker unstage request comes in.
-	marker := GetHashedMarkerPath(markerRoot, stagingTarget)
+	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
 
 	// 1. Delete marker.txt for this volume
 	log.Debugf("Removing volume marker %s", marker)
 	_ = os.Remove(marker)
 	log.Debugf("Removed volume marker %s", marker)
 	// 2. If marker tree is now empty, clean up root
-	if !IsAnyVolumeStillMounted(markerRoot) {
+	if !IsAnyVolumeStillMounted(common.BaseVolumeMarkerSourcePath) {
 		// if no volume are mounted
 		log.Debugf("No volume marker is present on this node. Remove root mount as well..")
-		_ = os.RemoveAll(markerRoot)
+		_ = os.RemoveAll(common.BaseVolumeMarkerSourcePath)
 		_ = common.UnmountFilesystem(common.BaseBackingShareMountPath)
 	}
 
@@ -261,7 +259,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 	defer d.releaseVolumeLock(volume_id)
 	d.getVolumeLock(volume_id)
 
-	log.Infof("Attempting to publish volume %s", volume_id)
+	log.Infof("Attempting to publish volume %s at target path %s", volume_id, targetPath)
 
 	var volumeContext = req.GetVolumeContext()
 	var readOnly bool = req.GetReadonly()
@@ -287,11 +285,21 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 
 	// For NFS
 	if fsType == "nfs" && backingShareName == "" {
+		log.WithFields(log.Fields{
+			"NFS Backing share": backingShareName,
+			"Volume_id":         volume_id,
+			"Traget Path":       targetPath,
+		}).Info("Starting node publish volume for Share backed NFS volume without backing share.")
 		err := d.publishShareBackedVolume(ctx, volume_id, targetPath)
 		if err != nil {
 			return nil, err
 		}
 	} else if fsType == "nfs" && backingShareName != "" {
+		log.WithFields(log.Fields{
+			"NFS Backing share": backingShareName,
+			"Volume_id":         volume_id,
+			"Traget Path":       targetPath,
+		}).Info("Starting node publish volume for Share backed NFS volume with backing share.")
 		err := d.publishShareBackedDirBasedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, volumeContext["fqdn"])
 		if err != nil {
 			return nil, err

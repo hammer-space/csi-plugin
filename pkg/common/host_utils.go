@@ -632,13 +632,14 @@ func SafeIsMountPoint(path string) (bool, error) {
 	to := defaultMountCheckTimeout
 	go func() {
 		mounted, err := mount.New("").IsMountPoint(path)
-		resultChan <- result{mounted: mounted, err: err}
+		resultChan <- result{mounted, err}
 	}()
 
 	select {
 	case res := <-resultChan:
 		return res.mounted, res.err
 	case <-time.After(to):
+		go func() { <-resultChan }() // drain the channel later so goroutine can exit
 		return false, context.DeadlineExceeded
 	}
 }
