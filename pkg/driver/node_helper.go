@@ -17,6 +17,35 @@ import (
 
 // Mount share and attach it
 func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string) error {
+	// Step 0 — Ensure root share mount exists for this volume (lazy stage for old volumes)
+	// Lazy stage for old volumes (skip if root share already mounted)
+	rootShareMounted, _ := common.SafeIsMountPoint(common.BaseBackingShareMountPath)
+	if !rootShareMounted {
+		log.Infof("[LazyStage] Root share not mounted — performing stage for old volume %s", volumeId)
+
+		// Create marker file (same as NodeStageVolume)
+		if err := os.MkdirAll(common.BaseVolumeMarkerSourcePath, 0755); err != nil {
+			log.Warnf("Failed to create marker root directory %s: %v", common.BaseVolumeMarkerSourcePath, err)
+		}
+		marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeId)
+		if err := os.WriteFile(marker, []byte(""), 0644); err != nil {
+			log.Warnf("Not able to create marker file path %s err %v", marker, err)
+		}
+
+		// Mount root export (same as NodeStageVolume)
+		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+			return status.Errorf(codes.Internal, "[LazyStage] root export mount failed: %v", err)
+		}
+
+		// Clear old mount because now this will come up with bind mount.
+		// This meant the the publish was not from bind mount, so remove old share mount to clear old direct nfs mount and do bind mount from here.
+		log.Debugf("Strating unmouting for target path %s, due to old style mount from v1.2.7 and earlier", targetPath)
+		if err := common.UnmountFilesystem(targetPath); err != nil {
+			log.Warnf("Not able to clear the old mount point targetpath (%s) volumeid (%s)", targetPath, volumeId)
+		}
+		log.Infof("[LazyStage] Completed mounting base HS share for volume %s", volumeId)
+	}
+
 	// Step 1 create a targetpath
 	log.Debugf("Check if target path exist. %s", targetPath)
 	if _, err := os.Stat(targetPath); err != nil {
@@ -74,15 +103,14 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 	}
 	log.Debugf("Bind mount is success, from source (%s) to target (%s)", sourcePath, targetPath)
 
-	mounted, statErr := common.SafeIsMountPoint(targetPath)
+	mounted, err = common.SafeIsMountPoint(targetPath)
 	log.Debugf("Checking mount is point target (%s).", targetPath)
-	if statErr != nil {
-		log.Warnf("Could not determine mount status of %s: %v", targetPath, statErr)
+	if err != nil {
+		log.Warnf("Could not determine mount status of %s: %v", targetPath, err)
 	} else if !mounted {
 		log.Warnf("Bind mount from %s to %s appears to have failed (target is not a mount point)", sourcePath, targetPath)
 	} else {
-		log.Infof("Bind mount succeeded from %s to %s.", sourcePath, targetPath)
-		return nil
+		log.Infof("Bind mount completed from %s to %s.", sourcePath, targetPath)
 	}
 
 	return err

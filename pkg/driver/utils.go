@@ -431,7 +431,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 
 func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string) error {
 	log.Debugf("Check if %s is already mounted", baseRootDirPath)
-	if isMounted(baseRootDirPath) {
+	if common.IsShareMounted(baseRootDirPath) {
 		log.Debugf("Root dir mount is already mounted at this node on path %s", baseRootDirPath)
 		return nil
 	}
@@ -463,12 +463,6 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 
 	log.Debugf("Successfully mounted base (/) share at best data portal to mount point %s", baseRootDirPath)
 	return err
-}
-
-func isMounted(path string) bool {
-	cmd, err := common.ExecCommand("findmnt", "--target", path)
-	log.Debugf("find mount command output %s", cmd)
-	return err == nil
 }
 
 // waitForPathReady waits until the given path exists and is a directory,
