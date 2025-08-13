@@ -3,15 +3,14 @@ package sanitytest
 import (
 	"crypto/rand"
 	"fmt"
-	"github.com/hammer-space/csi-plugin/pkg/client"
-	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-	"gopkg.in/yaml.v2"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
-)
 
+	"github.com/hammer-space/csi-plugin/pkg/client"
+	"github.com/kubernetes-csi/csi-test/pkg/sanity"
+	"gopkg.in/yaml.v2"
+)
 
 func copyStringMap(originalMap map[string]string) map[string]string {
 	newMap := make(map[string]string)
@@ -38,7 +37,7 @@ func createMountTargetLocation(targetPath string) error {
 func loadSecrets(path string) (*sanity.CSISecrets, error) {
 	var creds sanity.CSISecrets
 
-	yamlFile, err := ioutil.ReadFile(path)
+	yamlFile, err := os.ReadFile(path)
 	if err != nil {
 		return &creds, fmt.Errorf("failed to read file %q: #%v", path, err)
 	}
@@ -71,7 +70,7 @@ func uniqueString(prefix string) string {
 	return prefix + "-" + pseudoUUID()
 }
 
-func GetHammerspaceClient() (*client.HammerspaceClient){
+func GetHammerspaceClient() *client.HammerspaceClient {
 	tlsVerify, _ := strconv.ParseBool(os.Getenv("HS_TLS_VERIFY"))
 
 	client, err := client.NewHammerspaceClient(
@@ -85,7 +84,7 @@ func GetHammerspaceClient() (*client.HammerspaceClient){
 	return client
 }
 
-func parseMetadataTagsParam(additionalMetadataTagsString string) (map[string]string){
+func parseMetadataTagsParam(additionalMetadataTagsString string) map[string]string {
 
 	additionalMetadataTags := map[string]string{}
 	tagsList := strings.Split(additionalMetadataTagsString, ",")

@@ -120,7 +120,7 @@ type Task struct {
 	Uuid          string        `json:"uuid"`
 	Action        string        `json:"name"`
 	Status        string        `json:"status"`
-	Progress      int           `json:"progress"`
+	Progress      ProgressValue `json:"progress"` // normalized to 0.0–1.0
 	StatusMessage string        `json:"statusMessage"`
 	ParamsMap     TaskParamsMap `json:"paramsMap"`
 }

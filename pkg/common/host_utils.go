@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,10 +35,28 @@ import (
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/kubernetes/pkg/util/mount"
+	"k8s.io/mount-utils"
 )
 
 const LOOP_CTL_GET_FREE = 0x4C82
+
+var (
+	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
+)
+
+func init() {
+	// Read environment variables for mount check timeout
+	mountCheckTimeoutStr := os.Getenv("MOUNT_CHECK_TIMEOUT")
+	if mountCheckTimeoutStr != "" {
+		if timeout, err := time.ParseDuration(mountCheckTimeoutStr); err == nil && timeout > 0 {
+			defaultMountCheckTimeout = timeout
+		} else {
+			log.Warnf("Invalid MOUNT_CHECK_TIMEOUT=%s; using default %s", mountCheckTimeoutStr, defaultMountCheckTimeout)
+		}
+	}
+
+	log.Infof("mountCheckTimeout=%s", defaultMountCheckTimeout)
+}
 
 func execCommandHelper(command string, args ...string) ([]byte, error) {
 	cmd := exec.Command(command, args...)
@@ -90,20 +109,28 @@ func EnsureFreeLoopbackDeviceFile() (uint64, error) {
 	if err != nil {
 		return 0, fmt.Errorf("could not get free loop device: %w", err)
 	}
+	log.Debugf("recived free device number %d", dev)
 	return uint64(dev), nil
 }
 
 func MountFilesystem(sourcefile, destfile, fsType string, mountFlags []string) error {
 	mounter := mount.New("")
-	if exists, _ := mounter.ExistsPath(destfile); !exists {
-		err := os.MkdirAll(filepath.Dir(destfile), os.FileMode(0644))
-		if err == nil {
-			err = mounter.MakeFile(destfile)
-		}
+	// Check if the file already exists
+	if _, err := os.Stat(destfile); os.IsNotExist(err) {
+		// Make sure parent dir exists
+		err := os.MkdirAll(filepath.Dir(destfile), 0755) // Use 0755 for dirs, not 0644
 		if err != nil {
-			log.Errorf("could not make destination path for mount, %v", err)
+			log.Errorf("could not create parent directory: %v", err)
 			return status.Error(codes.Internal, err.Error())
 		}
+
+		// Create the file
+		f, err := os.OpenFile(destfile, os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			log.Errorf("could not create target file: %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		f.Close()
 	}
 
 	err := mounter.Mount(sourcefile, destfile, fsType, mountFlags)
@@ -138,15 +165,22 @@ func ExpandFilesystem(device, fsType string) error {
 
 func BindMountDevice(sourcefile, destfile string) error {
 	mounter := mount.New("")
-	if exists, _ := mounter.ExistsPath(destfile); !exists {
-		err := os.MkdirAll(filepath.Dir(destfile), os.FileMode(0644))
-		if err == nil {
-			err = mounter.MakeFile(destfile)
-		}
+	// Check if the file already exists
+	if _, err := os.Stat(destfile); os.IsNotExist(err) {
+		// Make sure parent dir exists
+		err := os.MkdirAll(filepath.Dir(destfile), 0755) // Use 0755 for dirs, not 0644
 		if err != nil {
-			log.Errorf("could not make destination path for bind mount, %v", err)
+			log.Errorf("could not create parent directory: %v", err)
 			return status.Error(codes.Internal, err.Error())
 		}
+
+		// Create the file
+		f, err := os.OpenFile(destfile, os.O_CREATE|os.O_EXCL, 0644)
+		if err != nil {
+			log.Errorf("could not create target file: %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		f.Close()
 	}
 
 	err := mounter.Mount(sourcefile, destfile, "", []string{"bind"})
@@ -224,43 +258,88 @@ func FormatDevice(device, fsType string) error {
 	return nil
 }
 
-func DeleteFile(pathname string) error {
-	log.Infof("deleting file '%s'", pathname)
+// os.Stat(path) hang some time, so to avoid just waiting to it come back just fail this
+func statWithTimeout(path string, timeout time.Duration) (os.FileInfo, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	// Check if the file exists
-	if _, err := os.Stat(pathname); err != nil {
-		// If the file does not exist, return without an error
+	result := make(chan struct {
+		info os.FileInfo
+		err  error
+	}, 1)
+
+	go func() {
+		info, err := os.Stat(path)
+		result <- struct {
+			info os.FileInfo
+			err  error
+		}{info, err}
+	}()
+
+	select {
+	case res := <-result:
+		return res.info, res.err
+	case <-ctx.Done():
+		return nil, errors.New("os.Stat timed out")
+	}
+}
+
+func DeleteFile(pathname string) error {
+	log.Infof("deleting all data from path '%s'", pathname)
+
+	// Don't allow deleting root
+	if pathname == "/" {
+		return status.Error(codes.Internal, "Cannot remove path name '/' — recheck or try manually.")
+	}
+
+	// Optional: protect NFS export paths
+	exports, _ := GetCacheData("NFS_EXPORTS")
+	if exports != nil {
+		exportList, ok := exports.([]string)
+		if ok {
+			if slices.Contains(exportList, pathname) {
+				return status.Error(codes.Internal, "Cannot remove export path — recheck or try manually.")
+			}
+		}
+	}
+
+	// Check if file exists with timeout
+	_, err := statWithTimeout(pathname, 30*time.Second)
+	if err != nil {
 		if os.IsNotExist(err) {
-			log.Errorf("file '%s' does not exist", pathname)
+			log.Warnf("file '%s' does not exist", pathname)
 			return nil
 		}
-		// If there was an error other than the file not existing, return it
+		log.Errorf("error accessing file '%s': %v", pathname, err)
 		return err
 	}
 
-	// Delete the file
-	if err := os.Remove(pathname); err != nil {
+	// Remove the file or directory
+	if err := os.RemoveAll(pathname); err != nil {
+		log.Errorf("error while deleting data from path '%s': %v", pathname, err)
 		return err
 	}
 
+	log.Debugf("successfully deleted '%s'", pathname)
 	return nil
 }
 
 func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
+	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetPath, 0750); err != nil {
+			if err := os.MkdirAll(targetPath, 0755); err != nil {
 				return status.Error(codes.Internal, err.Error())
 			}
-			notMnt = true
+			mounted = false
 		} else {
 			return status.Error(codes.Internal, err.Error())
 		}
 	}
 
-	if !notMnt {
+	if mounted {
+		log.Infof("Share already mounted, sourcepath %s, targetPath %s", sourcePath, targetPath)
 		return nil
 	}
 
@@ -324,8 +403,8 @@ func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
 }
 
 func GetNFSExports(address string) ([]string, error) {
-	// Create a context with timeout of 30 seconds
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create a context with timeout of 5min
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second) // 5 min timeout
 	defer cancel()
 
 	// Execute the command within the context
@@ -419,8 +498,8 @@ func checkIPType(ipAddress string) (string, error) {
 }
 
 func CheckNFSExports(address string) (bool, error) {
-	// Create a context with timeout of 30 seconds
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Create a context with timeout of 5 min
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
 	log.Infof("Checking floating ip %s", address)
@@ -455,46 +534,46 @@ func CheckNFSExports(address string) (bool, error) {
 	}
 }
 
-func IsShareMounted(targetPath string) (bool, error) {
-	notMnt, err := mount.IsNotMountPoint(mount.New(""), targetPath)
-
+func IsShareMounted(targetPath string) bool {
+	mounter := mount.New("")
+	isMounted, err := mounter.IsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return false, status.Error(codes.NotFound, EmptyTargetPath)
+			log.Warnf("Check [IsShareMounted] target path is empty, %s", EmptyTargetPath)
+			return false
 		} else {
-			return false, status.Error(codes.Internal, err.Error())
+			log.Warnf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
+			return false
 		}
 	}
-	if notMnt {
-		return false, nil
-	}
-	return true, nil
+	log.Debugf("Target path %s isMounted %t", targetPath, isMounted)
+	return isMounted
 }
 
 func UnmountFilesystem(targetPath string) error {
+	log.Infof("UnmountFilesystem is called with targetPath %s", targetPath)
 	mounter := mount.New("")
 
-	isMounted, err := IsShareMounted(targetPath)
+	isMounted := IsShareMounted(targetPath)
 
-	if err != nil {
-		log.Error(err.Error())
-		return status.Error(codes.Internal, err.Error())
-	}
 	if !isMounted {
+		log.Warnf("Target path %s is not mounted so return without clean up.", targetPath)
 		return nil
 	}
-
-	err = mounter.Unmount(targetPath)
+	log.Debugf("Found mounted target dir %s", targetPath)
+	err := mounter.Unmount(targetPath)
 	if err != nil {
-		log.Error(err.Error())
+		log.Errorf("Error while unmounting target path %s, Error %v", targetPath, err.Error())
 		return status.Error(codes.Internal, err.Error())
 	}
+	log.Debugf("Successfully unmounted target dir %s", targetPath)
 	// delete target path
 	err = os.Remove(targetPath)
 	if err != nil {
-		log.Errorf("could not remove target path, %v", err)
+		log.Errorf("Error while removing target path %s. Could not remove target path due to %v", targetPath, err)
 		return status.Error(codes.Internal, err.Error())
 	}
+	log.Debugf("Successfully unmounted and deleted target dir %s", targetPath)
 	return nil
 }
 
@@ -539,4 +618,66 @@ func ResolveFQDN(fqdn string) (string, error) {
 	}
 	// Use the first resolved IP address
 	return ips[0].String(), nil
+}
+
+// Wrapper function to check mount status safely
+func SafeIsMountPoint(path string) (bool, error) {
+	type result struct {
+		mounted bool
+		err     error
+	}
+
+	resultChan := make(chan result, 1)
+	// Use provided timeout if set, otherwise default to 1 minute
+	to := defaultMountCheckTimeout
+	go func() {
+		mounted, err := mount.New("").IsMountPoint(path)
+		resultChan <- result{mounted, err}
+	}()
+
+	select {
+	case res := <-resultChan:
+		return res.mounted, res.err
+	case <-time.After(to):
+		go func() { <-resultChan }() // drain the channel later so goroutine can exit
+		return false, context.DeadlineExceeded
+	}
+}
+
+// MakeEmptyRawFolder creates a folder at the specified path
+func MakeEmptyRawFolder(pathname string) error {
+	log.Debugf("checking folder '%s'", pathname)
+
+	// Check if directory exists
+	info, err := os.Stat(pathname)
+	if err == nil {
+		if !info.IsDir() {
+			log.Errorf("Path exists but is not a directory: %s", pathname)
+			return status.Error(codes.Internal, "path exists but is not a directory")
+		}
+		// Correct permissions if needed
+		err = os.Chmod(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("Failed to set correct permissions on %s: %v", pathname, err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Debugf("Directory already exists: %s", pathname)
+		return nil
+	}
+
+	// Create the directory if it does not exist
+	if os.IsNotExist(err) {
+		log.Debugf("Creating folder with path as -> %s", pathname)
+		err = os.MkdirAll(pathname, os.FileMode(0755))
+		if err != nil {
+			log.Errorf("could not make folder, %v", err)
+			return status.Error(codes.Internal, err.Error())
+		}
+		log.Debugf("Successfully created folder: %s", pathname)
+		return nil
+	}
+
+	// Handle unexpected errors
+	log.Errorf("Unexpected error checking folder: %v", err)
+	return status.Error(codes.Internal, err.Error())
 }

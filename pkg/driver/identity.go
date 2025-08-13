@@ -17,7 +17,7 @@ limitations under the License.
 package driver
 
 import (
-	"golang.org/x/net/context"
+	"context"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"

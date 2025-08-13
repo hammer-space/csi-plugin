@@ -19,21 +19,20 @@ limitations under the License.
 package sanitytest
 
 import (
+	"context"
 	"fmt"
-	"github.com/container-storage-interface/spec/lib/go/csi"
-	"github.com/hammer-space/csi-plugin/pkg/common"
-	"github.com/kubernetes-csi/csi-test/pkg/sanity"
 	"io"
-	"io/ioutil"
-	"k8s.io/kubernetes/pkg/kubelet/kubeletconfig/util/log"
 	"os"
 	"strconv"
 	"strings"
-)
 
-import (
-	"context"
+	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/hammer-space/csi-plugin/pkg/common"
+	"github.com/kubernetes-csi/csi-test/pkg/sanity"
+	log "github.com/sirupsen/logrus"
+
 	. "github.com/onsi/ginkgo"
+
 	. "github.com/onsi/gomega"
 )
 
@@ -104,8 +103,8 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
 					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath+"/dev",
-					StagingTargetPath: sc.Config.StagingPath+"/dev",
+					TargetPath:        sc.Config.TargetPath + "/dev",
+					StagingTargetPath: sc.Config.StagingPath + "/dev",
 					VolumeCapability: &csi.VolumeCapability{
 						AccessType: &csi.VolumeCapability_Block{
 							Block: &csi.VolumeCapability_BlockVolume{},
@@ -128,13 +127,12 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 				additionalMetadataTags = parseMetadataTagsParam(tags)
 			}
 			for key, value := range additionalMetadataTags {
-                // Check the file exists
-                output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir + vol.GetVolume().GetVolumeId()))
-                if err != nil {
-                    Expect(err).NotTo(HaveOccurred())
-                }
-                log.Infof(string(output))
-				output, err = common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir + vol.GetVolume().GetVolumeId(), key))
+				// Check the file exists
+				_, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval list_tags", common.ShareStagingDir+vol.GetVolume().GetVolumeId()))
+				if err != nil {
+					Expect(err).NotTo(HaveOccurred())
+				}
+				output, err := common.ExecCommand("cat", fmt.Sprintf("%s?.eval get_tag(\"%s\")", common.ShareStagingDir+vol.GetVolume().GetVolumeId(), key))
 				if err != nil {
 					Expect(err).NotTo(HaveOccurred())
 				}
@@ -144,15 +142,15 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			By("Write data to volume")
 			//sc.Config.TargetPath
 			testData := []byte("test_data")
-			err = ioutil.WriteFile(sc.Config.TargetPath + "/dev", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
 			Expect(err).NotTo(HaveOccurred())
 
 			By("expand the volume")
 			_, err = c.NodeExpandVolume(
 				context.Background(),
 				&csi.NodeExpandVolumeRequest{
-					VolumeId:          vol.GetVolume().GetVolumeId(),
-					VolumePath:        sc.Config.TargetPath + "/dev",
+					VolumeId:   vol.GetVolume().GetVolumeId(),
+					VolumePath: sc.Config.TargetPath + "/dev",
 					CapacityRange: &csi.CapacityRange{
 						RequiredBytes: TestVolumeSize(sc) * 2,
 					},
@@ -161,7 +159,7 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 
 			Expect(err).NotTo(HaveOccurred())
 
-			output, err := common.ExecCommand("blockdev", "--getsize64", sc.Config.TargetPath + "/dev")
+			output, err := common.ExecCommand("blockdev", "--getsize64", sc.Config.TargetPath+"/dev")
 			if err != nil {
 				Expect(err).NotTo(HaveOccurred())
 			}
@@ -171,8 +169,8 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			_, err = c.NodeUnpublishVolume(
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath + "/dev",
+					VolumeId:   vol.GetVolume().GetVolumeId(),
+					TargetPath: sc.Config.TargetPath + "/dev",
 				},
 			)
 
@@ -183,16 +181,15 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 				context.Background(),
 				&csi.NodePublishVolumeRequest{
 					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath+ "/dev",
-					StagingTargetPath: sc.Config.StagingPath+ "/dev",
-					Readonly: true,
+					TargetPath:        sc.Config.TargetPath + "/dev",
+					StagingTargetPath: sc.Config.StagingPath + "/dev",
+					Readonly:          true,
 					VolumeCapability: &csi.VolumeCapability{
 						AccessType: &csi.VolumeCapability_Block{
 							Block: &csi.VolumeCapability_BlockVolume{},
 						},
 						AccessMode: &csi.VolumeCapability_AccessMode{
 							Mode: csi.VolumeCapability_AccessMode_SINGLE_NODE_WRITER,
-
 						},
 					},
 					VolumeContext: vol.GetVolume().GetVolumeContext(),
@@ -217,15 +214,15 @@ var _ = sanity.DescribeSanity("Hammerspace - Block Volumes", func(sc *sanity.San
 			Expect(output).To(Equal(testData))
 
 			By("Ensure write data to volume fails")
-			err = ioutil.WriteFile(sc.Config.TargetPath + "/dev", testData, 0644)
+			err = os.WriteFile(sc.Config.TargetPath+"/dev", testData, 0644)
 			Expect(err).To(HaveOccurred())
 
 			By("unpublish the volume from alt location")
 			_, err = c.NodeUnpublishVolume(
 				context.Background(),
 				&csi.NodeUnpublishVolumeRequest{
-					VolumeId:          vol.GetVolume().GetVolumeId(),
-					TargetPath:        sc.Config.TargetPath + "/dev",
+					VolumeId:   vol.GetVolume().GetVolumeId(),
+					TargetPath: sc.Config.TargetPath + "/dev",
 				},
 			)
 

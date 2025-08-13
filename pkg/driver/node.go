@@ -17,392 +17,35 @@ limitations under the License.
 package driver
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
 	"unsafe"
 
+	"context"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
-	"golang.org/x/net/context"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
-	"k8s.io/kubernetes/pkg/util/mount"
 )
 
-func (d *CSIDriver) NodeStageVolume(
-	ctx context.Context,
-	req *csi.NodeStageVolumeRequest) (
-	*csi.NodeStageVolumeResponse, error) {
-
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
-	}
-
-	if req.GetStagingTargetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyStagingTargetPath)
-	}
-
-	if req.GetVolumeCapability() == nil {
-		return nil, status.Error(codes.InvalidArgument, common.NoCapabilitiesSupplied)
-	}
-
-	return &csi.NodeStageVolumeResponse{}, nil
-}
-
-func (d *CSIDriver) NodeUnstageVolume(
-	ctx context.Context,
-	req *csi.NodeUnstageVolumeRequest) (
-	*csi.NodeUnstageVolumeResponse, error) {
-
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
-	}
-
-	if req.GetStagingTargetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyStagingTargetPath)
-	}
-
-	return &csi.NodeUnstageVolumeResponse{}, nil
-}
-
-func (d *CSIDriver) publishShareBackedVolume(
-	exportPath,
-	targetPath string, mountFlags []string, readOnly bool, fqdn string) error {
-
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if err := os.MkdirAll(targetPath, 0750); err != nil {
-				return status.Error(codes.Internal, err.Error())
-			}
-			notMnt = true
-		} else {
-			return status.Error(codes.Internal, err.Error())
-		}
-	}
-
-	if !notMnt {
-		log.Debugf("Volume already published at %s", targetPath)
-		return nil
-	}
-
-	if readOnly {
-		mountFlags = append(mountFlags, "ro")
-	}
-	err = d.MountShareAtBestDataportal(exportPath, targetPath, mountFlags, fqdn)
-	return err
-}
-
-func (d *CSIDriver) publishFileBackedVolume(
-	backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
-
-	notMnt, err := mount.New("").IsLikelyNotMountPoint(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if fsType != "" {
-				if err := mount.New("").MakeDir(targetPath); err != nil {
-					return status.Error(codes.Internal, err.Error())
-				}
-			} else {
-				if err := mount.New("").MakeFile(targetPath); err != nil {
-					return status.Error(codes.Internal, err.Error())
-				}
-			}
-			notMnt = true
-		} else {
-			return status.Error(codes.Internal, err.Error())
-		}
-	}
-	if !notMnt {
-		log.Debugf("Volume already published at %s", targetPath)
-		return nil
-	}
-
-	hsVolume := &common.HSVolume{
-		FQDN:               fqdn,
-		FSType:             fsType,
-		ClientMountOptions: mountFlags,
-	}
-	log.Infof("check publish file backed volume %v", hsVolume)
-
-	// Ensure the backing share is mounted
-	err = d.EnsureBackingShareMounted(backingShareName, hsVolume)
-	if err != nil {
-		return err
-	}
-
-	// Mount the file
-	log.Infof("Mounting file-backed volume at %s", targetPath)
-	filePath := common.ShareStagingDir + volumePath
-
-	// If no fsType specified, mount as a device
-	if fsType == "" {
-		filePath := common.ShareStagingDir + volumePath
-
-		deviceStr, err := AttachLoopDeviceWithRetry(filePath, readOnly)
-		if err != nil {
-			log.Errorf("failed to attach loop device: %v", err)
-			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(backingShareName)
-			return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
-		}
-		log.Infof("File %s attached to %s", filePath, deviceStr)
-
-		// Bind mount loop device to target path
-		err = common.BindMountDevice(deviceStr, targetPath)
-		if err != nil {
-			log.Errorf("bind mount failed for %s: %v", deviceStr, err)
-			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(backingShareName)
-			return err
-		}
-	} else {
-		if readOnly {
-			mountFlags = append(mountFlags, "ro")
-		}
-		err = common.MountFilesystem(filePath, targetPath, fsType, mountFlags)
-		if err != nil {
-			d.UnmountBackingShareIfUnused(backingShareName)
-			return err
-		}
-	}
-	return nil
-}
-
-func (d *CSIDriver) NodePublishVolume(
-	ctx context.Context,
-	req *csi.NodePublishVolumeRequest) (
-	*csi.NodePublishVolumeResponse, error) {
-
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
-	}
-
-	if req.GetTargetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyTargetPath)
-	}
-
-	if req.GetVolumeCapability() == nil {
-		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.GetVolumeId())
-	}
-
-	defer d.releaseVolumeLock(req.GetVolumeId())
-	d.getVolumeLock(req.GetVolumeId())
-
-	log.Infof("Attempting to publish volume %s", req.GetVolumeId())
-
-	var volumeMode, fsType string
-	var mountFlags []string
-	fqdn := req.GetVolumeContext()["fqdn"]
-	cap := req.GetVolumeCapability()
-	switch cap.GetAccessType().(type) {
-	case *csi.VolumeCapability_Block:
-		volumeMode = "Block"
-	case *csi.VolumeCapability_Mount:
-		volumeMode = "Filesystem"
-		fsType = cap.GetMount().FsType
-		if fsType == "" {
-			fsType = req.GetVolumeContext()["fsType"]
-			if fsType == "" {
-				fsType = "nfs"
-			}
-		}
-		mountFlags = cap.GetMount().MountFlags
-	default:
-		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.GetVolumeId())
-	}
-	var err error
-	if fsType == "nfs" {
-		err = d.publishShareBackedVolume(req.GetVolumeId(), req.GetTargetPath(), mountFlags, req.GetReadonly(), fqdn)
-	} else {
-		var backingShareName string
-		if volumeMode == "Block" {
-			backingShareName = req.GetVolumeContext()["blockBackingShareName"]
-		} else {
-			backingShareName = req.GetVolumeContext()["mountBackingShareName"]
-		}
-		log.Infof("Found backing share %s for volume %s", backingShareName, req.GetVolumeId())
-
-		err = d.publishFileBackedVolume(
-			backingShareName, req.GetVolumeId(), req.GetTargetPath(), fsType, mountFlags, req.GetReadonly(), fqdn)
-
-	}
-
-	return &csi.NodePublishVolumeResponse{}, err
-}
-
-func (d *CSIDriver) unpublishFileBackedVolume(
-	volumePath, targetPath string) error {
-
-	//determine backing share
-	backingShareName := filepath.Dir(volumePath)
-
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
-
-	deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
-	if err != nil {
-		log.Errorf("could not determine corresponding device path for target path, %s, %v", targetPath, err)
-		return status.Error(codes.Internal, err.Error())
-	}
-	lodevice := fmt.Sprintf("/dev/loop%d", deviceMinor)
-	log.Infof("found device %s for mount %s", lodevice, targetPath)
-
-	// Remove bind mount
-	output, err := common.ExecCommand("umount", "-f", targetPath)
-	if err != nil {
-		log.Errorf("could not remove bind mount, %s", err)
-		return status.Error(codes.Internal, err.Error())
-	}
-	log.Infof("unmounted the targetPath %s. Command output %v ", targetPath, output)
-	// delete target path
-	err = os.Remove(targetPath)
-	if err != nil {
-		log.Errorf("could not remove target path, %v", err)
-		return status.Error(codes.Internal, err.Error())
-	}
-
-	// detach from loopback device
-	log.Infof("detaching loop device, %s", lodevice)
-	output, err = exec.Command("losetup", "-d", lodevice).CombinedOutput()
-	if err != nil {
-		log.Errorf("%s, %v", output, err.Error())
-		return status.Error(codes.Internal, err.Error())
-	}
-
-	// Unmount backing share if appropriate
-	unmounted, err := d.UnmountBackingShareIfUnused(backingShareName)
-	if unmounted {
-		log.Infof("unmounted backing share, %s", backingShareName)
-	}
-	if err != nil {
-		log.Errorf("unmounted backing share, %s, failed: %v", backingShareName, err)
-		return status.Error(codes.Internal, err.Error())
-	}
-	return nil
-}
-func (d *CSIDriver) NodeUnpublishVolume(
-	ctx context.Context,
-	req *csi.NodeUnpublishVolumeRequest) (
-	*csi.NodeUnpublishVolumeResponse, error) {
-
-	if req.GetVolumeId() == "" {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
-	}
-	if len(req.GetTargetPath()) == 0 {
-		return nil, status.Error(codes.InvalidArgument, common.EmptyTargetPath)
-	}
-
-	log.Infof("Attempting to unpublish volume %s", req.GetVolumeId())
-	defer d.releaseVolumeLock(req.GetVolumeId())
-	d.getVolumeLock(req.GetVolumeId())
-
-	targetPath := req.GetTargetPath()
-	fi, err := os.Lstat(targetPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			log.Infof("target path does not exist on this host: %s", targetPath)
-			return &csi.NodeUnpublishVolumeResponse{}, nil
-		}
-		return nil, status.Errorf(codes.Internal, "error stating target path: %v", err)
-	}
-
-	// Resolve symlink before checking type
-	if fi.Mode()&os.ModeSymlink != 0 {
-		resolvedPath, err := filepath.EvalSymlinks(targetPath)
-		if err != nil {
-			log.Warnf("Broken symlink at %s: %v", targetPath, err)
-			// remove the symlink path
-			if rmErr := os.Remove(targetPath); rmErr != nil {
-				return nil, status.Errorf(codes.Internal, "failed to remove broken symlink: %v", rmErr)
-			}
-			return &csi.NodeUnpublishVolumeResponse{}, nil
-		}
-
-		log.Infof("Resolved symlink targetPath=%s → %s", req.GetTargetPath(), resolvedPath)
-		targetPath = resolvedPath
-		fi, err = os.Stat(targetPath)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to stat resolved path: %v", err)
-		}
-	}
-
-	switch mode := fi.Mode(); {
-	case IsBlockDevice(fi): // block device
-		log.Infof("Detected block device at target path %s", targetPath)
-		if err := d.unpublishFileBackedVolume(req.GetVolumeId(), targetPath); err != nil {
-			return nil, err
-		}
-	case mode.IsDir(): // directory for mount volumes
-		log.Infof("Detected directory mount at target path %s", targetPath)
-		if err := common.UnmountFilesystem(targetPath); err != nil {
-			return nil, status.Error(codes.Internal, err.Error())
-		}
-	default:
-		// Unknown file type, attempt cleanup
-		log.Warnf("Target path %s exists but is not a block device nor directory. Removing...", targetPath)
-		if err := os.Remove(targetPath); err != nil {
-			return nil, status.Errorf(codes.Internal, "failed to remove unexpected target path: %v", err)
-		}
-	}
-
-	return &csi.NodeUnpublishVolumeResponse{}, nil
-}
-
-func (d *CSIDriver) NodeGetCapabilities(
-	ctx context.Context,
-	req *csi.NodeGetCapabilitiesRequest) (
-	*csi.NodeGetCapabilitiesResponse, error) {
-
-	return &csi.NodeGetCapabilitiesResponse{
-		Capabilities: []*csi.NodeServiceCapability{
-			{
-				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_UNKNOWN,
-					},
-				},
-			},
-			{
-				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
-					},
-				},
-			},
-			{
-				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
-					},
-				},
-			},
-			{
-				Type: &csi.NodeServiceCapability_Rpc{
-					Rpc: &csi.NodeServiceCapability_RPC{
-						Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
-					},
-				},
-			},
-		},
-	}, nil
-}
-
-func (d *CSIDriver) NodeGetInfo(ctx context.Context,
-	req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
+func (d *CSIDriver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
 
 	// Determine if this node is a data portal
-	dataPortals, err := d.hsclient.GetDataPortals(d.NodeID)
+	dataPortals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
-		log.Errorf("Could not list data-portals, %s", err.Error())
+		log.WithFields(log.Fields{
+			"Node ID": d.NodeID,
+		}).Errorf("Could not list data-portals, %s", err.Error())
+		return nil, err
 	}
+
+	log.WithFields(log.Fields{
+		"dataPortals": dataPortals,
+	}).Debugf("Recived data portal list")
 	var isDataPortal bool
 	for _, p := range dataPortals {
 		if p.Node.Name == d.NodeID {
@@ -418,11 +61,14 @@ func (d *CSIDriver) NodeGetInfo(ctx context.Context,
 			},
 		},
 	}
+	log.WithFields(log.Fields{
+		"csiNodeResponse": csiNodeResponse,
+	}).Debugf("NodeGetInfo was successful.")
+
 	return csiNodeResponse, nil
 }
 
-func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
-	req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
+func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolumeStatsRequest) (*csi.NodeGetVolumeStatsResponse, error) {
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
@@ -509,10 +155,273 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context,
 	}, nil
 }
 
-func (d *CSIDriver) NodeExpandVolume(
-	ctx context.Context,
-	req *csi.NodeExpandVolumeRequest) (
-	*csi.NodeExpandVolumeResponse, error) {
+func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTarget := req.GetStagingTargetPath()
+	volumeCapability := req.GetVolumeCapability()
+
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing")
+	}
+	if stagingTarget == "" {
+		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
+	}
+	if volumeCapability == nil {
+		return nil, status.Error(codes.InvalidArgument, "VolumeCapability must be provided")
+	}
+
+	log.WithFields(log.Fields{
+		"volume_id":      volumeID,
+		"staging_target": stagingTarget,
+	}).Debug("NodeStageVolume will only stage hammerspace root share to use bind on future publish call.")
+
+	// Step 1: Create a marker file for each new volume comming in.
+	// Create marker for this volume
+	if err := os.MkdirAll(common.BaseVolumeMarkerSourcePath, 0755); err != nil {
+		log.Warnf("Failed to create marker root directory %s: %v", common.BaseVolumeMarkerSourcePath, err)
+	}
+
+	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
+
+	err := os.WriteFile(marker, []byte(""), 0644)
+	if err != nil {
+		log.Warnf("Not able to create marker file path %s err %v", marker, err)
+	}
+
+	// Step 2: Ensure the root NFS export is mounted once per node
+	// EnsureRootExportMounted function will do a mount check before mounting or creating dir.
+	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+		return nil, status.Errorf(codes.Internal, "root export mount failed: %v", err)
+	}
+
+	log.Infof("[NodeStageVolume] completed mounting base HS share.")
+
+	return &csi.NodeStageVolumeResponse{}, nil
+}
+
+func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	volumeID := req.GetVolumeId()
+	stagingTarget := req.GetStagingTargetPath()
+
+	if volumeID == "" {
+		return nil, status.Error(codes.InvalidArgument, "Volume ID missing")
+	}
+	if stagingTarget == "" {
+		return nil, status.Error(codes.InvalidArgument, "Staging target path missing")
+	}
+
+	log.WithFields(log.Fields{
+		"volume_id":      volumeID,
+		"staging_target": stagingTarget,
+	}).Debug("NodeUnstageVolume will remove the any volume mounted counter, and at last delete base hs mount.")
+
+	// Step 1: Remove volume marker unstage request comes in.
+	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
+
+	// 1. Delete marker.txt for this volume
+	log.Debugf("Removing volume marker %s", marker)
+	_ = os.Remove(marker)
+	log.Debugf("Removed volume marker %s", marker)
+	// 2. If marker tree is now empty, clean up root
+	if !IsAnyVolumeStillMounted(common.BaseVolumeMarkerSourcePath) {
+		// if no volume are mounted
+		log.Debugf("No volume marker is present on this node. Remove root mount as well..")
+		_ = os.RemoveAll(common.BaseVolumeMarkerSourcePath)
+		_ = common.UnmountFilesystem(common.BaseBackingShareMountPath)
+	}
+
+	return &csi.NodeUnstageVolumeResponse{}, nil
+}
+
+func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+
+	volume_id := req.GetVolumeId()
+	targetPath := req.GetTargetPath()
+	volumeCapability := req.GetVolumeCapability()
+
+	if volume_id == "" || targetPath == "" || volumeCapability == nil {
+		log.WithFields(log.Fields{
+			"volume_id":        volume_id,
+			"targetPath":       targetPath,
+			"volumeCapability": volumeCapability,
+		}).Errorf("Invalid arguments")
+		if volume_id == "" {
+			return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
+		}
+		if targetPath == "" {
+			return nil, status.Error(codes.InvalidArgument, common.EmptyTargetPath)
+		}
+		if volumeCapability == nil {
+			return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, volume_id)
+		}
+	}
+
+	defer d.releaseVolumeLock(volume_id)
+	d.getVolumeLock(volume_id)
+
+	log.Infof("Attempting to publish volume %s at target path %s", volume_id, targetPath)
+
+	var volumeContext = req.GetVolumeContext()
+	var readOnly bool = req.GetReadonly()
+	var mountFlags []string
+	var fsType, backingShareName string
+
+	switch volumeCapability.GetAccessType().(type) {
+	case *csi.VolumeCapability_Block:
+		backingShareName = volumeContext["blockBackingShareName"]
+	case *csi.VolumeCapability_Mount:
+		backingShareName = volumeContext["mountBackingShareName"]
+		fsType = volumeCapability.GetMount().FsType
+		if fsType == "" {
+			fsType = volumeContext["fsType"]
+			if fsType == "" {
+				fsType = "nfs"
+			}
+		}
+		mountFlags = volumeCapability.GetMount().MountFlags
+	default:
+		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, volume_id)
+	}
+
+	// For NFS
+	if fsType == "nfs" && backingShareName == "" {
+		log.WithFields(log.Fields{
+			"NFS Backing share": backingShareName,
+			"Volume_id":         volume_id,
+			"Traget Path":       targetPath,
+		}).Info("Starting node publish volume for Share backed NFS volume without backing share.")
+		err := d.publishShareBackedVolume(ctx, volume_id, targetPath)
+		if err != nil {
+			return nil, err
+		}
+	} else if fsType == "nfs" && backingShareName != "" {
+		log.WithFields(log.Fields{
+			"NFS Backing share": backingShareName,
+			"Volume_id":         volume_id,
+			"Traget Path":       targetPath,
+		}).Info("Starting node publish volume for Share backed NFS volume with backing share.")
+		err := d.publishShareBackedDirBasedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, volumeContext["fqdn"])
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		log.WithFields(log.Fields{
+			"Backing share": backingShareName,
+			"Volume_id":     volume_id,
+			"Traget Path":   targetPath,
+		}).Info("Starting node publish volume file backed.")
+		err := d.publishFileBackedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, readOnly, volumeContext["fqdn"])
+		if err != nil {
+			log.Errorf("Error while running publishFileBackedVolume.")
+			return nil, err
+		}
+	}
+
+	return &csi.NodePublishVolumeResponse{}, nil
+}
+
+func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+
+	if req.GetVolumeId() == "" {
+		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
+	}
+	if len(req.GetTargetPath()) == 0 {
+		return nil, status.Error(codes.InvalidArgument, common.EmptyTargetPath)
+	}
+
+	log.Infof("Attempting to unpublish volume %s", req.GetVolumeId())
+	defer d.releaseVolumeLock(req.GetVolumeId())
+	d.getVolumeLock(req.GetVolumeId())
+
+	targetPath := req.GetTargetPath()
+	fi, err := os.Lstat(targetPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			log.Infof("target path does not exist on this host: %s", targetPath)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+		return nil, status.Errorf(codes.Internal, "error stating target path: %v", err)
+	}
+
+	// Resolve symlink before checking type
+	if fi.Mode()&os.ModeSymlink != 0 {
+		resolvedPath, err := filepath.EvalSymlinks(targetPath)
+		if err != nil {
+			log.Warnf("Broken symlink at %s: %v", targetPath, err)
+			// remove the symlink path
+			if rmErr := os.Remove(targetPath); rmErr != nil {
+				return nil, status.Errorf(codes.Internal, "failed to remove broken symlink: %v", rmErr)
+			}
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+
+		log.Infof("Resolved symlink targetPath=%s → %s", req.GetTargetPath(), resolvedPath)
+		targetPath = resolvedPath
+		fi, err = os.Stat(targetPath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to stat resolved path: %v", err)
+		}
+	}
+
+	switch mode := fi.Mode(); {
+	case IsBlockDevice(fi): // block device
+		log.Infof("Detected block device at target path %s", targetPath)
+		if err := d.unpublishFileBackedVolume(ctx, req.GetVolumeId(), targetPath); err != nil {
+			return nil, err
+		}
+	case mode.IsDir(): // directory for mount volumes
+		log.Infof("Detected directory mount at target path %s", targetPath)
+		if err := common.UnmountFilesystem(targetPath); err != nil {
+			return nil, status.Error(codes.Internal, err.Error())
+		}
+	default:
+		// Unknown file type, attempt cleanup
+		log.Warnf("Target path %s exists but is not a block device nor directory. Removing...", targetPath)
+		if err := os.Remove(targetPath); err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to remove unexpected target path: %v", err)
+		}
+	}
+
+	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (d *CSIDriver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {
+
+	return &csi.NodeGetCapabilitiesResponse{
+		Capabilities: []*csi.NodeServiceCapability{
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_UNKNOWN,
+					},
+				},
+			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_STAGE_UNSTAGE_VOLUME,
+					},
+				},
+			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_GET_VOLUME_STATS,
+					},
+				},
+			},
+			{
+				Type: &csi.NodeServiceCapability_Rpc{
+					Rpc: &csi.NodeServiceCapability_RPC{
+						Type: csi.NodeServiceCapability_RPC_EXPAND_VOLUME,
+					},
+				},
+			},
+		},
+	}, nil
+}
+
+func (d *CSIDriver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVolumeRequest) (*csi.NodeExpandVolumeResponse, error) {
 
 	var requestedSize int64
 	if req.GetCapacityRange().GetLimitBytes() != 0 {
@@ -526,10 +435,10 @@ func (d *CSIDriver) NodeExpandVolume(
 	fileBacked := false
 
 	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(volumeName)
+	share, _ := d.hsclient.GetShare(ctx, volumeName)
 	if share != nil {
 		typeMount = true
-		if isMounted, _ := common.IsShareMounted(share.ExportPath); !isMounted {
+		if isMounted := common.IsShareMounted(share.ExportPath); !isMounted {
 			return nil, status.Error(codes.FailedPrecondition, common.ShareNotMounted)
 		}
 	} else {
@@ -538,7 +447,7 @@ func (d *CSIDriver) NodeExpandVolume(
 
 	//  Check if the specified backing share or file exists
 	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(req.GetVolumeId())
+		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
 		if err != nil {
 			log.Error(err)
 		}

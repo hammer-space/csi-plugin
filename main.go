@@ -27,6 +27,9 @@ import (
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 func init() {
@@ -39,6 +42,24 @@ func init() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.DebugLevel)
 	log.SetReportCaller(false)
+	// Initialize OpenTelemetry Tracer
+	if _, err := initTracer(); err != nil {
+		log.Fatalf("failed to init tracer: %v", err)
+	}
+}
+
+// Setup tracing
+func initTracer() (*sdktrace.TracerProvider, error) {
+	// Create a new tracer provider with a short ID generator
+	// This will generate shorter span IDs for better readability in logs
+	// Note: This is a custom ID generator that generates shorter IDs for spans
+	// It is not a standard OpenTelemetry ID generator, but it is used here for demonstration
+	log.Info("Creating TracerProvider with full ID generator")
+	tp := sdktrace.NewTracerProvider()
+	otel.SetTracerProvider(tp)
+	log.Info("OpenTelemetry TracerProvider set")
+	otel.SetTextMapPropagator(propagation.TraceContext{})
+	return tp, nil
 }
 
 func validateEnvironmentVars() {

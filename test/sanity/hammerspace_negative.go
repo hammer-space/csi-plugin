@@ -19,13 +19,13 @@ limitations under the License.
 package sanitytest
 
 import (
+	"context"
+
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/kubernetes-csi/csi-test/pkg/sanity"
-)
 
-import (
-	"context"
 	. "github.com/onsi/ginkgo"
+
 	. "github.com/onsi/gomega"
 )
 
@@ -100,7 +100,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 
 		})
 
-
 		// Create Volume  with invalid metadata tags field
 		It("should fail with invalid metadata", func() {
 			name := uniqueString("sanity-node-full")
@@ -136,7 +135,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 			Expect(err).To(HaveOccurred())
 
 		})
-
 
 		// Create Volume  with invalid objectives field
 		It("should fail with invalid objectives", func() {
@@ -206,7 +204,6 @@ var _ = sanity.DescribeSanity("Hammerspace - Create Volume Negative Tests", func
 			)
 			Expect(err).To(HaveOccurred())
 		})
-
 
 		// Create Volume  with invalid export options
 		It("should fail with invalid objectives", func() {

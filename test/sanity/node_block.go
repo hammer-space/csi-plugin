@@ -1,11 +1,10 @@
 package sanitytest
 
 import (
-	"github.com/container-storage-interface/spec/lib/go/csi"
-)
-
-import (
 	"context"
+
+	"github.com/container-storage-interface/spec/lib/go/csi"
+
 	. "github.com/onsi/gomega"
 )
 
