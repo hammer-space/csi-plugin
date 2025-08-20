@@ -40,6 +40,24 @@ import (
 
 const LOOP_CTL_GET_FREE = 0x4C82
 
+var (
+	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
+)
+
+func init() {
+	// Read environment variables for mount check timeout
+	mountCheckTimeoutStr := os.Getenv("MOUNT_CHECK_TIMEOUT")
+	if mountCheckTimeoutStr != "" {
+		if timeout, err := time.ParseDuration(mountCheckTimeoutStr); err == nil && timeout > 0 {
+			defaultMountCheckTimeout = timeout
+		} else {
+			log.Warnf("Invalid MOUNT_CHECK_TIMEOUT=%s; using default %s", mountCheckTimeoutStr, defaultMountCheckTimeout)
+		}
+	}
+
+	log.Infof("mountCheckTimeout=%s", defaultMountCheckTimeout)
+}
+
 func execCommandHelper(command string, args ...string) ([]byte, error) {
 	cmd := exec.Command(command, args...)
 	log.Debugf("Executing command: %v", cmd)
