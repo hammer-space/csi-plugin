@@ -21,17 +21,16 @@ This repository provides Helm charts to deploy the Hammerspace CSI driver compon
 
 #### Navigate to the chart directory:
 ```
-cd deploy/helm/hammerspace-helm-chart
+cd deploy/helm/repo/v1.2.8
 ```
 #### Create new package
 ```
-helm package .
+helm package ./hammerspace-helm-chart/
 ```
 
-#### Move the .tgz to your repo directory (e.g., deploy/helm/repo/) and regenerate the index.yaml:
+#### Update the index.yaml 
 ```
-mv hammerspace-csi-<version>.tgz ../../repo/
-cd ../../repo
+cd ../repo
 helm repo index .
 ```
 
