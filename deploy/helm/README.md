@@ -21,14 +21,15 @@ This repository provides Helm charts to deploy the Hammerspace CSI driver compon
 
 #### Navigate to the chart directory:
 ```
+(v1.2.8) will be changed to dir name for which package need to be created
 cd deploy/helm/repo/v1.2.8
 ```
 #### Create new package
 ```
-helm package ./hammerspace-helm-chart/
+helm package .hammerspace-helm-chart/
 ```
 
-#### Update the index.yaml 
+#### Update the index.yaml
 ```
 cd ../repo
 helm repo index .
