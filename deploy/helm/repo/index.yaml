@@ -3,9 +3,9 @@ entries:
   hammerspace-csi:
   - apiVersion: v2
     appVersion: v1.2.8
-    created: "2025-08-22T06:21:31.000723783Z"
+    created: "2025-08-26T06:46:19.212057988Z"
     description: A Helm chart for the Hammerspace CSI driver
-    digest: c8d82095e2a9323ae7061faa7e6b971ce9df1c1685d0739020f8e2ccb558e3a1
+    digest: b7f41604ea1d1b9b35bc183c5d5f1b8fd0d771a1887565b8a348982824fae058
     icon: https://www.hammerspace.com/favicon.ico
     name: hammerspace-csi
     urls:
@@ -13,12 +13,12 @@ entries:
     version: 1.2.8
   - apiVersion: v2
     appVersion: v1.2.7
-    created: "2025-08-22T06:21:31.000159223Z"
+    created: "2025-08-26T06:46:19.211443051Z"
     description: A Helm chart for the Hammerspace CSI driver
-    digest: 342c39ef85e06e4ed13fdb2d392bcafbb73e64525e0036f15644d0af35f6412f
+    digest: 1db738079a744d44fb7e25c70636568d4c136000b564b4845666071ef901b58c
     icon: https://www.hammerspace.com/favicon.ico
     name: hammerspace-csi
     urls:
     - v1.2.7/hammerspace-csi-1.2.7.tgz
     version: 1.2.7
-generated: "2025-08-22T06:21:30.999427348Z"
+generated: "2025-08-26T06:46:19.210659997Z"
