@@ -22,11 +22,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
+	"golang.org/x/sync/semaphore"
 
 	log "github.com/sirupsen/logrus"
 
@@ -45,9 +47,9 @@ type CSIDriver struct {
 	server        *grpc.Server
 	wg            sync.WaitGroup
 	running       bool
-	lock          sync.Mutex
-	volumeLocks   map[string]*sync.Mutex //This only grows and may be a memory issue
-	snapshotLocks map[string]*sync.Mutex
+	locksMu       sync.Mutex
+	volumeLocks   map[string]*keyLock
+	snapshotLocks map[string]*keyLock
 	hsclient      *client.HammerspaceClient
 	NodeID        string
 }
@@ -69,41 +71,70 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 
 	return &CSIDriver{
 		hsclient:      client,
-		volumeLocks:   make(map[string]*sync.Mutex),
-		snapshotLocks: make(map[string]*sync.Mutex),
+		volumeLocks:   make(map[string]*keyLock),
+		snapshotLocks: make(map[string]*keyLock),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
 	}
 
 }
 
-func (c *CSIDriver) getVolumeLock(volName string) {
-	if _, exists := c.volumeLocks[volName]; !exists {
-		c.volumeLocks[volName] = &sync.Mutex{}
-	}
-	c.volumeLocks[volName].Lock()
+type keyLock struct {
+	sem *semaphore.Weighted // weight=1 → acts like a mutex
 }
 
-func (c *CSIDriver) releaseVolumeLock(volName string) {
-	if _, exists := c.volumeLocks[volName]; exists {
-		if exists {
-			c.volumeLocks[volName].Unlock()
-		}
-	}
+func newKeyLock() *keyLock {
+	return &keyLock{sem: semaphore.NewWeighted(1)}
 }
 
-func (c *CSIDriver) getSnapshotLock(volName string) {
-	if _, exists := c.snapshotLocks[volName]; !exists {
-		c.snapshotLocks[volName] = &sync.Mutex{}
-	}
-	c.snapshotLocks[volName].Lock()
+func (kl *keyLock) lock(ctx context.Context) error {
+	return kl.sem.Acquire(ctx, 1)
 }
 
-func (c *CSIDriver) releaseSnapshotLock(volName string) {
-	if _, exists := c.snapshotLocks[volName]; exists {
-		if exists {
-			c.snapshotLocks[volName].Unlock()
-		}
+func (kl *keyLock) unlock() {
+	kl.sem.Release(1)
+}
+
+// acquire helpers with timeout + unlock func return
+func (c *CSIDriver) acquireVolumeLock(ctx context.Context, volID string) (func(), error) {
+	log.Debug("acquireVolumeLock: ", volID)
+	c.locksMu.Lock()
+	lk, ok := c.volumeLocks[volID]
+	if !ok {
+		lk = newKeyLock()
+		c.volumeLocks[volID] = lk
 	}
+	c.locksMu.Unlock()
+
+	lctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := lk.lock(lctx); err != nil {
+		log.WithError(err).Errorf("Error acquiring volume lock for %s", volID)
+		debug.PrintStack()
+		os.Exit(1)
+	}
+	return func() { lk.unlock() }, nil
+}
+
+func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (func(), error) {
+	log.Debug("acquireSnapshotLock: ", snapID)
+	c.locksMu.Lock()
+	lk, ok := c.snapshotLocks[snapID]
+	if !ok {
+		lk = newKeyLock()
+		c.snapshotLocks[snapID] = lk
+	}
+	c.locksMu.Unlock()
+
+	lctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := lk.lock(lctx); err != nil {
+		log.WithError(err).Errorf("Error acquiring snapshot lock for %s", snapID)
+		debug.PrintStack()
+		os.Exit(1)
+	}
+	return func() { lk.unlock() }, nil
 }
 
 func (c *CSIDriver) goServe(started chan<- bool) {
@@ -123,8 +154,8 @@ func (c *CSIDriver) Address() string {
 }
 
 func (c *CSIDriver) Start(l net.Listener) error {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.locksMu.Lock()
+	defer c.locksMu.Unlock()
 
 	// Set listener
 	c.listener = l
@@ -151,8 +182,8 @@ func (c *CSIDriver) Start(l net.Listener) error {
 }
 
 func (c *CSIDriver) Stop() {
-	c.lock.Lock()
-	defer c.lock.Unlock()
+	c.locksMu.Lock()
+	defer c.locksMu.Unlock()
 
 	if !c.running {
 		return
@@ -164,13 +195,6 @@ func (c *CSIDriver) Stop() {
 
 func (c *CSIDriver) Close() {
 	c.server.Stop()
-}
-
-func (c *CSIDriver) IsRunning() bool {
-	c.lock.Lock()
-	defer c.lock.Unlock()
-
-	return c.running
 }
 
 func (c *CSIDriver) GetHammerspaceClient() *client.HammerspaceClient {

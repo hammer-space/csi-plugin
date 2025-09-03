@@ -256,8 +256,13 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		}
 	}
 
-	defer d.releaseVolumeLock(volume_id)
-	d.getVolumeLock(volume_id)
+	unlock, err := d.acquireVolumeLock(ctx, volume_id)
+	if err != nil {
+		log.Errorf("Failed to acquire volume lock for volume %s: %v", volume_id, err)
+		// surfaces to kubelet instead of hanging forever
+		return nil, err
+	}
+	defer unlock()
 
 	log.Infof("Attempting to publish volume %s at target path %s", volume_id, targetPath)
 
@@ -330,8 +335,14 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 	}
 
 	log.Infof("Attempting to unpublish volume %s", req.GetVolumeId())
-	defer d.releaseVolumeLock(req.GetVolumeId())
-	d.getVolumeLock(req.GetVolumeId())
+
+	unlock, err := d.acquireVolumeLock(ctx, req.VolumeId)
+	if err != nil {
+		log.Errorf("Failed to acquire volume lock for volume %s: %v", req.VolumeId, err)
+		// surfaces to kubelet instead of hanging forever
+		return nil, err
+	}
+	defer unlock()
 
 	targetPath := req.GetTargetPath()
 	fi, err := os.Lstat(targetPath)
