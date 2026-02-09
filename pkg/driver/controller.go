@@ -176,8 +176,13 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 
 func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) error {
 	// Check if backing share exists
-	d.getVolumeLock(backingShareName)
-	defer d.releaseVolumeLock(backingShareName)
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return err
+	}
+	defer unlock()
+
 	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
@@ -487,10 +492,14 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *
 		"backingShareName": backingShareName,
 		"hsVolume":         hsVolume,
 	}).Debugf("ensureFileBackedVolumeExists is called.")
-
 	// Check if backing share exists
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
+	// Acquire BEFORE defer; with timeout so we never hang forever
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return err
+	}
+	defer unlock()
 
 	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
 	if err != nil {
@@ -671,8 +680,13 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	}
 
 	// Create Volume
-	defer d.releaseVolumeLock(volumeName)
-	d.getVolumeLock(volumeName)
+	// Acquire BEFORE defer; with timeout so we never hang forever
+	unlock, err := d.acquireVolumeLock(ctx, volumeName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return nil, err
+	}
+	defer unlock()
 
 	if snap != nil {
 		sourceSnapName, err := GetSnapshotNameFromSnapshotId(snap.GetSnapshotId())
@@ -785,10 +799,16 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 		// mount share and delete file
 		destination := common.ShareStagingDir + path.Dir(filepath)
 		// grab and defer a lock here for the backing share
-		defer d.releaseVolumeLock(residingShareName)
-		d.getVolumeLock(residingShareName)
+		// Acquire BEFORE defer; with timeout so we never hang forever
+		unlock, err := d.acquireVolumeLock(ctx, residingShareName)
+		if err != nil {
+			// surfaces to kubelet instead of hanging forever
+			return err
+		}
+		defer unlock()
+		// mount the share to delete the file
 		defer d.UnmountBackingShareIfUnused(ctx, residingShareName)
-		err := d.EnsureBackingShareMounted(ctx, residingShareName, hsVolume) // check if share is mounted
+		err = d.EnsureBackingShareMounted(ctx, residingShareName, hsVolume) // check if share is mounted
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, "%s", err.Error())
@@ -843,8 +863,12 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
 	}
 
-	defer d.releaseVolumeLock(volumeId)
-	d.getVolumeLock(volumeId)
+	unlock, err := d.acquireVolumeLock(ctx, volumeId)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return nil, err
+	}
+	defer unlock()
 
 	volumeName := GetVolumeNameFromPath(volumeId)
 	share, err := d.hsclient.GetShare(ctx, volumeName)
@@ -1254,8 +1278,12 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		return nil, status.Error(codes.InvalidArgument, common.MissingSnapshotSourceVolumeId)
 	}
 
-	defer d.releaseSnapshotLock(req.GetName())
-	d.getSnapshotLock(req.GetName())
+	unlock, err := d.acquireSnapshotLock(ctx, req.Name)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return nil, err
+	}
+	defer unlock()
 
 	// FIXME: Check to see if snapshot already exists?
 	//  (using their id somehow?, update the share extended info maybe?) what about for file-backed volumes?

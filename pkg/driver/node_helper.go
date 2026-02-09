@@ -119,8 +119,13 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 
 // Check base pv exist as backingShareName and create path with backingShareName/exportPath attach to target path
 func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backingShareName, exportPath, targetPath, fsType string, mountFlags []string, fqdn string) error {
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
+	log.Debugf("Recived publish dir based volume request.")
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return err
+	}
+	defer unlock()
 
 	mounted, err := common.SafeIsMountPoint(targetPath)
 	if err != nil {
@@ -178,8 +183,12 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 }
 
 func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return err
+	}
+	defer unlock()
 
 	log.Debugf("Recived publish file backed volume request.")
 	mounted, err := common.SafeIsMountPoint(targetPath)
@@ -271,8 +280,12 @@ func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, volumePath, t
 	//determine backing share
 	backingShareName := filepath.Dir(volumePath)
 
-	defer d.releaseVolumeLock(backingShareName)
-	d.getVolumeLock(backingShareName)
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		// surfaces to kubelet instead of hanging forever
+		return err
+	}
+	defer unlock()
 
 	deviceMinor, err := common.GetDeviceMinorNumber(targetPath)
 	if err != nil {

@@ -640,6 +640,10 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	json.NewEncoder(shareString).Encode(share)
 
 	req, err := client.generateRequest(ctx, "POST", "/shares", shareString.String())
+	if err != nil {
+		log.Errorf("unable to genrate share create request with POST. Error %v", err)
+		return err
+	}
 	statusCode, _, respHeaders, err := client.doRequest(*req)
 
 	if err != nil {
@@ -667,7 +671,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		}
 		if !success {
 			defer client.DeleteShare(ctx, share.Name, 0)
-			return errors.New("Share failed to create")
+			return errors.New("share failed to create")
 		}
 
 	} else {

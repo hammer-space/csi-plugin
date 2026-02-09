@@ -4,22 +4,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"testing"
 )
 
-// AreEqualJSON does a deep inspection of two strings and returns whether they produce equivalent json objects
-func AreEqualJSON(s1, s2 string) (bool, error) {
-	var o1 interface{}
-	var o2 interface{}
-
-	var err error
-	err = json.Unmarshal([]byte(s1), &o1)
-	if err != nil {
-		return false, fmt.Errorf("Error mashalling string 1 :: %s", err.Error())
+// NormalizeJSON ensures stable comparison between JSON strings.
+func NormalizeJSON(s string) (any, error) {
+	var obj any
+	if err := json.Unmarshal([]byte(s), &obj); err != nil {
+		return nil, fmt.Errorf("invalid JSON: %w", err)
 	}
-	err = json.Unmarshal([]byte(s2), &o2)
+	return obj, nil
+}
+
+// AssertEqualJSON compares two JSON strings ignoring key order.
+func AssertEqualJSON(t *testing.T, expected, got string) {
+	expObj, err := NormalizeJSON(expected)
 	if err != nil {
-		return false, fmt.Errorf("Error mashalling string 2 :: %s", err.Error())
+		t.Fatalf("bad expected JSON: %v", err)
+	}
+	gotObj, err := NormalizeJSON(got)
+	if err != nil {
+		t.Fatalf("bad got JSON: %v", err)
 	}
 
-	return reflect.DeepEqual(o1, o2), nil
+	if !reflect.DeepEqual(expObj, gotObj) {
+		expJSON, _ := json.MarshalIndent(expObj, "", "  ")
+		gotJSON, _ := json.MarshalIndent(gotObj, "", "  ")
+		t.Errorf("Expected:\n%s\nGot:\n%s", expJSON, gotJSON)
+	}
 }
