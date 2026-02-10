@@ -1,0 +1,24 @@
+# This file is part of the Hammerspace CSI Driver Helm Chart.
+# It defines the service for the CSI provisioner component.
+# The service is a headless service that allows the StatefulSet to manage the pods.
+kind: Service
+apiVersion: v1
+metadata:
+  name: csi-provisioner
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: csi-provisioner
+spec:
+  type: ClusterIP
+  clusterIP: None
+  # This is needed for the StatefulSet to work properly
+  # as it uses a headless service to manage the pods.
+  # The StatefulSet will create a DNS entry for the pods
+  # in the format <pod-name>.<service-name>.<namespace>.svc.cluster.local
+  # where <pod-name> is the name of the pod, <service-name> is the name of the service,
+  # and <namespace> is the namespace of the service.
+  # This allows the pods to communicate with each other using DNS.
+  # The StatefulSet will also create a DNS entry for the service in the format <service-name>.<namespace>.svc.cluster.local
+  # which allows the pods to communicate with the service
+  selector:
+    app: csi-provisioner

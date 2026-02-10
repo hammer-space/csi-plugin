@@ -1,0 +1,21 @@
+namespace: kube-system
+
+credentialsSecretName: com.hammerspace.csi.credentials
+# 
+env:
+  MOUNT_CHECK_TIMEOUT: "30s"
+  UNMOUNT_RETRY_COUNT: "5"
+  UNMOUNT_RETRY_INTERVAL: "1s"
+# 
+image:
+  csiPlugin: hammerspaceinc/csi-plugin:v1.2.8-rc2
+  provisioner: registry.k8s.io/sig-storage/csi-provisioner:v5.2.0
+  attacher: registry.k8s.io/sig-storage/csi-attacher:v4.8.0
+  snapshotter: registry.k8s.io/sig-storage/csi-snapshotter:v8.0.2
+  resizer: registry.k8s.io/sig-storage/csi-resizer:v1.14.0
+  registrar: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.13.0
+# 
+controller:
+  replicas: 1
+
+
