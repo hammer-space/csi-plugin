@@ -678,8 +678,8 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		log.Errorf("No task returned to monitor")
 	}
 
-	// Set objectives on share
-	err = client.SetObjectives(ctx, name, "/", objectives, true)
+	// Set objectives on share (share-level, not root path)
+	err = client.SetShareObjectives(ctx, name, objectives, true)
 	if err != nil {
 		log.Errorf("Failed to set objectives %s, %v", objectives, err)
 		return err
@@ -762,8 +762,8 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 		log.Errorf("No task returned to monitor")
 	}
 
-	// Set objectives on share
-	err = client.SetObjectives(ctx, name, "/", objectives, true)
+	// Set objectives on share (share-level, not root path)
+	err = client.SetShareObjectives(ctx, name, objectives, true)
 	if err != nil {
 		log.Errorf("Failed to set objectives %s, %v", objectives, err)
 		return err
@@ -800,18 +800,32 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Con
 	return false, nil
 }
 
-// Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
-// The path must start with a slash
+// Set objectives at the share level (no path), optionally clearing existing share-level objectives.
+func (client *HammerspaceClient) SetShareObjectives(ctx context.Context, shareName string,
+	objectives []string,
+	replaceExisting bool) error {
+	return client.SetObjectives(ctx, shareName, "", objectives, replaceExisting)
+}
+
+// Set objectives on a share at the specified path, optionally clearing previously-set objectives.
+// Path rules:
+// - ""   => share-level objectives (no path query param)
+// - "/x" => path-level objectives (must start with a slash)
 func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName string,
 	path string,
 	objectives []string,
 	replaceExisting bool) error {
 	log.Debugf("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
-	// Set objectives on share at path
 	cleared := false
 	for _, objectiveName := range objectives {
-		urlPath := fmt.Sprintf("/shares/%s/objective-set?path=%s&objective-identifier=%s",
-			shareName, path, objectiveName)
+		var urlPath string
+		if path == "" {
+			urlPath = fmt.Sprintf("/shares/%s/objective-set?objective-identifier=%s",
+				shareName, objectiveName)
+		} else {
+			urlPath = fmt.Sprintf("/shares/%s/objective-set?path=%s&objective-identifier=%s",
+				shareName, path, objectiveName)
+		}
 		if replaceExisting && !cleared {
 			urlPath += "&clear-existing=true"
 			cleared = true
