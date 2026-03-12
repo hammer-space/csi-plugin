@@ -30,6 +30,10 @@ type HSVolumeParameters struct {
 	CacheEnabled           bool
 	FQDN                   string
 	ClientMountOptions     []string
+	SecretName             string
+	SecretNamespace        string
+	CsiEndpoint            string
+	CsiTlsVerify           bool
 }
 
 type HSVolume struct {

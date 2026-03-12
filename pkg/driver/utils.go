@@ -429,7 +429,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	return fmt.Errorf("could not mount to any data-portals")
 }
 
-func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string) error {
+func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string, mountFlags []string) error {
 	log.Debugf("Check if %s is already mounted", baseRootDirPath)
 	if common.IsShareMounted(baseRootDirPath) {
 		log.Debugf("Root dir mount is already mounted at this node on path %s", baseRootDirPath)
@@ -446,9 +446,10 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	}
 	// Step 2 - Use export ip and path to mount root with 4.2 only.
 	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", "", baseRootDirPath)
-	var mountOption []string
-	mountOption = append(mountOption, "nfsvers=4.2")
-	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, mountOption)
+	if mountFlags == nil {
+		mountFlags = append(mountFlags, "nfsvers=4.2")
+	}
+	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, mountFlags)
 	if err != nil {
 		log.Errorf("Unable to mount root share via 4.2 using anvil IP. %v", err)
 

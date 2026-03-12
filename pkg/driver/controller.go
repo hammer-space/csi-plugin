@@ -37,6 +37,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
@@ -166,15 +167,26 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		vParams.FQDN = FQDN
 	}
 
-	clientMountOptions, exists := params["clientMountOptions"]
-	if exists {
-		vParams.ClientMountOptions = strings.Split(clientMountOptions, ",")
+	if params["clientMountOptions"] != "" {
+		vParams.ClientMountOptions = strings.Split(params["clientMountOptions"], ",")
+	}
+
+	vParams.SecretName = params["secretName"]
+	vParams.SecretNamespace = params["secretNamespace"]
+	vParams.CsiEndpoint = params["csiEndpoint"]
+
+	if params["csiTlsVerify"] != "" {
+		csiTlsVerify, err := strconv.ParseBool(params["csiTlsVerify"])
+		if err != nil {
+			vParams.CsiTlsVerify = false
+		}
+		vParams.CsiTlsVerify = csiTlsVerify
 	}
 
 	return vParams, nil
 }
 
-func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) error {
+func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName string, hsVolume *common.HSVolume) error {
 	// Check if backing share exists
 	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
 	if err != nil {
@@ -183,7 +195,7 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 	}
 	defer unlock()
 
-	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	backingShare, err := d.ensureBackingShareExists(ctx, hsclient, backingShareName, hsVolume)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
@@ -210,10 +222,10 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 	return nil
 }
 
-func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
+func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsclient *client.HammerspaceClient, hsVolume *common.HSVolume) error {
 
 	// Check if the Mount Volume Exists
-	share, err := d.hsclient.GetShare(ctx, hsVolume.Name)
+	share, err := hsclient.GetShare(ctx, hsVolume.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get share: %w", err)
 	}
@@ -230,7 +242,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 
 	if hsVolume.SourceSnapPath != "" {
 		// Create from snapshot
-		sourceShare, err := d.hsclient.GetShare(ctx, hsVolume.SourceSnapShareName)
+		sourceShare, err := hsclient.GetShare(ctx, hsVolume.SourceSnapShareName)
 		if err != nil {
 			log.Errorf("Failed to restore from snapshot, %v", err)
 			return status.Error(codes.Internal, common.UnknownError)
@@ -238,7 +250,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		if sourceShare == nil {
 			return status.Error(codes.NotFound, common.SourceSnapshotShareNotFound)
 		}
-		snapshots, err := d.hsclient.GetShareSnapshots(ctx, hsVolume.SourceSnapShareName)
+		snapshots, err := hsclient.GetShareSnapshots(ctx, hsVolume.SourceSnapShareName)
 		if err != nil {
 			log.Errorf("Failed to restore from snapshot, %v", err)
 			return status.Error(codes.Internal, common.UnknownError)
@@ -249,7 +261,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 			return status.Error(codes.NotFound, common.SourceSnapshotNotFound)
 		}
 
-		err = d.hsclient.CreateShareFromSnapshot(
+		err = hsclient.CreateShareFromSnapshot(
 			ctx,
 			hsVolume.Name,
 			hsVolume.Path,
@@ -266,7 +278,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		}
 	} else {
 		// Share is not there, try creating a new share
-		err = d.hsclient.CreateShare(
+		err = hsclient.CreateShare(
 			ctx,
 			hsVolume.Name,
 			hsVolume.Path,
@@ -305,13 +317,13 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	return nil
 }
 
-func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error) {
-	share, err := d.hsclient.GetShare(ctx, backingShareName)
+func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error) {
+	share, err := hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	if share == nil {
-		err = d.hsclient.CreateShare(
+		err = hsclient.CreateShare(
 			ctx,
 			backingShareName,
 			hsVolume.Path,
@@ -324,7 +336,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
-		share, err = d.hsclient.GetShare(ctx, backingShareName)
+		share, err = hsclient.GetShare(ctx, backingShareName)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
@@ -349,7 +361,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 	return share, err
 }
 
-func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume) error {
+func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, hsclient *client.HammerspaceClient, backingShare *common.ShareResponse, hsVolume *common.HSVolume) error {
 	log.WithFields(log.Fields{
 		"backingShare": backingShare,
 		"hsVolume":     hsVolume,
@@ -359,7 +371,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 	log.Debugf("checking if file exist %s", hsVolume.Path)
 
 	// Step 1: Check if file already exists in metadata
-	file, err := d.hsclient.GetFile(ctx, hsVolume.Path)
+	file, err := hsclient.GetFile(ctx, hsVolume.Path)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
@@ -389,7 +401,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 	// Step 3: Create file from snapshot or empty
 	if hsVolume.SourceSnapPath != "" {
 		// Restore from snapshot
-		err := d.hsclient.RestoreFileSnapToDestination(ctx, hsVolume.SourceSnapPath, hsVolume.Path)
+		err := hsclient.RestoreFileSnapToDestination(ctx, hsVolume.SourceSnapPath, hsVolume.Path)
 		if err != nil {
 			log.Errorf("Failed to restore from snapshot, %v", err)
 			return status.Error(codes.NotFound, common.UnknownError)
@@ -428,7 +440,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 	metadataCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
+	err = d.applyObjectiveAndMetadata(metadataCtx, hsclient, backingShare, hsVolume, deviceFile)
 	if err != nil {
 		log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
 	}
@@ -437,7 +449,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 }
 
 // ensure from hs system /share/file exist to apply objective and metadata
-func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
+func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, hsclient *client.HammerspaceClient, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
 	b := &backoff.Backoff{
 		Max:    5 * time.Second,
 		Factor: 1.5,
@@ -451,7 +463,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 		time.Sleep(dur)
 		// Wait for file to exist on metadata server
 		log.Debugf("Checking existance of file %s", hsVolume.Path)
-		backingFileExists, err = d.hsclient.DoesFileExist(ctx, hsVolume.Path)
+		backingFileExists, err = hsclient.DoesFileExist(ctx, hsVolume.Path)
 		if err != nil {
 			log.Warnf("Error checking file existence: %v", err)
 			time.Sleep(time.Second)
@@ -471,7 +483,8 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 
 	if len(hsVolume.Objectives) > 0 {
 		filePath := GetVolumeNameFromPath(hsVolume.Path)
-		err = d.hsclient.SetObjectives(ctx, backingShare.Name, filePath, hsVolume.Objectives, true)
+		// dont set replaceObjective to true
+		err = hsclient.SetObjectives(ctx, backingShare.Name, filePath, hsVolume.Objectives, false)
 		if err != nil {
 			log.Errorf("failed to set objectives on backing file for volume: %v\n", err)
 			return err
@@ -486,7 +499,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 	return err
 }
 
-func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume, backingShareName string) error {
+func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsclient *client.HammerspaceClient, hsVolume *common.HSVolume, backingShareName string) error {
 
 	log.WithFields(log.Fields{
 		"backingShareName": backingShareName,
@@ -501,12 +514,12 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *
 	}
 	defer unlock()
 
-	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	backingShare, err := d.ensureBackingShareExists(ctx, hsclient, backingShareName, hsVolume)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	log.Debugf("Backing share existed %s", backingShareName)
-	err = d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
+	err = d.ensureDeviceFileExists(ctx, hsclient, backingShare, hsVolume)
 
 	return err
 }
@@ -533,6 +546,23 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	vParams, err := parseVolParams(req.Parameters)
 	if err != nil {
 		return nil, err
+	}
+
+	hsclient := d.hsclient
+	if vParams.SecretName != "" {
+		if vParams.CsiEndpoint == "" {
+			return nil, status.Errorf(codes.InvalidArgument, "csiEndpoint must be specified with secretName")
+		}
+		username, uOk := req.Secrets["username"]
+		password, pOk := req.Secrets["password"]
+		if !uOk || !pOk {
+			return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+		}
+		newClient, err := client.NewHammerspaceClient(vParams.CsiEndpoint, username, password, vParams.CsiTlsVerify)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+		}
+		hsclient = newClient
 	}
 
 	// Check for snapshot source specified
@@ -638,7 +668,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		} else {
 			log.Infof("getting free capacity from (/cntl/state) api response")
 			// Call your function to get the free capacity from the API response here
-			available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
+			available, err = hsclient.GetClusterAvailableCapacity(ctx)
 			if err != nil {
 				return nil, status.Error(codes.Internal, err.Error())
 			}
@@ -662,7 +692,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		}
 	} else {
 		// If cached objective list is nil or empty, fetch it from the API
-		clusterObjectiveNames, err = d.hsclient.ListObjectiveNames(ctx)
+		clusterObjectiveNames, err = hsclient.ListObjectiveNames(ctx)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -709,7 +739,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
 		// This function is called when user want new nfs share inside one base share
 		log.Debugf("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
-		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		err := d.ensureNFSDirectoryExists(ctx, hsclient, backingShareName, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
 			return nil, status.Errorf(codes.Internal, "failed to ensure base NFS share (%s): %v", backingShareName, err)
@@ -720,7 +750,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	} else if fileBacked {
 		// This function will be called in case of Block and File backed share
 		log.Debugf("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
-		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
+		err = d.ensureFileBackedVolumeExists(ctx, hsclient, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
 		}
@@ -733,7 +763,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		// Then we create snapshot of that share /pvc-csi-uuid which will be inside /k8s-nfs-share/.snapshot
 		// Then restore the snapshot to the new created share from snapshot content source.
 		log.Debugf("Creating share for NFS volume with path %s", hsVolume.Path)
-		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
+		err = d.ensureShareBackedVolumeExists(ctx, hsclient, hsVolume)
 		if err != nil {
 			return nil, err
 		}
@@ -776,14 +806,14 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	return resp, nil
 }
 
-func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string) error {
+func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, hsclient *client.HammerspaceClient, filepath string) error {
 	var exists bool
-	if exists, _ = d.hsclient.DoesFileExist(ctx, filepath); exists {
+	if exists, _ = hsclient.DoesFileExist(ctx, filepath); exists {
 		log.Debugf("found file-backed volume to delete, %s", filepath)
 	}
 
 	// Check if file has snapshots and fail
-	snaps, _ := d.hsclient.GetFileSnapshots(ctx, filepath)
+	snaps, _ := hsclient.GetFileSnapshots(ctx, filepath)
 	if len(snaps) > 0 {
 		return status.Errorf(codes.FailedPrecondition, common.VolumeDeleteHasSnapshots)
 	}
@@ -824,9 +854,9 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 	return nil
 }
 
-func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.ShareResponse) error {
+func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, hsclient *client.HammerspaceClient, share *common.ShareResponse) error {
 	// Check for snapshots
-	snaps, err := d.hsclient.GetShareSnapshots(ctx, share.Name)
+	snaps, err := hsclient.GetShareSnapshots(ctx, share.Name)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
@@ -842,7 +872,7 @@ func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.S
 			log.Warnf("csi_delete_delay extended info, %s, should be an integer, on share %s; falling back to cluster defaults", v, share.Name)
 		}
 	}
-	err = d.hsclient.DeleteShare(ctx, share.Name, deleteDelay)
+	err = hsclient.DeleteShare(ctx, share.Name, deleteDelay)
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
@@ -870,17 +900,34 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	}
 	defer unlock()
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	volumeName := GetVolumeNameFromPath(volumeId)
-	share, err := d.hsclient.GetShare(ctx, volumeName)
+	share, err := hsclient.GetShare(ctx, volumeName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	if share == nil { // Share does not exist, may be a file-backed volume
-		err = d.deleteFileBackedVolume(ctx, volumeId)
+		err = d.deleteFileBackedVolume(ctx, hsclient, volumeId)
 
 		return &csi.DeleteVolumeResponse{}, err
 	} else { // Share exists and is a Filesystem
-		err = d.deleteShareBackedVolume(ctx, share)
+		err = d.deleteShareBackedVolume(ctx, hsclient, share)
 		return &csi.DeleteVolumeResponse{}, err
 	}
 
@@ -926,15 +973,32 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 		return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
 	}
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(ctx, volumeName)
+	share, _ := hsclient.GetShare(ctx, volumeName)
 	if share == nil {
 		fileBacked = true
 	}
 
 	//  Check if the specified backing share or file exists
 	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
+		backingFileExists, err := hsclient.DoesFileExist(ctx, req.GetVolumeId())
 		if err != nil {
 			log.Error(err)
 		}
@@ -946,7 +1010,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 	}
 
 	if fileBacked {
-		file, err := d.hsclient.GetFile(ctx, req.GetVolumeId())
+		file, err := hsclient.GetFile(ctx, req.GetVolumeId())
 		if file == nil || err != nil {
 			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 		} else {
@@ -963,7 +1027,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 				// if required - current > available on backend share
 				sizeDiff := requestedSize - file.Size
 				backingShareName := path.Base(path.Dir(req.GetVolumeId()))
-				backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
+				backingShare, err := hsclient.GetShare(ctx, backingShareName)
 				if err != nil {
 					return nil, fmt.Errorf("share not found %w", err)
 				}
@@ -991,7 +1055,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 		if shareName == "" {
 			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 		}
-		share, err := d.hsclient.GetShare(ctx, shareName)
+		share, err := hsclient.GetShare(ctx, shareName)
 		if share == nil {
 			return nil, status.Error(codes.NotFound, common.ShareNotFound)
 		}
@@ -1003,7 +1067,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 		}
 
 		if currentSize < requestedSize {
-			err = d.hsclient.UpdateShareSize(ctx, shareName, requestedSize)
+			err = hsclient.UpdateShareSize(ctx, shareName, requestedSize)
 			if err != nil {
 				return nil, status.Error(codes.Internal, common.UnknownError)
 			}
@@ -1033,13 +1097,30 @@ func (d *CSIDriver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Val
 		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.VolumeId)
 	}
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	// Find Share
 	typeBlock := false
 	typeMount := false
 	fileBacked := false
 
 	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(ctx, volumeName)
+	share, _ := hsclient.GetShare(ctx, volumeName)
 	if share != nil {
 		typeMount = true
 	}
@@ -1054,7 +1135,7 @@ func (d *CSIDriver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Val
 
 	//  Check if the specified backing share or file exists
 	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
+		backingFileExists, err := hsclient.DoesFileExist(ctx, req.GetVolumeId())
 		if err != nil {
 			log.Error(err)
 		}
@@ -1111,7 +1192,12 @@ func (d *CSIDriver) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest
 			"[ListVolumes] Invalid max entries request %v, must not be negative ", req.MaxEntries))
 	}
 
-	vlist, err := d.hsclient.ListVolumes(ctx)
+	hsclient := d.hsclient
+	// Note: ListVolumes does not have a secrets field in the request.
+	// We would need to implement a custom way to pass secrets if we want to support this.
+	// For now, we will use the default client.
+
+	vlist, err := hsclient.ListVolumes(ctx)
 	if err != nil {
 		return nil, status.Error(codes.Internal, fmt.Sprintf("ListVolumes failed: %v", err))
 	}
@@ -1140,6 +1226,23 @@ func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/GetCapacity", trace.WithAttributes())
 	defer span.End()
+
+	hsclient := d.hsclient
+	// if req.Secrets != nil {
+	// 	if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+	// 		username, uOk := req.Secrets["username"]
+	// 		password, pOk := req.Secrets["password"]
+	// 		if !uOk || !pOk {
+	// 			return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+	// 		}
+	// 		tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+	// 		newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+	// 		if err != nil {
+	// 			return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+	// 		}
+	// 		hsclient = newClient
+	// 	}
+	// }
 
 	var blockRequested bool
 	var filesystemRequested bool
@@ -1179,7 +1282,7 @@ func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest
 		} else {
 			backingShareName = vParams.MountBackingShareName
 		}
-		backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
+		backingShare, err := hsclient.GetShare(ctx, backingShareName)
 		if err != nil {
 			available = 0
 		}
@@ -1189,7 +1292,7 @@ func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest
 
 	} else {
 		// Return all capacity of cluster for share backed volumes
-		available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
+		available, err = hsclient.GetClusterAvailableCapacity(ctx)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -1285,22 +1388,39 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	}
 	defer unlock()
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	// FIXME: Check to see if snapshot already exists?
 	//  (using their id somehow?, update the share extended info maybe?) what about for file-backed volumes?
 	// do we update extended info on backing share?
 	if _, exists := recentlyCreatedSnapshots[req.GetName()]; !exists {
 		// find source volume (is it file or share?
 		volumeName := GetVolumeNameFromPath(req.GetSourceVolumeId())
-		share, err := d.hsclient.GetShare(ctx, volumeName)
+		share, err := hsclient.GetShare(ctx, volumeName)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
 		// Create the snapshot
 		var hsSnapName string
 		if share != nil {
-			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
+			hsSnapName, err = hsclient.SnapshotShare(ctx, volumeName)
 		} else {
-			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
+			hsSnapName, err = hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
@@ -1342,6 +1462,23 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		return nil, status.Error(codes.InvalidArgument, common.EmptySnapshotId)
 	}
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	splitSnapId := strings.SplitN(snapshotId, "|", 2)
 	if len(splitSnapId) != 2 {
 		log.Warnf("DeleteSnapshot: malformed snapshot ID %s; treating as success (idempotent)", snapshotId)
@@ -1355,9 +1492,9 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 
 	var err error
 	if shareName != "" {
-		err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
+		err = hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
 	} else {
-		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+		err = hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
 	}
 
 	if err != nil {
@@ -1386,11 +1523,28 @@ func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReq
 			"[ListSnapshots] Invalid max entries request %v, must not be negative ", req.MaxEntries))
 	}
 
+	hsclient := d.hsclient
+	if req.Secrets != nil {
+		if endpoint, ok := req.Secrets["csiEndpoint"]; ok {
+			username, uOk := req.Secrets["username"]
+			password, pOk := req.Secrets["password"]
+			if !uOk || !pOk {
+				return nil, status.Errorf(codes.InvalidArgument, "username and password must be in secrets")
+			}
+			tlsVerify, _ := strconv.ParseBool(req.Secrets["csiTlsVerify"])
+			newClient, err := client.NewHammerspaceClient(endpoint, username, password, tlsVerify)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to create new hsclient, %v", err)
+			}
+			hsclient = newClient
+		}
+	}
+
 	// Initialize a slice to hold the snapshot entries
 	var snapshots []*csi.ListSnapshotsResponse_Entry
 
 	// Fetch all snapshots from the backend storage
-	backendSnapshots, err := d.hsclient.ListSnapshots(ctx, req.SnapshotId, req.SourceVolumeId)
+	backendSnapshots, err := hsclient.ListSnapshots(ctx, req.SnapshotId, req.SourceVolumeId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}

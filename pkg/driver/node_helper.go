@@ -33,7 +33,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		}
 
 		// Mount root export (same as NodeStageVolume)
-		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, nil); err != nil {
 			return status.Errorf(codes.Internal, "[LazyStage] root export mount failed: %v", err)
 		}
 

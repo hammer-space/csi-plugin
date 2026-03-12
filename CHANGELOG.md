@@ -6,6 +6,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+### Fixed
+- Passed mount options from the storage class to the mount command.
+- Fixed an issue where objectives was being applied to share "/" instead it should directly apply to share.
+
 
 ## [1.2.8]
 ### Added

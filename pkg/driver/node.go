@@ -170,6 +170,11 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 		return nil, status.Error(codes.InvalidArgument, "VolumeCapability must be provided")
 	}
 
+	mountFlags := []string{}
+	if m := volumeCapability.GetMount(); m != nil {
+		mountFlags = m.GetMountFlags()
+	}
+
 	log.WithFields(log.Fields{
 		"volume_id":      volumeID,
 		"staging_target": stagingTarget,
@@ -190,7 +195,7 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	// Step 2: Ensure the root NFS export is mounted once per node
 	// EnsureRootExportMounted function will do a mount check before mounting or creating dir.
-	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, mountFlags); err != nil {
 		return nil, status.Errorf(codes.Internal, "root export mount failed: %v", err)
 	}
 
