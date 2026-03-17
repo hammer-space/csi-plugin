@@ -18,14 +18,17 @@ package driver
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"unsafe"
 
 	"context"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -170,6 +173,11 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 		return nil, status.Error(codes.InvalidArgument, "VolumeCapability must be provided")
 	}
 
+	hsclient, err := d.clientFromSecrets(req.GetSecrets())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create hsclient from secrets, %v", err)
+	}
+
 	mountFlags := []string{}
 	if m := volumeCapability.GetMount(); m != nil {
 		mountFlags = m.GetMountFlags()
@@ -188,14 +196,14 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
 
-	err := os.WriteFile(marker, []byte(""), 0644)
+	err = os.WriteFile(marker, []byte(""), 0644)
 	if err != nil {
 		log.Warnf("Not able to create marker file path %s err %v", marker, err)
 	}
 
 	// Step 2: Ensure the root NFS export is mounted once per node
 	// EnsureRootExportMounted function will do a mount check before mounting or creating dir.
-	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, mountFlags); err != nil {
+	if err := d.EnsureRootExportMounted(ctx, hsclient, common.BaseBackingShareMountPath, mountFlags); err != nil {
 		return nil, status.Errorf(codes.Internal, "root export mount failed: %v", err)
 	}
 
@@ -261,6 +269,11 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		}
 	}
 
+	hsclient, err := d.clientFromSecrets(req.GetSecrets())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create hsclient from secrets, %v", err)
+	}
+
 	unlock, err := d.acquireVolumeLock(ctx, volume_id)
 	if err != nil {
 		log.Errorf("Failed to acquire volume lock for volume %s: %v", volume_id, err)
@@ -300,7 +313,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			"Volume_id":         volume_id,
 			"Traget Path":       targetPath,
 		}).Info("Starting node publish volume for Share backed NFS volume without backing share.")
-		err := d.publishShareBackedVolume(ctx, volume_id, targetPath)
+		err := d.publishShareBackedVolume(ctx, hsclient, volume_id, targetPath)
 		if err != nil {
 			return nil, err
 		}
@@ -310,7 +323,32 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			"Volume_id":         volume_id,
 			"Traget Path":       targetPath,
 		}).Info("Starting node publish volume for Share backed NFS volume with backing share.")
-		err := d.publishShareBackedDirBasedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, volumeContext["fqdn"])
+		exportPath := volume_id
+		subPath := volumeContext["shareSubPath"]
+		if subPath == "" {
+			subPath = volumeContext["exportSubPath"]
+		}
+		if subPath == "" {
+			subPath = volumeContext["mountSubPath"]
+		}
+		if subPath != "" {
+			base := "/" + strings.Trim(backingShareName, "/")
+			sp := strings.TrimPrefix(subPath, "/")
+			if sp == "" || sp == "." {
+				exportPath = base
+			} else {
+				exportPath = path.Join(base, sp)
+			}
+			if !strings.HasPrefix(exportPath, "/") {
+				exportPath = "/" + exportPath
+			}
+			log.WithFields(log.Fields{
+				"backingShareName": backingShareName,
+				"exportPath":       exportPath,
+				"subPath":          subPath,
+			}).Debug("Using explicit subpath inside backing share for mount.")
+		}
+		err := d.publishShareBackedDirBasedVolume(ctx, hsclient, backingShareName, exportPath, targetPath, fsType, mountFlags, volumeContext["fqdn"])
 		if err != nil {
 			return nil, err
 		}
@@ -320,7 +358,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			"Volume_id":     volume_id,
 			"Traget Path":   targetPath,
 		}).Info("Starting node publish volume file backed.")
-		err := d.publishFileBackedVolume(ctx, backingShareName, volume_id, targetPath, fsType, mountFlags, readOnly, volumeContext["fqdn"])
+		err := d.publishFileBackedVolume(ctx, hsclient, backingShareName, volume_id, targetPath, fsType, mountFlags, readOnly, volumeContext["fqdn"])
 		if err != nil {
 			log.Errorf("Error while running publishFileBackedVolume.")
 			return nil, err
@@ -382,7 +420,7 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 	switch mode := fi.Mode(); {
 	case IsBlockDevice(fi): // block device
 		log.Infof("Detected block device at target path %s", targetPath)
-		if err := d.unpublishFileBackedVolume(ctx, req.GetVolumeId(), targetPath); err != nil {
+		if err := d.unpublishFileBackedVolume(ctx, d.hsclient, req.GetVolumeId(), targetPath); err != nil {
 			return nil, err
 		}
 	case mode.IsDir(): // directory for mount volumes
@@ -399,6 +437,13 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 	}
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
+}
+
+func (d *CSIDriver) clientFromSecrets(secrets map[string]string) (*client.HammerspaceClient, error) {
+	if len(secrets) == 0 {
+		return d.hsclient, nil
+	}
+	return client.NewHammerspaceClientFromSecrets(secrets)
 }
 
 func (d *CSIDriver) NodeGetCapabilities(ctx context.Context, req *csi.NodeGetCapabilitiesRequest) (*csi.NodeGetCapabilitiesResponse, error) {

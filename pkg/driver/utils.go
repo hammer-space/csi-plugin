@@ -29,6 +29,7 @@ import (
 
 	"context"
 
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -207,8 +208,8 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareName string, hsVol *common.HSVolume) error {
-	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
+func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName string, hsVol *common.HSVolume) error {
+	backingShare, err := hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
 		return status.Errorf(codes.NotFound, "%s", err.Error())
 	}
@@ -218,7 +219,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 		isMounted := common.IsShareMounted(backingDir)
 		log.Infof("Checked mount for %s: isMounted=%t", backingDir, isMounted)
 		if !isMounted {
-			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
+			err := d.MountShareAtBestDataportal(ctx, hsclient, backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
 				return err
@@ -233,9 +234,9 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	return nil
 }
 
-func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShareName string) (bool, error) {
+func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName string) (bool, error) {
 	log.Infof("UnmountBackingShareIfUnused is called with backing share name %s", backingShareName)
-	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
+	backingShare, err := hsclient.GetShare(ctx, backingShareName)
 	if err != nil || backingShare == nil {
 		log.Errorf("unable to get share while checking UnmountBackingShareIfUnused. Err %v", err)
 		return false, err
@@ -278,13 +279,13 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 // If we have the IP's in list we use that IP only. We select the IP which response first rpcinfo command.
 // 3. If all above check is null of err use anvil IP.
 
-func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportPath, targetPath string, mountFlags []string, fqdn string) error {
+func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, hsclient *client.HammerspaceClient, shareExportPath, targetPath string, mountFlags []string, fqdn string) error {
 	var err error
 	var fipaddr string = ""
 
 	log.Infof("Finding best host exporting %s", shareExportPath)
 
-	portals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
+	portals, err := hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
 		log.WithFields(log.Fields{
 			"share":   shareExportPath,
@@ -309,7 +310,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		}
 	} else {
 		// Always look for floating data portal IPs
-		fipaddr, err = d.hsclient.GetPortalFloatingIp(ctx)
+		fipaddr, err = hsclient.GetPortalFloatingIp(ctx)
 		if err != nil {
 			log.Errorf("Could not contact Anvil for floating IPs, %v", err)
 		}
@@ -429,7 +430,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	return fmt.Errorf("could not mount to any data-portals")
 }
 
-func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string, mountFlags []string) error {
+func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, hsclient *client.HammerspaceClient, baseRootDirPath string, mountFlags []string) error {
 	log.Debugf("Check if %s is already mounted", baseRootDirPath)
 	if common.IsShareMounted(baseRootDirPath) {
 		log.Debugf("Root dir mount is already mounted at this node on path %s", baseRootDirPath)
@@ -440,7 +441,7 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 		return err
 	}
 	// Step 1 - Get Anvil IP
-	anvilEndpointIP, err := d.hsclient.GetAnvilPortal()
+	anvilEndpointIP, err := hsclient.GetAnvilPortal()
 	if err != nil {
 		log.Errorf("Not able to extract anvil endpoint. Err %v", err)
 	}
@@ -455,7 +456,7 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 
 		// Step 3 - Use fallback
 		log.Debugf("Call for mount root share with anvil IP and 4.2 FAILED, now will do a fallback try with other data portals, with fallback to 4.2 and v3")
-		err = d.MountShareAtBestDataportal(ctx, "/", baseRootDirPath, nil, "")
+		err = d.MountShareAtBestDataportal(ctx, hsclient, "/", baseRootDirPath, nil, "")
 		if err != nil {
 			log.Errorf("Not able to mount root share to mount point %s. Error %v", baseRootDirPath, err)
 			return err

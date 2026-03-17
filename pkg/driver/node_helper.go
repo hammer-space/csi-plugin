@@ -9,6 +9,7 @@ import (
 
 	"context"
 
+	"github.com/hammer-space/csi-plugin/pkg/client"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
@@ -16,7 +17,7 @@ import (
 )
 
 // Mount share and attach it
-func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string) error {
+func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, hsclient *client.HammerspaceClient, volumeId, targetPath string) error {
 	// Step 0 — Ensure root share mount exists for this volume (lazy stage for old volumes)
 	// Lazy stage for old volumes (skip if root share already mounted)
 	rootShareMounted, _ := common.SafeIsMountPoint(common.BaseBackingShareMountPath)
@@ -33,7 +34,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		}
 
 		// Mount root export (same as NodeStageVolume)
-		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, nil); err != nil {
+		if err := d.EnsureRootExportMounted(ctx, hsclient, common.BaseBackingShareMountPath, nil); err != nil {
 			return status.Errorf(codes.Internal, "[LazyStage] root export mount failed: %v", err)
 		}
 
@@ -118,7 +119,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 }
 
 // Check base pv exist as backingShareName and create path with backingShareName/exportPath attach to target path
-func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backingShareName, exportPath, targetPath, fsType string, mountFlags []string, fqdn string) error {
+func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName, exportPath, targetPath, fsType string, mountFlags []string, fqdn string) error {
 	log.Debugf("Recived publish dir based volume request.")
 	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
 	if err != nil {
@@ -153,7 +154,7 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 	log.Infof("check nfs backed volume %v", hsVolume)
 
 	// Ensure the backing share is mounted
-	if err := d.EnsureBackingShareMounted(ctx, backingShareName, hsVolume); err != nil {
+	if err := d.EnsureBackingShareMounted(ctx, hsclient, backingShareName, hsVolume); err != nil {
 		return err
 	}
 
@@ -174,7 +175,7 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 	if err := common.BindMountDevice(sourceMountPoint, targetPath); err != nil {
 		log.Errorf("bind mount failed for %s: %v", targetPath, err)
 		CleanupLoopDevice(targetPath)
-		d.UnmountBackingShareIfUnused(ctx, backingShareName)
+		d.UnmountBackingShareIfUnused(ctx, hsclient, backingShareName)
 		return err
 	}
 
@@ -182,7 +183,7 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 	return nil
 }
 
-func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
+func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, hsclient *client.HammerspaceClient, backingShareName, volumePath, targetPath, fsType string, mountFlags []string, readOnly bool, fqdn string) error {
 	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
 	if err != nil {
 		// surfaces to kubelet instead of hanging forever
@@ -238,7 +239,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 	}).Info("Publish file backed volume.")
 
 	// Ensure the backing share is mounted
-	if err := d.EnsureBackingShareMounted(ctx, backingShareName, hsVolume); err != nil {
+	if err := d.EnsureBackingShareMounted(ctx, hsclient, backingShareName, hsVolume); err != nil {
 		return err
 	}
 
@@ -251,7 +252,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 		if err != nil {
 			log.Errorf("failed to attach loop device: %v", err)
 			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(ctx, backingShareName)
+			d.UnmountBackingShareIfUnused(ctx, hsclient, backingShareName)
 			return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
 		}
 		log.Infof("File %s attached to %s", filePath, deviceStr)
@@ -259,7 +260,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 		if err := common.BindMountDevice(deviceStr, targetPath); err != nil {
 			log.Errorf("bind mount failed for %s: %v", deviceStr, err)
 			CleanupLoopDevice(deviceStr)
-			d.UnmountBackingShareIfUnused(ctx, backingShareName)
+			d.UnmountBackingShareIfUnused(ctx, hsclient, backingShareName)
 			return err
 		}
 	} else {
@@ -267,7 +268,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 			mountFlags = append(mountFlags, "ro")
 		}
 		if err := common.MountFilesystem(filePath, targetPath, fsType, mountFlags); err != nil {
-			d.UnmountBackingShareIfUnused(ctx, backingShareName)
+			d.UnmountBackingShareIfUnused(ctx, hsclient, backingShareName)
 			return err
 		}
 	}
@@ -275,7 +276,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 }
 
 // NodeUnpublishVolume
-func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, volumePath, targetPath string) error {
+func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, hsclient *client.HammerspaceClient, volumePath, targetPath string) error {
 
 	//determine backing share
 	backingShareName := filepath.Dir(volumePath)
@@ -318,7 +319,7 @@ func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, volumePath, t
 	}
 
 	// Unmount backing share if appropriate
-	unmounted, err := d.UnmountBackingShareIfUnused(ctx, backingShareName)
+	unmounted, err := d.UnmountBackingShareIfUnused(ctx, hsclient, backingShareName)
 	if unmounted {
 		log.Infof("unmounted backing share, %s", backingShareName)
 	}

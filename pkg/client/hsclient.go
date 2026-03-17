@@ -101,6 +101,20 @@ func NewHammerspaceClient(endpoint, username, password string, tlsVerify bool) (
 	return hsclient, err
 }
 
+func NewHammerspaceClientFromSecrets(secrets map[string]string) (*HammerspaceClient, error) {
+	endpoint, ok := secrets["csiEndpoint"]
+	if !ok {
+		return nil, fmt.Errorf("csiEndpoint must be in secrets")
+	}
+	username, uOk := secrets["username"]
+	password, pOk := secrets["password"]
+	if !uOk || !pOk {
+		return nil, fmt.Errorf("username and password must be in secrets")
+	}
+	tlsVerify, _ := strconv.ParseBool(secrets["csiTlsVerify"])
+	return NewHammerspaceClient(endpoint, username, password, tlsVerify)
+}
+
 // GetAnvilPortal returns the hostname of the configured Hammerspace API gateway
 func (client *HammerspaceClient) GetAnvilPortal() (string, error) {
 	endpointUrl, _ := url.Parse(client.endpoint)
@@ -679,7 +693,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	}
 
 	// Set objectives on share (share-level, not root path)
-	err = client.SetShareObjectives(ctx, name, objectives, true)
+	err = client.SetShareObjectives(ctx, name, objectives, false)
 	if err != nil {
 		log.Errorf("Failed to set objectives %s, %v", objectives, err)
 		return err
@@ -763,7 +777,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 	}
 
 	// Set objectives on share (share-level, not root path)
-	err = client.SetShareObjectives(ctx, name, objectives, true)
+	err = client.SetShareObjectives(ctx, name, objectives, false)
 	if err != nil {
 		log.Errorf("Failed to set objectives %s, %v", objectives, err)
 		return err

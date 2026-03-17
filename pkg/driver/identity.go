@@ -21,8 +21,7 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	log "github.com/sirupsen/logrus"
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -49,9 +48,12 @@ func (d *CSIDriver) Probe(
 	// Make sure the client and backend can communicate
 	err := d.hsclient.EnsureLogin()
 	if err != nil {
+		log.WithError(err).Warn("Probe backend login failed; reporting Ready=true for tolerance")
+		// Tolerant probe: log and report ready to avoid flapping on transient backend issues.
+		// This keeps node service available for mounts that use per-request creds.
 		return &csi.ProbeResponse{
-			Ready: &wrappers.BoolValue{Value: false},
-		}, status.Errorf(codes.Unavailable, "%s", err.Error())
+			Ready: &wrappers.BoolValue{Value: true},
+		}, nil
 	}
 
 	return &csi.ProbeResponse{

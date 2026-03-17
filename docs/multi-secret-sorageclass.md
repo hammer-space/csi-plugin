@@ -47,6 +47,10 @@ provisioner: csi.hammerspace.com
 parameters:
   csi.storage.k8s.io/provisioner-secret-name: hs-secret-1
   csi.storage.k8s.io/provisioner-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: hs-secret-1
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/node-publish-secret-name: hs-secret-1
+  csi.storage.k8s.io/node-publish-secret-namespace: default
   # Other parameters specific to your storage provisioner
   fsType: "nfs"
   volumeNameFormat: "pvc-%s"
@@ -62,6 +66,10 @@ provisioner: csi.hammerspace.com
 parameters:
   csi.storage.k8s.io/provisioner-secret-name: hs-secret-2
   csi.storage.k8s.io/provisioner-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: hs-secret-2
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/node-publish-secret-name: hs-secret-2
+  csi.storage.k8s.io/node-publish-secret-namespace: default
   # Other parameters specific to your storage provisioner
   fsType: "xfs"
   volumeNameFormat: "test-%s"
@@ -109,7 +117,13 @@ spec:
 - Storage Classes: The StorageClass resources define the type of storage to be provisioned. The parameters section includes:
 csi.storage.k8s.io/provisioner-secret-name: Specifies the name of the secret containing the credentials.
 csi.storage.k8s.io/provisioner-secret-namespace: Specifies the namespace where the secret is located.
+  csi.storage.k8s.io/node-stage-secret-name / namespace: Secrets used by NodeStageVolume (root share mount).
+  csi.storage.k8s.io/node-publish-secret-name / namespace: Secrets used by NodePublishVolume (bind mounts and file/block mounts).
 Other storage-specific parameters (e.g., fsType, volumeNameFormat).
+
+#### Delete Behavior
+
+DeleteVolume uses the provisioner secrets when provided. If the delete request does not include secrets, the driver will fall back to the secrets cached at CreateVolume time for the same volume ID. This cache is in-memory and will be lost if the controller restarts, so the recommended setup is to always supply provisioner secrets in the StorageClass.
 
 - PersistentVolumeClaims: The PersistentVolumeClaim resources request storage from the provisioner. The storageClassName field specifies which storage class to use, which in turn determines which secret will be used for provisioning.
 
