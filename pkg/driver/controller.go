@@ -818,9 +818,6 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	}
 
 	log.WithField("response", resp).Info("volume was created")
-	if volumeSecrets["csiEndpoint"] != "" {
-		d.storeVolumeSecrets(volID, volumeSecrets)
-	}
 	return resp, nil
 }
 
@@ -918,7 +915,7 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	}
 	defer unlock()
 
-	hsclient, err := d.clientFromSecretsOrVolume(req.Secrets, volumeId)
+	hsclient, err := d.clientFromSecrets(req.Secrets)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create hsclient from secrets, %v", err)
 	}
@@ -930,15 +927,9 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	}
 	if share == nil { // Share does not exist, may be a file-backed volume
 		err = d.deleteFileBackedVolume(ctx, hsclient, volumeId)
-		if err == nil {
-			d.deleteVolumeSecrets(volumeId)
-		}
 		return &csi.DeleteVolumeResponse{}, err
 	} else { // Share exists and is a Filesystem
 		err = d.deleteShareBackedVolume(ctx, hsclient, share)
-		if err == nil {
-			d.deleteVolumeSecrets(volumeId)
-		}
 		return &csi.DeleteVolumeResponse{}, err
 	}
 

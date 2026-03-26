@@ -6,10 +6,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 
 ## [Unreleased]
+### Added
+- Multi-tenant / multi-endpoint secret support via StorageClass `csi.storage.k8s.io/*-secret-*` parameters for controller and node operations (provision, stage, publish, delete).
+
 ### Fixed
 - Passed mount options from the storage class to the mount command.
 - Fixed an issue where objectives was being applied to share "/" instead it should directly apply to share.
+- Ensured controller operations (including `DeleteVolume`) use request-provided secrets when present, to avoid cross-tenant deletes in multi-endpoint environments.
 
+### Documentation
+- Clarified that Kubernetes Secrets are Hammerspace management/API (REST) credentials (not NFS mount credentials) and documented DeleteVolume behavior for multi-tenant setups.
 
 ## [1.2.8]
 ### Added

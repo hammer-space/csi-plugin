@@ -112,7 +112,9 @@ spec:
 
 ### Explanation:
 
-- Secrets: The Secret resources store the credentials needed by the CSI driver to communicate with the Hammerspace backend. The stringData field is used to store the username, password, and CSI endpoint.
+- Secrets: The Secret resources store the credentials used by the CSI driver to talk to the Hammerspace management/API endpoint (REST). These credentials are **not** used as NFS mount credentials; the data path mount is performed by the node via NFS, while the driver uses the API credentials to discover/prepare exports, create/delete shares, apply policies/objectives, etc.
+  - Required keys: `csiEndpoint`, `username`, `password`
+  - Optional keys: `csiTlsVerify` (`"true"`/`"false"`)
 
 - Storage Classes: The StorageClass resources define the type of storage to be provisioned. The parameters section includes:
 csi.storage.k8s.io/provisioner-secret-name: Specifies the name of the secret containing the credentials.
@@ -123,7 +125,11 @@ Other storage-specific parameters (e.g., fsType, volumeNameFormat).
 
 #### Delete Behavior
 
-DeleteVolume uses the provisioner secrets when provided. If the delete request does not include secrets, the driver will fall back to the secrets cached at CreateVolume time for the same volume ID. This cache is in-memory and will be lost if the controller restarts, so the recommended setup is to always supply provisioner secrets in the StorageClass.
+DeleteVolume uses the provisioner secrets when provided. The driver does **not** cache secrets from CreateVolume for later use.
+
+If the delete request does not include secrets (for example, if the StorageClass is not configured with `csi.storage.k8s.io/provisioner-secret-name` / `csi.storage.k8s.io/provisioner-secret-namespace`), the driver falls back to the controller's configured credentials (for example, the Deployment's `com.hammerspace.csi.credentials` Secret via env vars).
+
+This is usually fine in single-endpoint clusters, but in multi-tenant or multi-endpoint setups it can cause share-backed deletes to fail if the controller's default credentials do not have access to the target Hammerspace system/share. In those setups, always supply provisioner secrets in the StorageClass so DeleteVolume is authenticated to the correct Hammerspace system.
 
 - PersistentVolumeClaims: The PersistentVolumeClaim resources request storage from the provisioner. The storageClassName field specifies which storage class to use, which in turn determines which secret will be used for provisioning.
 

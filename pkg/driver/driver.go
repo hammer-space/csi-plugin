@@ -52,8 +52,6 @@ type CSIDriver struct {
 	snapshotLocks map[string]*keyLock
 	hsclient      *client.HammerspaceClient
 	NodeID        string
-	secretsMu     sync.RWMutex
-	volumeSecrets map[string]map[string]string
 	nodeInfoMu    sync.RWMutex
 	nodeInfoKnown bool
 	nodeIsPortal  bool
@@ -79,7 +77,6 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		volumeLocks:   make(map[string]*keyLock),
 		snapshotLocks: make(map[string]*keyLock),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
-		volumeSecrets: make(map[string]map[string]string),
 	}
 
 }
@@ -141,43 +138,6 @@ func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (fun
 		os.Exit(1)
 	}
 	return func() { lk.unlock() }, nil
-}
-
-func (d *CSIDriver) storeVolumeSecrets(volumeID string, secrets map[string]string) {
-	if volumeID == "" || len(secrets) == 0 {
-		return
-	}
-	dup := make(map[string]string, len(secrets))
-	for k, v := range secrets {
-		dup[k] = v
-	}
-	d.secretsMu.Lock()
-	d.volumeSecrets[volumeID] = dup
-	d.secretsMu.Unlock()
-}
-
-func (d *CSIDriver) deleteVolumeSecrets(volumeID string) {
-	if volumeID == "" {
-		return
-	}
-	d.secretsMu.Lock()
-	delete(d.volumeSecrets, volumeID)
-	d.secretsMu.Unlock()
-}
-
-func (d *CSIDriver) clientFromSecretsOrVolume(secrets map[string]string, volumeID string) (*client.HammerspaceClient, error) {
-	if len(secrets) > 0 {
-		return client.NewHammerspaceClientFromSecrets(secrets)
-	}
-	if volumeID != "" {
-		d.secretsMu.RLock()
-		cached, ok := d.volumeSecrets[volumeID]
-		d.secretsMu.RUnlock()
-		if ok && len(cached) > 0 {
-			return client.NewHammerspaceClientFromSecrets(cached)
-		}
-	}
-	return d.hsclient, nil
 }
 
 func (c *CSIDriver) goServe(started chan<- bool) {
