@@ -2,9 +2,16 @@
 
 This plugin uses Hammerspace backend as distributed data storage for containers.
 
-Supports [CSI Spec 1.1.0](https://github.com/container-storage-interface/spec/blob/master/spec.md) 
+Supports CSI Spec v1.1.0 for `CSI_MAJOR_VERSION=1` and legacy CSI Spec v0.3.0 compatibility for `CSI_MAJOR_VERSION=0`.
  
 Implements the Identity, Node, and Controller interfaces as single Golang binary.
+
+## Compatibility
+
+CSI Mode | CSI Spec Version | `CSI_MAJOR_VERSION` | Compatibility | Notes
+-------- | ---------------- | ------------------- | ------------- | -----
+CSI v1   | v1.9.0           | `1`                 | Kubernetes 1.13+ | Default mode for current deployments. This repo includes example manifests for Kubernetes 1.13, 1.14, 1.17, 1.18, 1.21, and 1.24 through 1.28.
+CSI v0.3 | v0.3.0           | `0`                 | Kubernetes 1.10-1.12 | Legacy compatibility mode. Supports filesystem (Mount) volumes only. See `deploy/kubernetes/kubernetes-1.10-1.12/README.md`.
  
 #### Supported Capabilities
 * CREATE_DELETE_VOLUME
@@ -66,7 +73,7 @@ Variable                       |     Default           | Description
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
 ``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex ``/mnt/data-portal``
-``CSI_MAJOR_VERSION``          |     ``"1"``           | The major version of the CSI interface used to communicate with the plugin. Valid values are "1" and "0"
+``CSI_MAJOR_VERSION``          |     ``"1"``           | CSI interface compatibility mode. Use ``"1"`` for Kubernetes 1.13+ deployments and ``"0"`` only for legacy Kubernetes 1.10-1.12 environments.
 
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):
@@ -81,6 +88,14 @@ Name                      |     Default            | Description
 ``mountBackingShareName`` |                        | The share in which to store File-backed Mount Volume files. If it does not exist, the plugin will create it. Alternatively, a preexisting share can be used. Must be specified if provisioning Filesystem Volumes other than 'nfs'.
 ``fsType``                |     ``nfs``            | The file system type to place on created mount volumes. If a value other than "nfs", then a file-backed volume is created instead of an NFS share.
 ``additionalMetadataTags``|                        | Comma separated list of tags to set on files and shares created by the plugin. Format is ',' separated list of key=value pairs. Ex ``storageClassName=hs-storage,fsType=nfs``
+
+Use the Kubernetes StorageClass ``mountOptions`` field for mount flags applied to CSI node mounts. Example:
+```yaml
+mountOptions:
+  - vers=4.2
+  - hard
+  - timeo=600
+```
 
 ### Topology support
 Currently, only the ``topology.csi.hammerspace.com/is-data-portal`` key is supported. Values are 'true' and 'false'

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/container-storage-interface/spec/lib/go/csi"
 	common "github.com/hammer-space/csi-plugin/pkg/common"
 )
 
@@ -184,4 +185,32 @@ func TestParseParams(t *testing.T) {
 		t.FailNow()
 	}
 
+}
+
+func TestGetMountFlagsFromCapabilities(t *testing.T) {
+	capabilities := []*csi.VolumeCapability{
+		{
+			AccessType: &csi.VolumeCapability_Block{
+				Block: &csi.VolumeCapability_BlockVolume{},
+			},
+		},
+		{
+			AccessType: &csi.VolumeCapability_Mount{
+				Mount: &csi.VolumeCapability_MountVolume{
+					FsType:     "nfs",
+					MountFlags: []string{"vers=4.2", "hard"},
+				},
+			},
+		},
+	}
+
+	actual := getMountFlagsFromCapabilities(capabilities)
+	expected := []string{"vers=4.2", "hard"}
+
+	if !reflect.DeepEqual(actual, expected) {
+		t.Logf("Mount flags not equal")
+		t.Logf("Expected: %v", expected)
+		t.Logf("Actual: %v", actual)
+		t.FailNow()
+	}
 }

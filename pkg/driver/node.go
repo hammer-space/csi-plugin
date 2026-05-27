@@ -157,6 +157,7 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolu
 
 func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
 	volumeID := req.GetVolumeId()
+	volumeContext := req.GetVolumeContext()
 	stagingTarget := req.GetStagingTargetPath()
 	volumeCapability := req.GetVolumeCapability()
 
@@ -175,6 +176,11 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 		"staging_target": stagingTarget,
 	}).Debug("NodeStageVolume will only stage hammerspace root share to use bind on future publish call.")
 
+	mountFlags := []string{}
+	if volumeCapability.GetMount() != nil {
+		mountFlags = append(mountFlags, volumeCapability.GetMount().MountFlags...)
+	}
+
 	// Step 1: Create a marker file for each new volume comming in.
 	// Create marker for this volume
 	if err := os.MkdirAll(common.BaseVolumeMarkerSourcePath, 0755); err != nil {
@@ -190,7 +196,7 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	// Step 2: Ensure the root NFS export is mounted once per node
 	// EnsureRootExportMounted function will do a mount check before mounting or creating dir.
-	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+	if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, mountFlags, volumeContext["fqdn"]); err != nil {
 		return nil, status.Errorf(codes.Internal, "root export mount failed: %v", err)
 	}
 
@@ -283,7 +289,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 				fsType = "nfs"
 			}
 		}
-		mountFlags = volumeCapability.GetMount().MountFlags
+		mountFlags = append([]string{}, volumeCapability.GetMount().MountFlags...)
 	default:
 		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, volume_id)
 	}
@@ -295,7 +301,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			"Volume_id":         volume_id,
 			"Traget Path":       targetPath,
 		}).Info("Starting node publish volume for Share backed NFS volume without backing share.")
-		err := d.publishShareBackedVolume(ctx, volume_id, targetPath)
+		err := d.publishShareBackedVolume(ctx, volume_id, targetPath, mountFlags, volumeContext["fqdn"])
 		if err != nil {
 			return nil, err
 		}

@@ -16,6 +16,8 @@ limitations under the License.
 
 package common
 
+import "encoding/json"
+
 // Structures to hold information about a plugin created volume
 type HSVolumeParameters struct {
 	DeleteDelay            int64
@@ -29,7 +31,7 @@ type HSVolumeParameters struct {
 	AdditionalMetadataTags map[string]string
 	CacheEnabled           bool
 	FQDN                   string
-	ClientMountOptions     []string
+	MountFlags             []string
 }
 
 type HSVolume struct {
@@ -48,7 +50,7 @@ type HSVolume struct {
 	SourceSnapShareName    string
 	AdditionalMetadataTags map[string]string
 	FQDN                   string
-	ClientMountOptions     []string
+	MountFlags             []string
 }
 
 ///// Request and Response objects for interacting with the HS API
@@ -60,12 +62,13 @@ type ClusterResponse struct {
 }
 
 type ShareRequest struct {
-	Name          string               `json:"name"`
-	ExportPath    string               `json:"path"`
-	Comment       string               `json:"comment"`
-	ExtendedInfo  map[string]string    `json:"extendedInfo"`
-	Size          int64                `json:"shareSizeLimit,omitempty"`
-	ExportOptions []ShareExportOptions `json:"exportOptions,omitempty"`
+	Name            string                  `json:"name"`
+	ExportPath      string                  `json:"path"`
+	Comment         string                  `json:"comment"`
+	ExtendedInfo    map[string]string       `json:"extendedInfo"`
+	Size            int64                   `json:"shareSizeLimit,omitempty"`
+	ExportOptions   []ShareExportOptions    `json:"exportOptions,omitempty"`
+	ShareObjectives []ShareObjectiveRequest `json:"shareObjectives,omitempty"`
 }
 
 type ShareUpdateRequest struct {
@@ -113,7 +116,35 @@ type AppliedObjectiveResponse struct {
 	Name string `json:"name"`
 }
 type ClusterObjectiveResponse struct {
-	Name string `json:"name"`
+	Name   string                 `json:"name"`
+	Fields map[string]interface{} `json:"-"`
+}
+
+func (o *ClusterObjectiveResponse) UnmarshalJSON(data []byte) error {
+	var fields map[string]interface{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	o.Fields = fields
+	if name, ok := fields["name"].(string); ok {
+		o.Name = name
+	}
+
+	return nil
+}
+
+func (o ClusterObjectiveResponse) MarshalJSON() ([]byte, error) {
+	if o.Fields != nil {
+		return json.Marshal(o.Fields)
+	}
+
+	type objectiveAlias ClusterObjectiveResponse
+	return json.Marshal(objectiveAlias(o))
+}
+
+type ShareObjectiveRequest struct {
+	Objective ClusterObjectiveResponse `json:"objective"`
 }
 
 type Task struct {

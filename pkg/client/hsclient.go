@@ -51,14 +51,28 @@ import (
 )
 
 const (
-	BasePath            = "/mgmt/v1.2/rest"
-	taskPollTimeout     = 3600 * time.Second // Seconds
-	taskPollIntervalCap = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
+	BasePath                   = "/mgmt/v1.2/rest"
+	taskPollTimeout            = 3600 * time.Second // Seconds
+	taskPollIntervalCap        = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
+	taskStatusValidationFailed = "VALIDATION_FAILED"
+	taskStatusResumed          = "RESUMED"
+	taskStatusFailed           = "FAILED"
+	taskStatusHalted           = "HALTED"
+	taskStatusCancelled        = "CANCELLED"
+	taskStatusCompleted        = "COMPLETED"
 )
 
 var (
-	fipIndices sync.Map // map[string]*uint32
-	tracer     = otel.Tracer("hammerspace-csi",
+	fipIndices           sync.Map // map[string]*uint32
+	terminalTaskStatuses = map[string]struct{}{
+		taskStatusValidationFailed: {},
+		taskStatusResumed:          {},
+		taskStatusFailed:           {},
+		taskStatusHalted:           {},
+		taskStatusCancelled:        {},
+		taskStatusCompleted:        {},
+	}
+	tracer = otel.Tracer("hammerspace-csi",
 		trace.WithInstrumentationAttributes(
 			attribute.String("service.name", "hammerspace-csi"),
 			attribute.String("version", common.Version),
@@ -354,13 +368,12 @@ func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, task
 			log.Error(err)
 			return false, nil
 		}
-		if task.Status != "NONE" && task.Status != "EXECUTING" {
-			if task.Status == "COMPLETED" || task.Status == "FAILED" || task.Status == "HALTED" || task.Status == "CANCELLED" {
+		if _, isTerminal := terminalTaskStatuses[task.Status]; isTerminal {
+			if task.Status == taskStatusCompleted {
 				return true, nil
-			} else {
-				log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.StatusMessage))
-				return false, nil
 			}
+			log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.StatusMessage))
+			return false, nil
 		}
 	}
 	return false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
@@ -393,6 +406,14 @@ func (client *HammerspaceClient) ListShares(ctx context.Context) ([]common.Share
 }
 
 func (client *HammerspaceClient) ListObjectives(ctx context.Context) ([]common.ClusterObjectiveResponse, error) {
+	cachedObjectiveList, err := common.GetCacheData("OBJECTIVE_LIST")
+	if err != nil {
+		return nil, err
+	}
+	if objectives, ok := cachedObjectiveList.([]common.ClusterObjectiveResponse); ok && len(objectives) > 0 {
+		return objectives, nil
+	}
+
 	req, err := client.generateRequest(ctx, "GET", "/objectives", "")
 	if err != nil {
 		log.Error(err)
@@ -421,6 +442,14 @@ func (client *HammerspaceClient) ListObjectives(ctx context.Context) ([]common.C
 }
 
 func (client *HammerspaceClient) ListObjectiveNames(ctx context.Context) ([]string, error) {
+	cachedObjectiveNames, err := common.GetCacheData("OBJECTIVE_LIST_NAMES")
+	if err != nil {
+		return nil, err
+	}
+	if objectiveNames, ok := cachedObjectiveNames.([]string); ok && len(objectiveNames) > 0 {
+		return objectiveNames, nil
+	}
+
 	objectives, err := client.ListObjectives(ctx)
 	if err != nil {
 		return nil, err
@@ -433,6 +462,36 @@ func (client *HammerspaceClient) ListObjectiveNames(ctx context.Context) ([]stri
 	// set free capacity to cache expire in 5 min
 	common.SetCacheData("OBJECTIVE_LIST_NAMES", objectiveNames, 60*5)
 	return objectiveNames, nil
+}
+
+func (client *HammerspaceClient) getShareObjectives(ctx context.Context, objectiveNames []string) ([]common.ShareObjectiveRequest, error) {
+	if len(objectiveNames) == 0 {
+		return nil, nil
+	}
+
+	objectives, err := client.ListObjectives(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	objectiveByName := make(map[string]common.ClusterObjectiveResponse, len(objectives))
+	for _, objective := range objectives {
+		objectiveByName[objective.Name] = objective
+	}
+
+	shareObjectives := make([]common.ShareObjectiveRequest, 0, len(objectiveNames))
+	for _, objectiveName := range objectiveNames {
+		objective, ok := objectiveByName[objectiveName]
+		if !ok {
+			return nil, status.Errorf(codes.InvalidArgument, common.InvalidObjectiveNameDoesNotExist, objectiveName)
+		}
+
+		shareObjectives = append(shareObjectives, common.ShareObjectiveRequest{
+			Objective: objective,
+		})
+	}
+
+	return shareObjectives, nil
 }
 
 func (client *HammerspaceClient) ListVolumes(ctx context.Context) ([]common.VolumeResponse, error) {
@@ -624,13 +683,18 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
 	}
+	shareObjectives, err := client.getShareObjectives(ctx, objectives)
+	if err != nil {
+		return err
+	}
 
 	share := common.ShareRequest{
-		Name:          name,
-		ExportPath:    exportPath,
-		ExportOptions: exportOptions,
-		ExtendedInfo:  extendedInfo,
-		Comment:       comment,
+		Name:            name,
+		ExportPath:      exportPath,
+		ExportOptions:   exportOptions,
+		ExtendedInfo:    extendedInfo,
+		Comment:         comment,
+		ShareObjectives: shareObjectives,
 	}
 	if size > 0 {
 		share.Size = size
@@ -678,13 +742,6 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		log.Errorf("No task returned to monitor")
 	}
 
-	// Set objectives on share
-	err = client.SetObjectives(ctx, name, "/", objectives, true)
-	if err != nil {
-		log.Errorf("Failed to set objectives %s, %v", objectives, err)
-		return err
-	}
-
 	return nil
 }
 
@@ -708,13 +765,18 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 	if len(name) > 80 {
 		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
 	}
+	shareObjectives, err := client.getShareObjectives(ctx, objectives)
+	if err != nil {
+		return err
+	}
 	////// FIXME: Replace with new api to clone a snapshot to a new share
 	share := common.ShareRequest{
-		Name:          name,
-		ExportPath:    exportPath,
-		ExportOptions: exportOptions,
-		ExtendedInfo:  extendedInfo,
-		Comment:       comment,
+		Name:            name,
+		ExportPath:      exportPath,
+		ExportOptions:   exportOptions,
+		ExtendedInfo:    extendedInfo,
+		Comment:         comment,
+		ShareObjectives: shareObjectives,
 	}
 	if size > 0 {
 		share.Size = size
@@ -762,13 +824,6 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 		log.Errorf("No task returned to monitor")
 	}
 
-	// Set objectives on share
-	err = client.SetObjectives(ctx, name, "/", objectives, true)
-	if err != nil {
-		log.Errorf("Failed to set objectives %s, %v", objectives, err)
-		return err
-	}
-
 	return nil
 }
 
@@ -802,37 +857,33 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Con
 
 // Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
 // The path must start with a slash
-func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName string,
-	path string,
-	objectives []string,
-	replaceExisting bool) error {
+func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName string, path string, objectives []string) error {
 	log.Debugf("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
 	// Set objectives on share at path
-	cleared := false
+
 	for _, objectiveName := range objectives {
-		urlPath := fmt.Sprintf("/shares/%s/objective-set?path=%s&objective-identifier=%s",
-			shareName, path, objectiveName)
-		if replaceExisting && !cleared {
-			urlPath += "&clear-existing=true"
-			cleared = true
-		}
+		query := url.Values{}
+		query.Set("path", path)
+		query.Set("objective-identifier", objectiveName)
+		urlPath := fmt.Sprintf("/shares/%s/objective-set?%s",
+			url.PathEscape(shareName), query.Encode())
 		req, err := client.generateRequest(ctx, "POST", urlPath, "")
 		if err != nil {
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
 			return err
 		}
-		statusCode, _, _, err := client.doRequest(*req)
+		statusCode, respBody, _, err := client.doRequest(*req)
 		if err != nil {
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
 			return err
 		}
 		if statusCode != 200 {
-			//FIXME: err is not set here
+			err = fmt.Errorf("failed to set objective: status code %d: %s", statusCode, respBody)
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
-			return errors.New("failed to set objective")
+			return err
 		}
 	}
 

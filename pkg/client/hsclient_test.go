@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	common "github.com/hammer-space/csi-plugin/pkg/common"
@@ -165,6 +166,32 @@ func TestCreateShare(t *testing.T) {
 		_, _ = io.WriteString(w, fakeTaskResponse)
 	})
 
+	objectiveRequests := 0
+	Mux.HandleFunc(BasePath+"/objectives", func(w http.ResponseWriter, r *http.Request) {
+		objectiveRequests++
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, `[
+			{
+				"uoid":{
+					"uuid":"test-obj-uuid",
+					"objectType":"OBJECTIVE"
+				},
+				"name":"test-obj",
+				"internalId":10,
+				"priority":"MEDIUM"
+			},
+			{
+				"uoid":{
+					"uuid":"test-obj2-uuid",
+					"objectType":"OBJECTIVE"
+				},
+				"name":"test-obj2",
+				"internalId":11,
+				"priority":"HIGH"
+			}
+		]`)
+	})
+
 	// test basic
 	expectedCreateShareBody = fmt.Sprintf(`{
 		"name":"test",
@@ -188,17 +215,42 @@ func TestCreateShare(t *testing.T) {
 
 	// test multiple objectives
 	t.Log("Test Multiple Objectives")
-	Mux.HandleFunc(BasePath+"/shares/test/objective-set", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(200)
-		if r.Method != "POST" {
-			t.Logf("Fail: this should be a POST method")
-			t.Fail()
-		}
-		if !((r.URL.Query()["objective-identifier"][0] == "test-obj") || (r.URL.Query()["objective-identifier"][0] == "test-obj2")) {
-			t.Logf("Fail: Incorrect Objective %s", r.URL.Query()["objective-identifier"][0])
-			t.Fail()
-		}
-	})
+	expectedCreateShareBody = fmt.Sprintf(`{
+		"name":"test",
+		"path":"/test",
+		"comment":"",
+		"extendedInfo":{
+			"csi_created_by_plugin_version":"%s",
+			"csi_created_by_plugin_name":"%s",
+			"csi_delete_delay": "%d",
+			"csi_created_by_plugin_git_hash":"%s",
+			"csi_created_by_csi_version":"%s"
+		},
+		"shareObjectives":[
+			{
+				"objective":{
+					"uoid":{
+						"uuid":"test-obj-uuid",
+						"objectType":"OBJECTIVE"
+					},
+					"name":"test-obj",
+					"internalId":10,
+					"priority":"MEDIUM"
+				}
+			},
+			{
+				"objective":{
+					"uoid":{
+						"uuid":"test-obj2-uuid",
+						"objectType":"OBJECTIVE"
+					},
+					"name":"test-obj2",
+					"internalId":11,
+					"priority":"HIGH"
+				}
+			}
+		]
+	}`, common.Version, common.CsiPluginName, 1, common.Githash, common.CsiVersion)
 
 	err = hsclient.CreateShare(context.Background(), "test",
 		"/test",
@@ -207,6 +259,25 @@ func TestCreateShare(t *testing.T) {
 		1, "")
 	if err != nil {
 		t.Error(err)
+	}
+	if objectiveRequests != 1 {
+		t.Fatalf("expected 1 objective list request, got %d", objectiveRequests)
+	}
+
+	t.Log("Test Missing Objective Fails Share Create")
+	err = hsclient.CreateShare(context.Background(), "test",
+		"/test",
+		-1, []string{"missing-obj"},
+		[]common.ShareExportOptions{},
+		1, "")
+	if err == nil {
+		t.Fatal("expected missing objective to fail share create")
+	}
+	if !strings.Contains(err.Error(), fmt.Sprintf(common.InvalidObjectiveNameDoesNotExist, "missing-obj")) {
+		t.Fatalf("expected missing objective error, got %v", err)
+	}
+	if objectiveRequests != 1 {
+		t.Fatalf("expected cached objective list to be reused, got %d objective list requests", objectiveRequests)
 	}
 
 	// test share size
@@ -300,11 +371,9 @@ func TestCreateShare(t *testing.T) {
 	}
 	}`, common.Version, common.CsiPluginName, 1, common.Githash, common.CsiVersion)
 
+	fakeTaskResponse = FakeTaskFailed
 	err = hsclient.CreateShare(context.Background(), "test", "/test", -1, []string{}, []common.ShareExportOptions{}, 1, "")
 	if err == nil {
-		// share failure should send err from task that fails TODO Fix it later
-		t.Skip("Skipping test for share creation failure")
-		t.Logf("Expected error")
-		t.Fail()
+		t.Fatal("Expected error")
 	}
 }

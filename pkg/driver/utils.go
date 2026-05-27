@@ -218,7 +218,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 		isMounted := common.IsShareMounted(backingDir)
 		log.Infof("Checked mount for %s: isMounted=%t", backingDir, isMounted)
 		if !isMounted {
-			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.ClientMountOptions, hsVol.FQDN)
+			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.MountFlags, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
 				return err
@@ -274,7 +274,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 
 // Check to select the IP for mount point
 // 1. Check if FQDN is provided and its resolvable. If FQDN is there we use that IP only.
-// 2. Check if GetPortalFloatingIp have flaoting IPS to be used.
+// 2. Check if GetPortalFloatingIp have floating IPS to be used.
 // If we have the IP's in list we use that IP only. We select the IP which response first rpcinfo command.
 // 3. If all above check is null of err use anvil IP.
 
@@ -313,16 +313,6 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		if err != nil {
 			log.Errorf("Could not contact Anvil for floating IPs, %v", err)
 		}
-	}
-
-	// Helper function to check if mountFlags contains nfsvers
-	containsNfsvers := func(flags []string) bool {
-		for _, flag := range flags {
-			if strings.HasPrefix(flag, "nfsvers=") {
-				return true
-			}
-		}
-		return false
 	}
 
 	MountToDataPortal := func(portal common.DataPortal, mount_options []string) bool {
@@ -393,21 +383,28 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 
 	log.Infof("Attempting to mount with provided mount flags.")
 	// Attempt to mount with provided mount flags if they contain nfsvers
-	if containsNfsvers(mountFlags) {
+	containsNfsvers := false
+	for _, flag := range mountFlags {
+		if strings.HasPrefix(flag, "nfsvers=") || strings.HasPrefix(flag, "vers=") {
+			containsNfsvers = true
+			break
+		}
+	}
+	if containsNfsvers {
 		for _, p := range portals {
 			if MountToDataPortal(p, mountFlags) {
 				return nil
 			}
 		}
-		// Remove nfsvers option from mountFlags if mount fails
+		// Remove nfsvers/vers option from mountFlags if mount fails
 		var filteredMountFlags []string
 		for _, flag := range mountFlags {
-			if !strings.HasPrefix(flag, "nfsvers=") {
+			if !strings.HasPrefix(flag, "nfsvers=") && !strings.HasPrefix(flag, "vers=") {
 				filteredMountFlags = append(filteredMountFlags, flag)
 			}
 		}
 		mountFlags = filteredMountFlags
-		log.Infof("Mount with provided mount flags failed, removed nfsvers option.")
+		log.Infof("Mount with provided mount flags failed, removed nfsvers/vers option.")
 	}
 
 	// Fallback to NFS 4.2
@@ -421,7 +418,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	// Fallback to NFS 3
 	log.Infof("Could not mount via NFS 4.2, falling back to NFS 3.")
 	for _, p := range portals {
-		if MountToDataPortal(p, append(mountFlags, "nfsvers=3,nolock")) {
+		if MountToDataPortal(p, append(mountFlags, "nfsvers=3", "nolock")) {
 			return nil
 		}
 	}
@@ -429,7 +426,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	return fmt.Errorf("could not mount to any data-portals")
 }
 
-func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string) error {
+func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string, mountFlags []string, fqdn string) error {
 	log.Debugf("Check if %s is already mounted", baseRootDirPath)
 	if common.IsShareMounted(baseRootDirPath) {
 		log.Debugf("Root dir mount is already mounted at this node on path %s", baseRootDirPath)
@@ -446,15 +443,24 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	}
 	// Step 2 - Use export ip and path to mount root with 4.2 only.
 	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", "", baseRootDirPath)
-	var mountOption []string
-	mountOption = append(mountOption, "nfsvers=4.2")
-	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, mountOption)
+	effectiveMountFlags := append([]string{}, mountFlags...)
+	hasNfsvers := false
+	for _, option := range effectiveMountFlags {
+		if strings.HasPrefix(option, "nfsvers=") || strings.HasPrefix(option, "vers=") {
+			hasNfsvers = true
+			break
+		}
+	}
+	if !hasNfsvers {
+		effectiveMountFlags = append(effectiveMountFlags, "nfsvers=4.2")
+	}
+	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, effectiveMountFlags)
 	if err != nil {
 		log.Errorf("Unable to mount root share via 4.2 using anvil IP. %v", err)
 
 		// Step 3 - Use fallback
 		log.Debugf("Call for mount root share with anvil IP and 4.2 FAILED, now will do a fallback try with other data portals, with fallback to 4.2 and v3")
-		err = d.MountShareAtBestDataportal(ctx, "/", baseRootDirPath, nil, "")
+		err = d.MountShareAtBestDataportal(ctx, "/", baseRootDirPath, mountFlags, fqdn)
 		if err != nil {
 			log.Errorf("Not able to mount root share to mount point %s. Error %v", baseRootDirPath, err)
 			return err
