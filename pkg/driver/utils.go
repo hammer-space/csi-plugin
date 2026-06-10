@@ -298,15 +298,9 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	if err != nil {
 		log.Errorf("Not able to resolve FQDN=%s checking floating IP's. Error %v", fqdn, err)
 	}
-	if extracted_endpoint != "" && err == nil { // if fqdn is provided use that ip
-		// check if rpcinfo gives a response
-		ok, err := common.CheckNFSExports(extracted_endpoint)
-		if err != nil {
-			log.Warnf("Could not get exports for fqdn %s ip %s. Error: %v", fqdn, extracted_endpoint, err)
-		}
-		if ok {
-			fipaddr = extracted_endpoint
-		}
+	if extracted_endpoint != "" && err == nil {
+		// if fqdn is provided use that ip, no need to check for rpcinfo response time as we are already using fqdn which is expected to be resolved to the right IP by DNS.
+		fipaddr = extracted_endpoint
 	} else {
 		// Always look for floating data portal IPs
 		fipaddr, err = d.hsclient.GetPortalFloatingIp(ctx)
@@ -427,6 +421,8 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 }
 
 func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath string, mountFlags []string, fqdn string) error {
+	var err error
+
 	log.Debugf("Check if %s is already mounted", baseRootDirPath)
 	if common.IsShareMounted(baseRootDirPath) {
 		log.Debugf("Root dir mount is already mounted at this node on path %s", baseRootDirPath)
@@ -436,13 +432,6 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	if err := os.MkdirAll(baseRootDirPath, 0755); err != nil {
 		return err
 	}
-	// Step 1 - Get Anvil IP
-	anvilEndpointIP, err := d.hsclient.GetAnvilPortal()
-	if err != nil {
-		log.Errorf("Not able to extract anvil endpoint. Err %v", err)
-	}
-	// Step 2 - Use export ip and path to mount root with 4.2 only.
-	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", "", baseRootDirPath)
 	effectiveMountFlags := append([]string{}, mountFlags...)
 	hasNfsvers := false
 	for _, option := range effectiveMountFlags {
@@ -454,6 +443,28 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	if !hasNfsvers {
 		effectiveMountFlags = append(effectiveMountFlags, "nfsvers=4.2")
 	}
+	// Step 1 - If FQDN is provided try to use that to mount the root share
+	if fqdn != "" {
+		fqdnEndpointIP, resolveErr := common.ResolveFQDN(fqdn)
+		if resolveErr != nil {
+			log.Errorf("Unable to resolve FQDN %s for root share mount. %v", fqdn, resolveErr)
+		} else {
+			log.Debugf("Calling mount via nfs v4.2 using FQDN %s resolved to IP %s to mount (/) on %s", fqdn, fqdnEndpointIP, baseRootDirPath)
+			err = common.MountShare(fqdn+":/", baseRootDirPath, effectiveMountFlags)
+			if err == nil {
+				log.Debugf("Successfully mounted root share using FQDN %s resolved to IP %s", fqdn, fqdnEndpointIP)
+				return nil
+			}
+			log.Errorf("Unable to mount root share via FQDN %s resolved to IP %s. %v", fqdn, fqdnEndpointIP, err)
+		}
+	}
+	// Step 2 - Get Anvil IP and try to mount with that IP with 4.2, if it fails we will do a fallback to try to mount with other data portals with 4.2 and fallback to 3 if 4.2 fails.
+	anvilEndpointIP, err := d.hsclient.GetAnvilPortal()
+	if err != nil {
+		log.Errorf("Not able to extract anvil endpoint. Err %v", err)
+	}
+	// Step 3 - Use export ip and path to mount root with 4.2 only.
+	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", anvilEndpointIP, baseRootDirPath)
 	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, effectiveMountFlags)
 	if err != nil {
 		log.Errorf("Unable to mount root share via 4.2 using anvil IP. %v", err)

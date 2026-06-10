@@ -158,12 +158,13 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	}
 
 	if params["fqdn"] != "" {
-		FQDN, err := common.ResolveFQDN(params["fqdn"])
+		_, err := common.ResolveFQDN(params["fqdn"])
 		if err != nil {
 			log.Warnf("fully qualified domain name not specified. Err %v", err.Error())
 			vParams.FQDN = ""
+		} else {
+			vParams.FQDN = params["fqdn"]
 		}
-		vParams.FQDN = FQDN
 	}
 
 	return vParams, nil
