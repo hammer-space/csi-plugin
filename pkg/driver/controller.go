@@ -158,20 +158,26 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	}
 
 	if params["fqdn"] != "" {
-		FQDN, err := common.ResolveFQDN(params["fqdn"])
+		_, err := common.ResolveFQDN(params["fqdn"])
 		if err != nil {
 			log.Warnf("fully qualified domain name not specified. Err %v", err.Error())
 			vParams.FQDN = ""
+		} else {
+			vParams.FQDN = params["fqdn"]
 		}
-		vParams.FQDN = FQDN
-	}
-
-	clientMountOptions, exists := params["clientMountOptions"]
-	if exists {
-		vParams.ClientMountOptions = strings.Split(clientMountOptions, ",")
 	}
 
 	return vParams, nil
+}
+
+func getMountFlagsFromCapabilities(capabilities []*csi.VolumeCapability) []string {
+	for _, capability := range capabilities {
+		if mount := capability.GetMount(); mount != nil {
+			return append([]string{}, mount.MountFlags...)
+		}
+	}
+
+	return nil
 }
 
 func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) error {
@@ -289,7 +295,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	defer common.UnmountFilesystem(targetPath)
 
 	log.Debugf("Created empty folder with path %s", targetPath)
-	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath)
+	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
@@ -336,7 +342,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		// generate unique target path on host for setting file metadata
 		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(targetPath)
-		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath)
+		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
@@ -471,7 +477,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 
 	if len(hsVolume.Objectives) > 0 {
 		filePath := GetVolumeNameFromPath(hsVolume.Path)
-		err = d.hsclient.SetObjectives(ctx, backingShare.Name, filePath, hsVolume.Objectives, true)
+		err = d.hsclient.SetObjectives(ctx, backingShare.Name, filePath, hsVolume.Objectives)
 		if err != nil {
 			log.Errorf("failed to set objectives on backing file for volume: %v\n", err)
 			return err
@@ -617,7 +623,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		AdditionalMetadataTags: vParams.AdditionalMetadataTags,
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
-		ClientMountOptions:     vParams.ClientMountOptions,
+		MountFlags:             getMountFlagsFromCapabilities(req.VolumeCapabilities),
 	}
 
 	// if it's file backed, we should check capacity of backing share
@@ -653,7 +659,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	var clusterObjectiveNames []string
 	cachedObjectiveList, err := common.GetCacheData("OBJECTIVE_LIST_NAMES")
 	if err != nil {
-		return nil, status.Error(codes.Internal, err.Error())
+		log.Warnf("Unable to read cached objective list; continuing volume create without objective validation: %v", err)
 	}
 	if cachedObjectiveList != nil {
 		if objectives, ok := cachedObjectiveList.([]string); ok && len(objectives) > 0 {
@@ -672,7 +678,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		log.Debugf("Checking for objective inside the objective list.")
 		if !IsValueInList(o, clusterObjectiveNames) {
 			log.WithFields(log.Fields{
-				"Supllied objective list": clusterObjectiveNames,
+				"Supplied objective list": clusterObjectiveNames,
 			}).Errorf("No objective found in objective list")
 			return nil, status.Errorf(codes.InvalidArgument, common.InvalidObjectiveNameDoesNotExist, o)
 		}
@@ -743,7 +749,9 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	volContext := make(map[string]string)
 	volContext["size"] = strconv.FormatInt(hsVolume.Size, 10)
 	volContext["mode"] = volumeMode
-
+	if fqdn := req.GetParameters()["fqdn"]; fqdn != "" {
+		volContext["fqdn"] = fqdn
+	}
 	switch volumeMode {
 	case "Block":
 		volContext["blockBackingShareName"] = hsVolume.BlockBackingShareName
@@ -791,8 +799,8 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 	residingShareName := path.Base(path.Dir(filepath))
 
 	hsVolume := &common.HSVolume{
-		FQDN:               "",
-		ClientMountOptions: []string{},
+		FQDN:       "",
+		MountFlags: nil,
 	}
 
 	if exists {

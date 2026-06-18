@@ -7,6 +7,10 @@ metadata:
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: com.hammerspace.csi
+mountOptions:
+  - vers=4.2
+  - hard
+  - timeo=600
 parameters:
   fsType: "nfs"
   # Objectives to set on shares in addition to HS cluster defaults

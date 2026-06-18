@@ -16,7 +16,7 @@ import (
 )
 
 // Mount share and attach it
-func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string) error {
+func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targetPath string, mountFlags []string, fqdn string) error {
 	// Step 0 — Ensure root share mount exists for this volume (lazy stage for old volumes)
 	// Lazy stage for old volumes (skip if root share already mounted)
 	rootShareMounted, _ := common.SafeIsMountPoint(common.BaseBackingShareMountPath)
@@ -33,7 +33,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		}
 
 		// Mount root export (same as NodeStageVolume)
-		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath); err != nil {
+		if err := d.EnsureRootExportMounted(ctx, common.BaseBackingShareMountPath, mountFlags, fqdn); err != nil {
 			return status.Errorf(codes.Internal, "[LazyStage] root export mount failed: %v", err)
 		}
 
@@ -146,9 +146,9 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 	}
 
 	hsVolume := &common.HSVolume{
-		FQDN:               fqdn,
-		FSType:             fsType,
-		ClientMountOptions: mountFlags,
+		FQDN:       fqdn,
+		FSType:     fsType,
+		MountFlags: mountFlags,
 	}
 	log.Infof("check nfs backed volume %v", hsVolume)
 
@@ -226,9 +226,9 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 	}
 
 	hsVolume := &common.HSVolume{
-		FQDN:               fqdn,
-		FSType:             fsType,
-		ClientMountOptions: mountFlags,
+		FQDN:       fqdn,
+		FSType:     fsType,
+		MountFlags: mountFlags,
 	}
 
 	log.WithFields(log.Fields{
@@ -263,10 +263,13 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 			return err
 		}
 	} else {
+		// StorageClass mountOptions are used for the backing NFS share mount.
+		// Do not pass them to the local ext4/xfs mount of the backing file.
+		var filesystemMountFlags []string
 		if readOnly {
-			mountFlags = append(mountFlags, "ro")
+			filesystemMountFlags = append(filesystemMountFlags, "ro")
 		}
-		if err := common.MountFilesystem(filePath, targetPath, fsType, mountFlags); err != nil {
+		if err := common.MountFilesystem(filePath, targetPath, fsType, filesystemMountFlags); err != nil {
 			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return err
 		}

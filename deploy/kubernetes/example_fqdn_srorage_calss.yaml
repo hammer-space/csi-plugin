@@ -1,0 +1,63 @@
+# Example FQDN-backed filesystem volume test.
+# Replace storage-server.example.com with the FQDN that should resolve to the
+# Hammerspace data portal IP from the CSI controller and node pods.
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hs-storage-fqdn
+provisioner: com.hammerspace.csi
+mountOptions:
+  - vers=4.2
+  - hard
+  - timeo=600
+parameters:
+  fsType: "nfs"
+  objectives: "keep-online"
+  exportOptions: "*,RW,false"
+  volumeNameFormat: "csi-fqdn-%s"
+  additionalMetadataTags: "storageClassName=hs-storage-fqdn,fsType=nfs"
+  comment: "FQDN mount test"
+  fqdn: "storage-server.example.com"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hs-fqdn-test
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: hs-storage-fqdn
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hs-fqdn-test
+  namespace: default
+spec:
+  restartPolicy: Never
+  containers:
+    - name: mount-test
+      image: alpine:3.20
+      command:
+        - /bin/sh
+        - -c
+        - |
+          set -eux
+          date > /data/fqdn-test.txt
+          cat /data/fqdn-test.txt
+          mount | grep /data
+          sleep 3600
+      volumeMounts:
+        - name: data-dir
+          mountPath: /data
+  volumes:
+    - name: data-dir
+      persistentVolumeClaim:
+        claimName: hs-fqdn-test
