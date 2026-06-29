@@ -1,0 +1,237 @@
+# NFS mountBackingShareName directory-backed volume snapshot/restore E2E test.
+#
+# This scenario provisions an NFS directory under a shared backing export using
+# mountBackingShareName. It should pass after directory-backed NFS snapshots are
+# handled through the backing share snapshot path.
+#
+# Run:
+#   kubectl apply -f test/e2e/kubernetes/nfs_mount_backing_snapshot_restore.yaml
+#   kubectl -n hs-nfs-mount-backing-snapshot-e2e wait --for=condition=Complete job/hs-nfs-mount-backing-snapshot-restore-e2e --timeout=10m
+#   kubectl -n hs-nfs-mount-backing-snapshot-e2e logs job/hs-nfs-mount-backing-snapshot-restore-e2e
+#
+# To rerun after a driver change:
+#   kubectl -n hs-nfs-mount-backing-snapshot-e2e delete job hs-nfs-mount-backing-snapshot-restore-e2e --ignore-not-found
+#   kubectl apply -f test/e2e/kubernetes/nfs_mount_backing_snapshot_restore.yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hs-nfs-mount-backing-snapshot-e2e
+---
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: hs-nfs-mount-backing-snapshot-e2e
+provisioner: com.hammerspace.csi
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - vers=4.2
+  - hard
+  - timeo=600
+parameters:
+  fsType: "nfs"
+  mountBackingShareName: k8s-nfs-storage
+  objectives: "keep-online"
+  exportOptions: "*,RW,false"
+  deleteDelay: "0"
+  volumeNameFormat: "csi-nfs-dir-%s"
+  additionalMetadataTags: "storageClassName=hs-nfs-mount-backing-snapshot-e2e,fsType=nfs"
+  comment: "NFS mountBackingShareName snapshot restore E2E volume"
+---
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: hs-nfs-mount-backing-snapshot-e2e
+driver: com.hammerspace.csi
+deletionPolicy: Delete
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hs-nfs-mount-backing-snapshot-restore-e2e
+  namespace: hs-nfs-mount-backing-snapshot-e2e
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: hs-nfs-mount-backing-snapshot-restore-e2e
+  namespace: hs-nfs-mount-backing-snapshot-e2e
+rules:
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "pods"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["create", "delete", "get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: hs-nfs-mount-backing-snapshot-restore-e2e
+  namespace: hs-nfs-mount-backing-snapshot-e2e
+subjects:
+  - kind: ServiceAccount
+    name: hs-nfs-mount-backing-snapshot-restore-e2e
+    namespace: hs-nfs-mount-backing-snapshot-e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: hs-nfs-mount-backing-snapshot-restore-e2e
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hs-nfs-mount-backing-snapshot-restore-e2e
+  namespace: hs-nfs-mount-backing-snapshot-e2e
+spec:
+  backoffLimit: 0
+  template:
+    spec:
+      serviceAccountName: hs-nfs-mount-backing-snapshot-restore-e2e
+      restartPolicy: Never
+      containers:
+        - name: e2e
+          image: docker.io/bitnami/kubectl@sha256:b9f4412e53f09d76b0991cdd29c0feff4c1d1e112b307e0ab155e5b050a9f4ec
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+
+              ns="$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace)"
+              marker="nfs-mount-backing-restore-ok-$(date -u +%Y-%m-%dT%H%M%SZ)"
+
+              echo "Cleaning up any previous test resources in namespace ${ns}"
+              kubectl -n "${ns}" delete pod reader writer --ignore-not-found --wait=true --timeout=120s || true
+              kubectl -n "${ns}" delete pvc restore --ignore-not-found --wait=true --timeout=120s || true
+              kubectl -n "${ns}" delete volumesnapshot src-snap --ignore-not-found --wait=true --timeout=120s || true
+              kubectl -n "${ns}" delete pvc src --ignore-not-found --wait=true --timeout=120s || true
+
+              echo "Creating source PVC"
+              cat <<EOF | kubectl create -f -
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: src
+                namespace: ${ns}
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: hs-nfs-mount-backing-snapshot-e2e
+                resources:
+                  requests:
+                    storage: 1Gi
+              EOF
+
+              kubectl -n "${ns}" wait pvc/src --for=jsonpath='{.status.phase}'=Bound --timeout=300s
+
+              echo "Writing marker to source PVC: ${marker}"
+              cat <<EOF | kubectl create -f -
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: writer
+                namespace: ${ns}
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: writer
+                    image: busybox:1.36
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        set -eu
+                        echo "${marker}" > /data/marker.txt
+                        sync
+                        cat /data/marker.txt
+                    volumeMounts:
+                      - name: data
+                        mountPath: /data
+                volumes:
+                  - name: data
+                    persistentVolumeClaim:
+                      claimName: src
+              EOF
+
+              kubectl -n "${ns}" wait pod/writer --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
+              kubectl -n "${ns}" logs pod/writer
+
+              echo "Creating snapshot from source PVC"
+              cat <<EOF | kubectl create -f -
+              apiVersion: snapshot.storage.k8s.io/v1
+              kind: VolumeSnapshot
+              metadata:
+                name: src-snap
+                namespace: ${ns}
+              spec:
+                volumeSnapshotClassName: hs-nfs-mount-backing-snapshot-e2e
+                source:
+                  persistentVolumeClaimName: src
+              EOF
+
+              kubectl -n "${ns}" wait volumesnapshot/src-snap --for=jsonpath='{.status.readyToUse}'=true --timeout=300s
+              kubectl -n "${ns}" get volumesnapshot src-snap -o wide
+
+              echo "Creating restore PVC from snapshot"
+              cat <<EOF | kubectl create -f -
+              apiVersion: v1
+              kind: PersistentVolumeClaim
+              metadata:
+                name: restore
+                namespace: ${ns}
+              spec:
+                accessModes:
+                  - ReadWriteMany
+                storageClassName: hs-nfs-mount-backing-snapshot-e2e
+                dataSource:
+                  name: src-snap
+                  kind: VolumeSnapshot
+                  apiGroup: snapshot.storage.k8s.io
+                resources:
+                  requests:
+                    storage: 1Gi
+              EOF
+
+              kubectl -n "${ns}" wait pvc/restore --for=jsonpath='{.status.phase}'=Bound --timeout=300s
+
+              echo "Reading restored PVC and validating marker"
+              cat <<EOF | kubectl create -f -
+              apiVersion: v1
+              kind: Pod
+              metadata:
+                name: reader
+                namespace: ${ns}
+              spec:
+                restartPolicy: Never
+                containers:
+                  - name: reader
+                    image: busybox:1.36
+                    command:
+                      - sh
+                      - -c
+                      - |
+                        set -eu
+                        ls -la /data
+                        actual="\$(cat /data/marker.txt)"
+                        echo "\$actual"
+                        test "\$actual" = "${marker}"
+                    volumeMounts:
+                      - name: data
+                        mountPath: /data
+                volumes:
+                  - name: data
+                    persistentVolumeClaim:
+                      claimName: restore
+              EOF
+
+              kubectl -n "${ns}" wait pod/reader --for=jsonpath='{.status.phase}'=Succeeded --timeout=300s
+              kubectl -n "${ns}" logs pod/reader
+
+              echo "PASS: NFS mountBackingShareName snapshot and restore preserved marker ${marker}"
