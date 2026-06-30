@@ -309,6 +309,26 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		}
 	}
 
+	// In a no-DSX deployment (e.g. Anvil-only) GetDataPortals returns an empty
+	// list, so the portal-bounded mount loops below would never execute and the
+	// resolved fipaddr (from the FQDN or floating IP) would be silently thrown
+	// away. Synthesize a single portal from fipaddr so the existing mount logic
+	// (export discovery via showmount, NFS 4.2 -> 3 fallback) still runs.
+	if len(portals) == 0 && fipaddr != "" {
+		log.Infof("No data-portals returned by Anvil; using resolved address %s as the mount target", fipaddr)
+		portals = []common.DataPortal{
+			{
+				Node: common.DataPortalNode{
+					Name: fqdn,
+					MgmtIpAddress: common.DataPortalNodeAddress{
+						Address: fipaddr,
+					},
+				},
+				Uoid: map[string]string{"uuid": fipaddr},
+			},
+		}
+	}
+
 	MountToDataPortal := func(portal common.DataPortal, mount_options []string) bool {
 		addr := ""
 		if len(fipaddr) > 0 {
