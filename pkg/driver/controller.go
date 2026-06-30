@@ -18,7 +18,10 @@ package driver
 
 import (
 	"fmt"
+	"io"
+	"os"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -41,7 +44,9 @@ import (
 )
 
 const (
-	MaxNameLength int = 128
+	MaxNameLength                  int = 128
+	MaxHammerspaceVolumeNameLength int = 80
+	restoreVolumeNameSuffix            = "-restore"
 )
 
 var (
@@ -263,6 +268,200 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 	return nil
 }
 
+func copyDirectoryContentsToDestination(sourceDir, destinationDir string) error {
+	stagingDir := destinationDir + ".staging"
+	if err := os.RemoveAll(stagingDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
+		return err
+	}
+
+	copyErr := filepath.WalkDir(sourceDir, func(sourcePath string, dirEntry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		relativePath, err := filepath.Rel(sourceDir, sourcePath)
+		if err != nil {
+			return err
+		}
+		if relativePath == "." {
+			return nil
+		}
+
+		stagingPath := filepath.Join(stagingDir, relativePath)
+		info, err := dirEntry.Info()
+		if err != nil {
+			return err
+		}
+
+		if dirEntry.IsDir() {
+			return os.MkdirAll(stagingPath, info.Mode())
+		}
+
+		if info.Mode()&os.ModeSymlink != 0 {
+			linkTarget, err := os.Readlink(sourcePath)
+			if err != nil {
+				return err
+			}
+			if _, err := os.Lstat(stagingPath); err == nil {
+				if err := os.Remove(stagingPath); err != nil {
+					return err
+				}
+			}
+			return os.Symlink(linkTarget, stagingPath)
+		}
+
+		if !info.Mode().IsRegular() {
+			return nil
+		}
+
+		if err := os.MkdirAll(filepath.Dir(stagingPath), 0o755); err != nil {
+			return err
+		}
+
+		sourceFile, err := os.Open(sourcePath)
+		if err != nil {
+			return err
+		}
+		defer sourceFile.Close()
+
+		stagingFile, err := os.OpenFile(stagingPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
+		if err != nil {
+			return err
+		}
+		defer stagingFile.Close()
+
+		_, err = io.Copy(stagingFile, sourceFile)
+		return err
+	})
+	if copyErr != nil {
+		_ = os.RemoveAll(stagingDir)
+		return copyErr
+	}
+
+	backupDir := destinationDir + ".bak"
+	if _, err := os.Stat(destinationDir); err == nil {
+		if err := os.RemoveAll(backupDir); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return err
+		}
+		if err := os.Rename(destinationDir, backupDir); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return err
+		}
+	}
+
+	if err := os.Rename(stagingDir, destinationDir); err != nil {
+		if _, statErr := os.Stat(backupDir); statErr == nil {
+			_ = os.Rename(backupDir, destinationDir)
+		}
+		_ = os.RemoveAll(stagingDir)
+		return err
+	}
+
+	if _, err := os.Stat(backupDir); err == nil {
+		_ = os.RemoveAll(backupDir)
+	}
+
+	return nil
+}
+
+func (d *CSIDriver) restoreNFSDirectoryFromSnapshot(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) error {
+	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+
+	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	if err != nil {
+		return status.Errorf(codes.Internal, "%s", err.Error())
+	}
+
+	defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
+	err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume)
+	if err != nil {
+		log.Errorf("failed to ensure backing share is mounted, %v", err)
+		return err
+	}
+
+	mountedBackingSharePath := common.ShareStagingDir + backingShare.ExportPath
+	destinationDir := filepath.Join(mountedBackingSharePath, hsVolume.Name)
+
+	if len(hsVolume.SourceSnapFilePaths) > 0 {
+		err = common.MakeEmptyRawFolder(destinationDir)
+		if err != nil {
+			log.Errorf("failed to create restored NFS directory %s, %v", destinationDir, err)
+			return err
+		}
+
+		sourceVolumePath := path.Clean(hsVolume.SourceSnapVolumePath)
+		for _, fileSnapshotPath := range hsVolume.SourceSnapFilePaths {
+			sourceFilePath, relativeFilePath, err := getSourcePathFromFileSnapshot(sourceVolumePath, fileSnapshotPath)
+			if err != nil {
+				return status.Errorf(codes.Internal, "failed to parse file snapshot path %s: %v", fileSnapshotPath, err)
+			}
+
+			destinationFilePath := path.Join(common.SharePathPrefix, backingShareName, hsVolume.Name, relativeFilePath)
+			err = d.hsclient.RestoreFileSnapToDestination(ctx, fileSnapshotPath, destinationFilePath)
+			if err != nil {
+				log.Errorf("failed to restore NFS file snapshot %s to %s, %v", fileSnapshotPath, destinationFilePath, err)
+				return status.Errorf(codes.Internal, "failed to restore NFS file snapshot %s: %v", fileSnapshotPath, err)
+			}
+
+			log.Debugf("restored NFS file snapshot source=%s relative=%s destination=%s", sourceFilePath, relativeFilePath, destinationFilePath)
+		}
+
+		return nil
+	}
+
+	sourceDirName := path.Base(hsVolume.SourceSnapVolumePath)
+	if sourceDirName == "." || sourceDirName == "/" || sourceDirName == "" {
+		return status.Errorf(codes.InvalidArgument, "invalid source snapshot volume path %q", hsVolume.SourceSnapVolumePath)
+	}
+
+	sourceSnapshotDir := path.Join(common.SharePathPrefix, backingShareName, ".snapshot", hsVolume.SourceSnapPath, sourceDirName)
+	destinationPath := path.Join(common.SharePathPrefix, backingShareName, hsVolume.Name)
+	err = d.hsclient.RestoreFileSnapToDestination(ctx, sourceSnapshotDir, destinationPath)
+	if err != nil {
+		log.Errorf("failed to clone NFS directory snapshot %s to %s, %v", sourceSnapshotDir, destinationPath, err)
+		return status.Errorf(codes.Internal, "failed to clone NFS directory snapshot: %v", err)
+	}
+
+	return nil
+}
+
+func getSourcePathFromFileSnapshot(sourceVolumePath, fileSnapshotPath string) (string, string, error) {
+	const fileSnapshotMarker = "/.fsnapshot/"
+
+	cleanSourceVolumePath := path.Clean(sourceVolumePath)
+	splitSnapshotPath := strings.SplitN(fileSnapshotPath, fileSnapshotMarker, 2)
+	if len(splitSnapshotPath) != 2 {
+		return "", "", fmt.Errorf("snapshot path does not contain %s", fileSnapshotMarker)
+	}
+
+	sourceFilePath := path.Clean(splitSnapshotPath[0])
+	if sourceFilePath == cleanSourceVolumePath {
+		snapshotRelativePath := path.Dir(splitSnapshotPath[1])
+		if snapshotRelativePath == "." || snapshotRelativePath == "/" || snapshotRelativePath == "" || strings.HasPrefix(snapshotRelativePath, "../") {
+			return "", "", fmt.Errorf("snapshot path %s does not contain a relative file path under source volume path %s", fileSnapshotPath, cleanSourceVolumePath)
+		}
+		return path.Join(cleanSourceVolumePath, snapshotRelativePath), snapshotRelativePath, nil
+	}
+	if !strings.HasPrefix(sourceFilePath, cleanSourceVolumePath+"/") {
+		return "", "", fmt.Errorf("snapshot source file path %s is not under source volume path %s", sourceFilePath, cleanSourceVolumePath)
+	}
+
+	relativeFilePath := strings.TrimPrefix(sourceFilePath, cleanSourceVolumePath+"/")
+	if relativeFilePath == "" || relativeFilePath == "." || strings.HasPrefix(relativeFilePath, "../") {
+		return "", "", fmt.Errorf("snapshot path %s does not contain a relative file path under source volume path %s", fileSnapshotPath, cleanSourceVolumePath)
+	}
+
+	return sourceFilePath, relativeFilePath, nil
+}
+
 func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
 	ctx, span := tracer.Start(ctx, "ensureShareBackedVolumeExists", trace.WithAttributes(
 		attribute.String("volume.name", hsVolume.Name),
@@ -307,7 +506,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 			return status.Error(codes.NotFound, common.SourceSnapshotNotFound)
 		}
 
-		err = d.hsclient.CreateShareFromSnapshot(
+		restoredPath, err := d.hsclient.CreateShareFromSnapshot(
 			ctx,
 			hsVolume.Name,
 			hsVolume.Path,
@@ -316,12 +515,15 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 			hsVolume.ExportOptions,
 			hsVolume.DeleteDelay,
 			hsVolume.Comment,
+			hsVolume.SourceSnapShareName,
+			sourceShare.ExportPath,
 			hsVolume.SourceSnapPath,
 		)
 
 		if err != nil {
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
+		hsVolume.Path = restoredPath
 	} else {
 		// Share is not there, try creating a new share
 		err = d.hsclient.CreateShare(
@@ -675,10 +877,23 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		return nil, status.Errorf(codes.InvalidArgument, common.ConflictingCapabilities)
 	} else if blockRequested {
 		volumeMode = "Block"
-		volumeName = fmt.Sprintf(vParams.VolumeNameFormat, req.Name)
+		volumeName, err = formatCreateVolumeName(req.Name, vParams.VolumeNameFormat, snap != nil)
+		if err != nil {
+			return nil, err
+		}
 	} else if filesystemRequested {
 		volumeMode = "Filesystem"
-		volumeName = fmt.Sprintf(vParams.VolumeNameFormat, req.Name)
+		if snap != nil && fsType == "nfs" && vParams.MountBackingShareName == "" && req.Parameters["csi.storage.k8s.io/pvc/name"] != "" {
+			volumeName, err = formatCreateVolumeName(req.Parameters["csi.storage.k8s.io/pvc/name"], common.DefaultVolumeNameFormat, true)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			volumeName, err = formatCreateVolumeName(req.Name, vParams.VolumeNameFormat, snap != nil)
+			if err != nil {
+				return nil, err
+			}
+		}
 	} else {
 		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.Name)
 	}
@@ -814,11 +1029,23 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		}
 		hsVolume.SourceSnapPath = sourceSnapName
 
+		sourceSnapVolumePath, err := GetSnapshotSourceVolumeId(snap.GetSnapshotId())
+		if err != nil {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		hsVolume.SourceSnapVolumePath = sourceSnapVolumePath
+
 		sourceSnapShareName, err := GetShareNameFromSnapshotId(snap.GetSnapshotId())
 		if err != nil {
 			return nil, status.Error(codes.NotFound, err.Error())
 		}
 		hsVolume.SourceSnapShareName = sourceSnapShareName
+
+		sourceSnapFilePaths, err := GetFileSnapshotPathsFromSnapshotId(snap.GetSnapshotId())
+		if err != nil {
+			return nil, status.Error(codes.NotFound, err.Error())
+		}
+		hsVolume.SourceSnapFilePaths = sourceSnapFilePaths
 
 		log.Info("using snapshot as volume source")
 	}
@@ -828,7 +1055,11 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
 		// This function is called when user want new nfs share inside one base share
 		log.Debugf("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
-		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		if hsVolume.SourceSnapPath != "" {
+			err = d.restoreNFSDirectoryFromSnapshot(ctx, backingShareName, hsVolume)
+		} else {
+			err = d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		}
 		if err != nil {
 			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
 			return nil, status.Errorf(codes.Internal, "failed to ensure base NFS share (%s): %v", backingShareName, err)
@@ -856,6 +1087,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		if err != nil {
 			return nil, err
 		}
+		volID = hsVolume.Path
 	}
 
 	// Create Response
@@ -1469,8 +1701,36 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		var hsSnapName string
 		if !fileBackedSource {
 			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
+			snapID = GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID)
 		} else {
-			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
+			hsSnapName, err = d.hsclient.SnapshotFile(ctx, sourceVolumeID)
+			if err == nil {
+				snapID = GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID)
+			} else {
+				fileSnapshotErr := err
+				backingShareName := GetBackingShareNameFromPath(sourceVolumeID)
+				if backingShareName != "" && backingShareName != volumeName {
+					backingShare, shareErr := d.hsclient.GetShare(ctx, backingShareName)
+					if shareErr != nil {
+						return nil, status.Errorf(codes.Internal, "%s", shareErr.Error())
+					}
+					if backingShare != nil {
+						log.WithFields(log.Fields{
+							"sourceVolumeID":   sourceVolumeID,
+							"backingShareName": backingShareName,
+							"fileSnapshotErr":  fileSnapshotErr,
+						}).Info("falling back to directory-scoped file snapshots for directory-backed NFS volume")
+						hsSnapNames, snapshotFilesErr := d.hsclient.SnapshotFiles(ctx, path.Join(sourceVolumeID, "*"))
+						err = snapshotFilesErr
+						if err == nil {
+							snapID, err = GetFileSnapshotsIDFromSnapshotNames(hsSnapNames, sourceVolumeID)
+						}
+					}
+				}
+				if snapID == "" && err == nil {
+					err = fileSnapshotErr
+				}
+			}
 		}
 		// Always unfreeze, even if snapshot failed — otherwise the app pod
 		// stays blocked on writes indefinitely. Use a context detached from the
@@ -1485,7 +1745,6 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
 
-		snapID := GetSnapshotIDFromSnapshotName(hsSnapName, req.GetSourceVolumeId())
 		now := time.Now()
 		timeTaken := &timestamp.Timestamp{
 			Seconds: now.Unix(),
@@ -1493,7 +1752,7 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		}
 		snapshotResponse := &csi.Snapshot{
 			SnapshotId:     snapID,
-			SourceVolumeId: req.GetSourceVolumeId(),
+			SourceVolumeId: sourceVolumeID,
 			CreationTime:   timeTaken,
 			ReadyToUse:     true,
 		}
@@ -1526,7 +1785,7 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		log.Warnf("DeleteSnapshot: malformed snapshot ID %s; treating as success (idempotent)", snapshotId)
 		return &csi.DeleteSnapshotResponse{}, nil
 	}
-	snapshotName, path := splitSnapId[0], splitSnapId[1]
+	snapshotName := splitSnapId[0]
 
 	// If the snapshot does not exist then return an idempotent response.
 

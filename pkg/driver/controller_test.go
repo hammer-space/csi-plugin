@@ -1,7 +1,10 @@
 package driver
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
@@ -190,6 +193,77 @@ func TestParseParams(t *testing.T) {
 		t.FailNow()
 	}
 
+}
+
+func TestFormatCreateVolumeNameAddsRestoreSuffixForSnapshotSource(t *testing.T) {
+	tests := []struct {
+		name             string
+		requestName      string
+		volumeNameFormat string
+		fromSnapshot     bool
+		want             string
+		wantLen          int
+		wantErr          bool
+	}{
+		{
+			name:             "normal create keeps existing format",
+			requestName:      "pvc-123",
+			volumeNameFormat: "csi-file-%s",
+			want:             "csi-file-pvc-123",
+		},
+		{
+			name:             "snapshot restore adds suffix before format",
+			requestName:      "pvc-123",
+			volumeNameFormat: "csi-file-%s",
+			fromSnapshot:     true,
+			want:             "csi-file-pvc-123-restore",
+		},
+		{
+			name:             "snapshot restore keeps existing restore name",
+			requestName:      "restore",
+			volumeNameFormat: "%s",
+			fromSnapshot:     true,
+			want:             "restore",
+		},
+		{
+			name:             "snapshot restore truncates to hammerspace name limit",
+			requestName:      strings.Repeat("a", 100),
+			volumeNameFormat: "csi-file-%s",
+			fromSnapshot:     true,
+			wantLen:          MaxHammerspaceVolumeNameLength,
+		},
+		{
+			name:             "snapshot restore fails if format leaves no room",
+			requestName:      "pvc-123",
+			volumeNameFormat: strings.Repeat("a", MaxHammerspaceVolumeNameLength) + "%s",
+			fromSnapshot:     true,
+			wantErr:          true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := formatCreateVolumeName(tt.requestName, tt.volumeNameFormat, tt.fromSnapshot)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tt.want != "" && got != tt.want {
+				t.Fatalf("expected %q, got %q", tt.want, got)
+			}
+			if tt.wantLen != 0 && len(got) != tt.wantLen {
+				t.Fatalf("expected length %d, got %d for %q", tt.wantLen, len(got), got)
+			}
+			if tt.fromSnapshot && !strings.Contains(got, "restore") {
+				t.Fatalf("expected restore marker in %q", got)
+			}
+		})
+	}
 }
 
 func TestGetMountFlagsFromCapabilities(t *testing.T) {

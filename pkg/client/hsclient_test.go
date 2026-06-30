@@ -377,3 +377,106 @@ func TestCreateShare(t *testing.T) {
 		t.Fatal("Expected error")
 	}
 }
+
+func TestCreateShareFromSnapshotClonesInsideSourceShare(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	Mux.HandleFunc(BasePath+"/shares", func(w http.ResponseWriter, r *http.Request) {
+		t.Fatalf("restore inside source share must not create a new Hammerspace share")
+	})
+
+	Mux.HandleFunc(BasePath+"/share-snapshots/clone-create/source-share", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" {
+			t.Fatalf("expected POST clone-create, got %s", r.Method)
+		}
+		query := r.URL.Query()
+		if got := query.Get("snapshot-name"); got != "snap-1" {
+			t.Fatalf("expected snapshot-name=snap-1, got %q", got)
+		}
+		if got := query.Get("destination-path"); got != "/restore" {
+			t.Fatalf("expected destination-path=/restore, got %q", got)
+		}
+		if got := query.Get("overwrite-destination"); got != "true" {
+			t.Fatalf("expected overwrite-destination=true, got %q", got)
+		}
+		w.Header().Set("Location", "http://fake_location/tasks/clone-share-snapshot")
+		w.WriteHeader(202)
+	})
+
+	Mux.HandleFunc(BasePath+"/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, FakeTaskCompleted)
+	})
+
+	restoredPath, err := hsclient.CreateShareFromSnapshot(
+		context.Background(),
+		"restore",
+		"/restore",
+		-1,
+		[]string{},
+		[]common.ShareExportOptions{{
+			Subnet:            "*",
+			AccessPermissions: "RW",
+			RootSquash:        false,
+		}},
+		0,
+		"restored share",
+		"source-share",
+		"/source-share",
+		"snap-1",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restoredPath != "/source-share/restore" {
+		t.Fatalf("expected restored path /source-share/restore, got %q", restoredPath)
+	}
+}
+
+func TestCloneShareSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	cloneRequests := 0
+
+	Mux.HandleFunc(BasePath+"/share-snapshots/clone-create/source-share", func(w http.ResponseWriter, r *http.Request) {
+		cloneRequests++
+		if r.Method != "POST" {
+			t.Fatalf("expected POST clone-create, got %s", r.Method)
+		}
+		query := r.URL.Query()
+		if got := query.Get("snapshot-name"); got != "snap-1" {
+			t.Fatalf("expected snapshot-name=snap-1, got %q", got)
+		}
+		if got := query.Get("destination-path"); got != "/restore" {
+			t.Fatalf("expected destination-path=/restore, got %q", got)
+		}
+		w.Header().Set("Location", "http://fake_location/tasks/clone-task")
+		w.WriteHeader(202)
+	})
+
+	Mux.HandleFunc(BasePath+"/tasks/clone-task", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			t.Fatalf("expected only GET for failed clone task, got %s", r.Method)
+		}
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, `{
+			"uuid":"clone-task",
+			"name":"share-clone",
+			"status":"FAILED",
+			"statusMessage":"failed to rsync (offloaded) /hs/source/.snapshot/snap-1/ to /hs/source/restore"
+		}`)
+	})
+
+	err := hsclient.CloneShareSnapshot(context.Background(), "source-share", "snap-1", "/restore", true)
+	if err == nil {
+		t.Fatal("expected clone failure")
+	}
+	if err.Error() != "failed to clone share snapshot" {
+		t.Fatalf("expected clone failure error, got %v", err)
+	}
+	if cloneRequests != 1 {
+		t.Fatalf("expected one clone request, got %d", cloneRequests)
+	}
+}

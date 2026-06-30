@@ -37,17 +37,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.
 - Treated all known terminal task states consistently so failed, halted, cancelled, validation-failed, and resumed tasks stop polling and report failure.
+- Fixed snapshot and restore handling for directory-backed NFS volumes that use `mountBackingShareName`; snapshots now target the PVC directory contents instead of the whole backing share and restore/delete paths understand file-snapshot IDs.
+- Restored volumes created from snapshot data sources now include a `restore` marker in the generated Hammerspace volume name while keeping the final name within the 80-character share-name limit.
+- Fixed Kubernetes 1.29 snapshotter RBAC so the CSI provisioner can update `volumesnapshotcontents/status`.
 - Avoided passing StorageClass NFS mount options to local filesystem mounts for file-backed volumes; those options are now only used for the backing NFS share mount.
 - Prevented duplicate or conflicting NFS version mount flags by treating both `nfsvers=` and `vers=` as version options, removing them before fallback retries, and passing NFSv3 fallback options as separate mount arguments.
 - Honored the StorageClass `fqdn` parameter in deployments without data-portals (e.g. Anvil-only/no-DSX). Previously the resolved FQDN/floating IP was discarded because the mount loops only ran per data-portal, so an empty `data-portals` list caused provisioning to fail with `could not mount to any data-portals`.
 
 ### Changed
 - Removed the driver-specific `clientMountOptions` StorageClass parameter; CSI node mounts now rely on Kubernetes `mountOptions` / CSI `mountFlags`.
+- Snapshot clone tasks now fail immediately when the Hammerspace task fails instead of attempting to resume failed `share-clone` tasks.
 - Added `dnsPolicy: ClusterFirstWithHostNet` to the Kubernetes 1.29 plugin manifest for host-networked CSI pods.
 
 ### Documentation
 - Clarified supported CSI compatibility modes (`CSI_MAJOR_VERSION=1` and `CSI_MAJOR_VERSION=0`).
 - Documented Kubernetes compatibility ranges and the legacy CSI v0.3 deployment path.
+- Added Kubernetes snapshot/restore examples and self-contained E2E scripts for file-backed, NFS share-backed, NFS `mountBackingShareName`, and block volume scenarios.
 
 ## [1.2.8]
 ### Added
