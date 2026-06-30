@@ -18,7 +18,9 @@ package driver
 
 import (
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -205,19 +207,63 @@ func isFileBackedVolumeID(volumeID string) bool {
 }
 
 func GetSnapshotNameFromSnapshotId(snapshotId string) (string, error) {
-	tokens := strings.SplitN(snapshotId, "|", 2)
-	if len(tokens) != 2 {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
 		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
 	}
 	return tokens[0], nil
 }
 
-func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
-	tokens := strings.SplitN(snapshotId, "|", 2)
-	if len(tokens) != 2 {
+func GetSnapshotSourceVolumeId(snapshotId string) (string, error) {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
 		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
 	}
+	return tokens[1], nil
+}
+
+func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
+		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
+	}
+	for _, token := range tokens[2:] {
+		if strings.HasPrefix(token, "share:") {
+			return strings.TrimPrefix(token, "share:"), nil
+		}
+		if strings.HasPrefix(token, "files:") {
+			return "", nil
+		}
+	}
 	return path.Base(tokens[1]), nil
+}
+
+func GetFileSnapshotPathsFromSnapshotId(snapshotId string) ([]string, error) {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
+		return nil, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
+	}
+	for _, token := range tokens[2:] {
+		if strings.HasPrefix(token, "files:") {
+			encoded := strings.TrimPrefix(token, "files:")
+			payload, err := base64.RawURLEncoding.DecodeString(encoded)
+			if err != nil {
+				return nil, err
+			}
+			var fileSnapshotPaths []string
+			err = json.Unmarshal(payload, &fileSnapshotPaths)
+			return fileSnapshotPaths, err
+		}
+	}
+	return nil, nil
+}
+
+func GetBackingShareNameFromPath(volumePath string) string {
+	trimmed := strings.Trim(path.Clean(volumePath), "/")
+	if trimmed == "" || trimmed == "." {
+		return ""
+	}
+	return strings.Split(trimmed, "/")[0]
 }
 
 // generate snapshot ID to be stored by the CO

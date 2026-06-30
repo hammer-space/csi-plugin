@@ -46,6 +46,8 @@ type HSVolume struct {
 	Path                   string
 	VolumeMode             string
 	SourceSnapPath         string
+	SourceSnapVolumePath   string
+	SourceSnapFilePaths    []string
 	FSType                 string
 	Comment                string
 	SourceSnapShareName    string

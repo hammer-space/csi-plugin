@@ -1,13 +1,13 @@
 # File-backed volume snapshot/restore E2E test.
 #
 # Run:
-#   kubectl apply -f test/e2e/kubernetes/file_backed_snapshot_restore.yaml
+#   kubectl apply -f test/e2e/kubernetes/snapshot_restore/file_backed_snapshot_restore.yaml
 #   kubectl -n hs-file-snapshot-e2e wait --for=condition=Complete job/hs-file-snapshot-restore-e2e --timeout=10m
 #   kubectl -n hs-file-snapshot-e2e logs job/hs-file-snapshot-restore-e2e
 #
 # To rerun after a driver change:
 #   kubectl -n hs-file-snapshot-e2e delete job hs-file-snapshot-restore-e2e --ignore-not-found
-#   kubectl apply -f test/e2e/kubernetes/file_backed_snapshot_restore.yaml
+#   kubectl apply -f test/e2e/kubernetes/snapshot_restore/file_backed_snapshot_restore.yaml
 ---
 apiVersion: v1
 kind: Namespace
@@ -91,7 +91,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: e2e
-          image: docker.io/bitnami/kubectl@sha256:b9f4412e53f09d76b0991cdd29c0feff4c1d1e112b307e0ab155e5b050a9f4ec
+          image: docker.io/bitnami/kubectl:latest
           imagePullPolicy: IfNotPresent
           command:
             - /bin/sh
