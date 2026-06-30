@@ -18,8 +18,6 @@ package driver
 
 import (
 	"fmt"
-	"io"
-	"os"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -263,106 +261,6 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 	if err != nil {
 		log.Errorf("failed to create backing folder for volume, %v", err)
 		return err
-	}
-
-	return nil
-}
-
-func copyDirectoryContentsToDestination(sourceDir, destinationDir string) error {
-	stagingDir := destinationDir + ".staging"
-	if err := os.RemoveAll(stagingDir); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(stagingDir, 0o755); err != nil {
-		return err
-	}
-
-	copyErr := filepath.WalkDir(sourceDir, func(sourcePath string, dirEntry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-
-		relativePath, err := filepath.Rel(sourceDir, sourcePath)
-		if err != nil {
-			return err
-		}
-		if relativePath == "." {
-			return nil
-		}
-
-		stagingPath := filepath.Join(stagingDir, relativePath)
-		info, err := dirEntry.Info()
-		if err != nil {
-			return err
-		}
-
-		if dirEntry.IsDir() {
-			return os.MkdirAll(stagingPath, info.Mode())
-		}
-
-		if info.Mode()&os.ModeSymlink != 0 {
-			linkTarget, err := os.Readlink(sourcePath)
-			if err != nil {
-				return err
-			}
-			if _, err := os.Lstat(stagingPath); err == nil {
-				if err := os.Remove(stagingPath); err != nil {
-					return err
-				}
-			}
-			return os.Symlink(linkTarget, stagingPath)
-		}
-
-		if !info.Mode().IsRegular() {
-			return nil
-		}
-
-		if err := os.MkdirAll(filepath.Dir(stagingPath), 0o755); err != nil {
-			return err
-		}
-
-		sourceFile, err := os.Open(sourcePath)
-		if err != nil {
-			return err
-		}
-		defer sourceFile.Close()
-
-		stagingFile, err := os.OpenFile(stagingPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, info.Mode())
-		if err != nil {
-			return err
-		}
-		defer stagingFile.Close()
-
-		_, err = io.Copy(stagingFile, sourceFile)
-		return err
-	})
-	if copyErr != nil {
-		_ = os.RemoveAll(stagingDir)
-		return copyErr
-	}
-
-	backupDir := destinationDir + ".bak"
-	if _, err := os.Stat(destinationDir); err == nil {
-		if err := os.RemoveAll(backupDir); err != nil {
-			_ = os.RemoveAll(stagingDir)
-			return err
-		}
-		if err := os.Rename(destinationDir, backupDir); err != nil {
-			_ = os.RemoveAll(stagingDir)
-			return err
-		}
-	}
-
-	if err := os.Rename(stagingDir, destinationDir); err != nil {
-		if _, statErr := os.Stat(backupDir); statErr == nil {
-			_ = os.Rename(backupDir, destinationDir)
-		}
-		_ = os.RemoveAll(stagingDir)
-		return err
-	}
-
-	if _, err := os.Stat(backupDir); err == nil {
-		_ = os.RemoveAll(backupDir)
 	}
 
 	return nil
