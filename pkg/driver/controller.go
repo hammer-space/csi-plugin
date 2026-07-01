@@ -292,7 +292,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	log.Debugf("Creating empty folder with path %s", targetPath)
 
-	defer common.UnmountFilesystem(targetPath)
+	defer common.UnmountFilesystem(ctx, targetPath)
 
 	log.Debugf("Created empty folder with path %s", targetPath)
 	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
@@ -341,7 +341,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		}
 		// generate unique target path on host for setting file metadata
 		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
-		defer common.UnmountFilesystem(targetPath)
+		defer common.UnmountFilesystem(ctx, targetPath)
 		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
@@ -412,7 +412,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 
 		log.Debugf("ensureDeviceFileExists mounted backing share %s", backingShare.Name)
 
-		err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
+		err = common.MakeEmptyRawFile(ctx, deviceFile, hsVolume.Size)
 		if err != nil {
 			log.Errorf("failed to create backing file for volume, %v", err)
 			return err
@@ -421,7 +421,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		// Add filesystem
 		log.Debugf("ensureDeviceFileExists created empty raw file over backing share %s and path %s", backingShare.Name, deviceFile)
 		if hsVolume.FSType != "" {
-			err = common.FormatDevice(deviceFile, hsVolume.FSType)
+			err = common.FormatDevice(ctx, deviceFile, hsVolume.FSType)
 			if err != nil {
 				log.Errorf("failed to format volume, %v", err)
 				return err
@@ -430,8 +430,12 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
-	// Step 4: Use a fresh context to apply metadata
-	metadataCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Step 4: Apply metadata with a fresh deadline, but inherit trace context
+	// from the caller so spans stay attached to the CreateVolume trace.
+	// context.WithoutCancel detaches from the gRPC handler's cancellation
+	// (which would otherwise kill the long poll loop) while preserving the
+	// OTel span context attached via tracer.Start above.
+	metadataCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 	defer cancel()
 
 	err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
@@ -444,20 +448,35 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 
 // ensure from hs system /share/file exist to apply objective and metadata
 func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
+	ctx, span := tracer.Start(ctx, "applyObjectiveAndMetadata", trace.WithAttributes(
+		attribute.String("backing_share", backingShare.Name),
+		attribute.String("path", hsVolume.Path),
+	))
+	defer span.End()
+
+	// Poll Anvil's metadata API until the backing file we just created over
+	// NFS becomes visible to the management plane. The loop is the dominant
+	// cost of CreateVolume in our traces (often tens of seconds), so it gets
+	// its own span and per-attempt count.
+	pollCtx, pollSpan := tracer.Start(ctx, "applyObjectiveAndMetadata.waitForFileVisible", trace.WithAttributes(
+		attribute.String("path", hsVolume.Path),
+	))
 	b := &backoff.Backoff{
-		Max:    5 * time.Second,
+		Max:    1 * time.Second,
 		Factor: 1.5,
 		Jitter: true,
 	}
 	startTime := time.Now()
 	var backingFileExists bool
 	var err error
+	attempts := 0
 	for time.Since(startTime) < (10 * time.Minute) {
 		dur := b.Duration()
 		time.Sleep(dur)
+		attempts++
 		// Wait for file to exist on metadata server
 		log.Debugf("Checking existance of file %s", hsVolume.Path)
-		backingFileExists, err = d.hsclient.DoesFileExist(ctx, hsVolume.Path)
+		backingFileExists, err = d.hsclient.DoesFileExist(pollCtx, hsVolume.Path)
 		if err != nil {
 			log.Warnf("Error checking file existence: %v", err)
 			time.Sleep(time.Second)
@@ -469,6 +488,11 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 		}
 		log.Warnf("File does not exist yet: %s", hsVolume.Path)
 	}
+	pollSpan.SetAttributes(
+		attribute.Int("attempts", attempts),
+		attribute.Bool("file_visible", backingFileExists),
+	)
+	pollSpan.End()
 
 	if !backingFileExists {
 		log.Errorf("backing file failed to show up in API after 10 minutes")

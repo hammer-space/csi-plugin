@@ -33,10 +33,16 @@ import (
 	log "github.com/sirupsen/logrus"
 	unix "golang.org/x/sys/unix"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/mount-utils"
 )
+
+var commonTracer = otel.Tracer("hammerspace-csi/common")
 
 const LOOP_CTL_GET_FREE = 0x4C82
 
@@ -205,11 +211,17 @@ func GetDeviceMinorNumber(device string) (uint32, error) {
 	return unix.Minor(dev), nil
 }
 
-func MakeEmptyRawFile(pathname string, size int64) error {
+func MakeEmptyRawFile(ctx context.Context, pathname string, size int64) error {
+	_, span := commonTracer.Start(ctx, "MakeEmptyRawFile", trace.WithAttributes(
+		attribute.String("path", pathname),
+		attribute.Int64("size", size),
+	))
+	defer span.End()
 	log.Infof("creating file '%s'", pathname)
 	sizeStr := strconv.FormatInt(size, 10)
 	output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
 	if err != nil {
+		span.RecordError(err)
 		log.Errorf("%s, %v", output, err.Error())
 		return err
 	}
@@ -239,7 +251,12 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 	return nil
 }
 
-func FormatDevice(device, fsType string) error {
+func FormatDevice(ctx context.Context, device, fsType string) error {
+	_, span := commonTracer.Start(ctx, "FormatDevice", trace.WithAttributes(
+		attribute.String("device", device),
+		attribute.String("fsType", fsType),
+	))
+	defer span.End()
 	log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
 	args := []string{device}
 	if fsType == "xfs" {
@@ -247,6 +264,7 @@ func FormatDevice(device, fsType string) error {
 	}
 	output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
 	if err != nil {
+		span.RecordError(err)
 		log.Errorf("Error executing mkfs command. %v", err)
 		if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
 			log.Warningf("Device %s is already mounted", device)
@@ -324,7 +342,13 @@ func DeleteFile(pathname string) error {
 	return nil
 }
 
-func MountShare(sourcePath, targetPath string, mountFlags []string) error {
+func MountShare(ctx context.Context, sourcePath, targetPath string, mountFlags []string) error {
+	_, span := commonTracer.Start(ctx, "MountShare", trace.WithAttributes(
+		attribute.String("source", sourcePath),
+		attribute.String("target", targetPath),
+		attribute.StringSlice("flags", mountFlags),
+	))
+	defer span.End()
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
 	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
@@ -550,7 +574,11 @@ func IsShareMounted(targetPath string) bool {
 	return isMounted
 }
 
-func UnmountFilesystem(targetPath string) error {
+func UnmountFilesystem(ctx context.Context, targetPath string) error {
+	_, span := commonTracer.Start(ctx, "UnmountFilesystem", trace.WithAttributes(
+		attribute.String("target", targetPath),
+	))
+	defer span.End()
 	log.Infof("UnmountFilesystem is called with targetPath %s", targetPath)
 	mounter := mount.New("")
 

@@ -28,8 +28,11 @@ import (
 	"github.com/hammer-space/csi-plugin/pkg/driver"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 func init() {
@@ -50,14 +53,25 @@ func init() {
 
 // Setup tracing
 func initTracer() (*sdktrace.TracerProvider, error) {
-	// Create a new tracer provider with a short ID generator
-	// This will generate shorter span IDs for better readability in logs
-	// Note: This is a custom ID generator that generates shorter IDs for spans
-	// It is not a standard OpenTelemetry ID generator, but it is used here for demonstration
-	log.Info("Creating TracerProvider with full ID generator")
-	tp := sdktrace.NewTracerProvider()
+	log.Info("Creating TracerProvider with stdouttrace exporter")
+	exp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+	if err != nil {
+		return nil, err
+	}
+	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName("hammerspace-csi"),
+		semconv.ServiceVersion(common.Version),
+	))
+	if err != nil {
+		return nil, err
+	}
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(exp),
+		sdktrace.WithResource(res),
+	)
 	otel.SetTracerProvider(tp)
-	log.Info("OpenTelemetry TracerProvider set")
+	log.Info("OpenTelemetry TracerProvider set with stdouttrace exporter")
 	otel.SetTextMapPropagator(propagation.TraceContext{})
 	return tp, nil
 }

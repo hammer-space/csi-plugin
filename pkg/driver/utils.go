@@ -30,6 +30,8 @@ import (
 	"context"
 
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
@@ -234,6 +236,10 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 }
 
 func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShareName string) (bool, error) {
+	ctx, span := tracer.Start(ctx, "UnmountBackingShareIfUnused", trace.WithAttributes(
+		attribute.String("backing_share", backingShareName),
+	))
+	defer span.End()
 	log.Infof("UnmountBackingShareIfUnused is called with backing share name %s", backingShareName)
 	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil || backingShare == nil {
@@ -263,7 +269,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 	}
 
 	log.Infof("unmounting backing share %s", mountPath)
-	err = common.UnmountFilesystem(mountPath)
+	err = common.UnmountFilesystem(ctx, mountPath)
 	if err != nil {
 		log.Errorf("failed to unmount backing share %s", mountPath)
 		return false, err
@@ -370,7 +376,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 				return false
 			}
 		}
-		err = common.MountShare(export, targetPath, mount_options)
+		err = common.MountShare(ctx, export, targetPath, mount_options)
 		if err != nil {
 			log.WithFields(log.Fields{
 				"share":         shareExportPath,
@@ -470,7 +476,7 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 			log.Errorf("Unable to resolve FQDN %s for root share mount. %v", fqdn, resolveErr)
 		} else {
 			log.Debugf("Calling mount via nfs v4.2 using FQDN %s resolved to IP %s to mount (/) on %s", fqdn, fqdnEndpointIP, baseRootDirPath)
-			err = common.MountShare(fqdn+":/", baseRootDirPath, effectiveMountFlags)
+			err = common.MountShare(ctx, fqdn+":/", baseRootDirPath, effectiveMountFlags)
 			if err == nil {
 				log.Debugf("Successfully mounted root share using FQDN %s resolved to IP %s", fqdn, fqdnEndpointIP)
 				return nil
@@ -485,7 +491,7 @@ func (d *CSIDriver) EnsureRootExportMounted(ctx context.Context, baseRootDirPath
 	}
 	// Step 3 - Use export ip and path to mount root with 4.2 only.
 	log.Debugf("Calling mount via nfs v4.2 using anvil IP %s to mount (/) on %s", anvilEndpointIP, baseRootDirPath)
-	err = common.MountShare(anvilEndpointIP+":/", baseRootDirPath, effectiveMountFlags)
+	err = common.MountShare(ctx, anvilEndpointIP+":/", baseRootDirPath, effectiveMountFlags)
 	if err != nil {
 		log.Errorf("Unable to mount root share via 4.2 using anvil IP. %v", err)
 

@@ -40,7 +40,7 @@ func (d *CSIDriver) publishShareBackedVolume(ctx context.Context, volumeId, targ
 		// Clear old mount because now this will come up with bind mount.
 		// This meant the the publish was not from bind mount, so remove old share mount to clear old direct nfs mount and do bind mount from here.
 		log.Debugf("Strating unmouting for target path %s, due to old style mount from v1.2.7 and earlier", targetPath)
-		if err := common.UnmountFilesystem(targetPath); err != nil {
+		if err := common.UnmountFilesystem(ctx, targetPath); err != nil {
 			log.Warnf("Not able to clear the old mount point targetpath (%s) volumeid (%s)", targetPath, volumeId)
 		}
 		log.Infof("[LazyStage] Completed mounting base HS share for volume %s", volumeId)

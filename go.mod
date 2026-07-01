@@ -11,18 +11,20 @@ require (
 	github.com/onsi/ginkgo v1.10.3 // - MIT license
 	github.com/onsi/gomega v1.35.1 //  - MIT license
 	github.com/sirupsen/logrus v1.9.3 // - MIT license
-	go.opentelemetry.io/otel v1.43.0
-	go.opentelemetry.io/otel/sdk v1.43.0
-	go.opentelemetry.io/otel/trace v1.43.0
+	go.opentelemetry.io/otel v1.44.0
+	go.opentelemetry.io/otel/sdk v1.44.0
+	go.opentelemetry.io/otel/trace v1.44.0
 	golang.org/x/net v0.48.0
 	golang.org/x/sync v0.19.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.45.0
 	google.golang.org/grpc v1.79.3
 	google.golang.org/protobuf v1.36.10
 	gopkg.in/yaml.v2 v2.4.0
 	k8s.io/kubernetes v1.33.6
 	k8s.io/mount-utils v0.27.5
 )
+
+require go.opentelemetry.io/otel/exporters/stdout/stdouttrace v1.44.0
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -34,7 +36,7 @@ require (
 	github.com/hpcloud/tail v1.0.0 // indirect
 	github.com/moby/sys/mountinfo v0.7.2 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
-	go.opentelemetry.io/otel/metric v1.43.0 // indirect
+	go.opentelemetry.io/otel/metric v1.44.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
 	gopkg.in/fsnotify.v1 v1.4.7 // indirect
