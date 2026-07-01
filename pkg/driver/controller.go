@@ -629,6 +629,18 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		requestedSize = common.DefaultBackingFileSizeBytes
 	}
 
+	// Reject XFS-formatted file-backed volumes below the xfsprogs minimum.
+	// mkfs.xfs 6.4+ returns exit 0 even when it warns "Filesystem should be
+	// larger than 300MB" and produces a deprecated-format FS that may fail
+	// to mount on future kernels. Fail fast here with a clear error so kubelet
+	// surfaces something actionable, instead of silently creating a broken FS.
+	if fileBacked && fsType == "xfs" && requestedSize < common.MinXfsSizeBytes {
+		const mib = 1024 * 1024
+		return nil, status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
+			common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
+			requestedSize, requestedSize/mib)
+	}
+
 	var backingShareName string
 	if blockRequested {
 		backingShareName = vParams.BlockBackingShareName

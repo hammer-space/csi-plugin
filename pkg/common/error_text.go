@@ -39,6 +39,7 @@ const (
 	MissingMountBackingShareName  = "mountBackingShareName must be provided when creating Filesystem volumes other than 'nfs'"
 	BlockVolumeSizeNotSpecified   = "capacity must be specified for block volumes"
 	ShareNotMounted               = "share is not in mounted state."
+	XfsSizeBelowMinimum           = "fsType=xfs volumes must be at least %d bytes (%d MiB); requested %d bytes (%d MiB). mkfs.xfs 6.4+ marks smaller filesystems as deprecated." // min_bytes, min_mib, req_bytes, req_mib
 
 	InvalidExportOptions             = "export options must consist of 3 values: subnet,access,rootSquash, received '%s'"
 	InvalidRootSquash                = "rootSquash must be a bool. Value received '%s'"
