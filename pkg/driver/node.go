@@ -213,6 +213,11 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 }
 
 func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+	ctx, span := tracer.Start(ctx, "Node/NodeUnstageVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("staging.target", req.GetStagingTargetPath()),
+	))
+	defer span.End()
 	volumeID := req.GetVolumeId()
 	stagingTarget := req.GetStagingTargetPath()
 
@@ -344,6 +349,11 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 }
 
 func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+	ctx, span := tracer.Start(ctx, "Node/NodeUnpublishVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("target.path", req.GetTargetPath()),
+	))
+	defer span.End()
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)

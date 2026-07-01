@@ -11,6 +11,8 @@ import (
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -173,7 +175,7 @@ func (d *CSIDriver) publishShareBackedDirBasedVolume(ctx context.Context, backin
 
 	if err := common.BindMountDevice(sourceMountPoint, targetPath); err != nil {
 		log.Errorf("bind mount failed for %s: %v", targetPath, err)
-		CleanupLoopDevice(targetPath)
+		CleanupLoopDevice(ctx, targetPath)
 		d.UnmountBackingShareIfUnused(ctx, backingShareName)
 		return err
 	}
@@ -250,7 +252,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 		deviceStr, err := AttachLoopDeviceWithRetry(filePath, readOnly)
 		if err != nil {
 			log.Errorf("failed to attach loop device: %v", err)
-			CleanupLoopDevice(deviceStr)
+			CleanupLoopDevice(ctx, deviceStr)
 			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return status.Errorf(codes.Internal, common.LoopDeviceAttachFailed, deviceStr, filePath)
 		}
@@ -258,7 +260,7 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 
 		if err := common.BindMountDevice(deviceStr, targetPath); err != nil {
 			log.Errorf("bind mount failed for %s: %v", deviceStr, err)
-			CleanupLoopDevice(deviceStr)
+			CleanupLoopDevice(ctx, deviceStr)
 			d.UnmountBackingShareIfUnused(ctx, backingShareName)
 			return err
 		}
@@ -279,6 +281,11 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 
 // NodeUnpublishVolume
 func (d *CSIDriver) unpublishFileBackedVolume(ctx context.Context, volumePath, targetPath string) error {
+	ctx, span := tracer.Start(ctx, "unpublishFileBackedVolume", trace.WithAttributes(
+		attribute.String("volume.path", volumePath),
+		attribute.String("target.path", targetPath),
+	))
+	defer span.End()
 
 	//determine backing share
 	backingShareName := filepath.Dir(volumePath)

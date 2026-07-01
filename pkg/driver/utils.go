@@ -155,7 +155,11 @@ func AttachLoopDeviceWithRetry(filePath string, readOnly bool) (string, error) {
 }
 
 // CleanupLoopDevice detaches a loop device if it exists
-func CleanupLoopDevice(dev string) {
+func CleanupLoopDevice(ctx context.Context, dev string) {
+	_, span := tracer.Start(ctx, "CleanupLoopDevice", trace.WithAttributes(
+		attribute.String("device", dev),
+	))
+	defer span.End()
 	if _, err := os.Stat(dev); os.IsNotExist(err) {
 		log.Warnf("Loop device %s does not exist, skipping cleanup", dev)
 		return

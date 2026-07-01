@@ -809,6 +809,10 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 }
 
 func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string) error {
+	ctx, span := tracer.Start(ctx, "deleteFileBackedVolume", trace.WithAttributes(
+		attribute.String("file.path", filepath),
+	))
+	defer span.End()
 	var exists bool
 	if exists, _ = d.hsclient.DoesFileExist(ctx, filepath); exists {
 		log.Debugf("found file-backed volume to delete, %s", filepath)
