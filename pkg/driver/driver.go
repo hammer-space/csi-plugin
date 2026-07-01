@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"runtime/debug"
 	"strconv"
 	"sync"
 	"time"
@@ -35,8 +34,10 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	client "github.com/hammer-space/csi-plugin/pkg/client"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
+	"google.golang.org/grpc/status"
 )
 
 type CSIDriver struct {
@@ -110,8 +111,7 @@ func (c *CSIDriver) acquireVolumeLock(ctx context.Context, volID string) (func()
 
 	if err := lk.lock(lctx); err != nil {
 		log.WithError(err).Errorf("Error acquiring volume lock for %s", volID)
-		debug.PrintStack()
-		os.Exit(1)
+		return nil, status.Errorf(codes.Aborted, "could not acquire volume lock for %s: %v", volID, err)
 	}
 	return func() { lk.unlock() }, nil
 }
@@ -131,8 +131,7 @@ func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (fun
 
 	if err := lk.lock(lctx); err != nil {
 		log.WithError(err).Errorf("Error acquiring snapshot lock for %s", snapID)
-		debug.PrintStack()
-		os.Exit(1)
+		return nil, status.Errorf(codes.Aborted, "could not acquire snapshot lock for %s: %v", snapID, err)
 	}
 	return func() { lk.unlock() }, nil
 }
