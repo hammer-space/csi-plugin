@@ -629,16 +629,27 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		requestedSize = common.DefaultBackingFileSizeBytes
 	}
 
-	// Reject XFS-formatted file-backed volumes below the xfsprogs minimum.
-	// mkfs.xfs 6.4+ returns exit 0 even when it warns "Filesystem should be
-	// larger than 300MB" and produces a deprecated-format FS that may fail
-	// to mount on future kernels. Fail fast here with a clear error so kubelet
-	// surfaces something actionable, instead of silently creating a broken FS.
-	if fileBacked && fsType == "xfs" && requestedSize < common.MinXfsSizeBytes {
+	// Reject file-backed volumes below the per-fsType minimum. See the
+	// constants in pkg/common/config.go for the reasoning behind each floor
+	// (xfsprogs 6.4+ deprecation warning for XFS; usable-space threshold
+	// for ext4). Fail fast here with codes.InvalidArgument so kubelet
+	// surfaces the reason, instead of silently formatting a broken FS.
+	if fileBacked {
 		const mib = 1024 * 1024
-		return nil, status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
-			common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
-			requestedSize, requestedSize/mib)
+		switch fsType {
+		case "xfs":
+			if requestedSize < common.MinXfsSizeBytes {
+				return nil, status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
+					common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
+					requestedSize, requestedSize/mib)
+			}
+		case "ext4":
+			if requestedSize < common.MinExt4SizeBytes {
+				return nil, status.Errorf(codes.InvalidArgument, common.Ext4SizeBelowMinimum,
+					common.MinExt4SizeBytes, common.MinExt4SizeBytes/mib,
+					requestedSize, requestedSize/mib)
+			}
+		}
 	}
 
 	var backingShareName string
