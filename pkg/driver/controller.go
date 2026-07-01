@@ -541,13 +541,13 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *
 	return err
 }
 
-func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (_ *csi.CreateVolumeResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/CreateVolume", trace.WithAttributes(
 		attribute.String("volume_name", req.Name),
 	))
 	defer span.End()
-	defer common.MeasureOp(ctx, "Controller/CreateVolume")(nil)
+	defer common.MeasureOp(ctx, "Controller/CreateVolume")(&err)
 
 	startTime := time.Now()
 	// Validate Parameters
@@ -886,13 +886,13 @@ func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.S
 	return nil
 }
 
-func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (_ *csi.DeleteVolumeResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/DeleteVolume", trace.WithAttributes(
 		attribute.String("volume.id", req.GetVolumeId()),
 	))
 	defer span.End()
-	defer common.MeasureOp(ctx, "Controller/DeleteVolume")(nil)
+	defer common.MeasureOp(ctx, "Controller/DeleteVolume")(&err)
 
 	volumeId := req.GetVolumeId()
 	log.Infof("Delete volume request for volume id, %s", volumeId)
@@ -1291,14 +1291,14 @@ func (d *CSIDriver) ControllerGetCapabilities(ctx context.Context, req *csi.Cont
 	}, nil
 }
 
-func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (_ *csi.CreateSnapshotResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/CreateSnapshot", trace.WithAttributes(
 		attribute.String("snapshot.name", req.GetName()),
 		attribute.String("source.volume.id", req.GetSourceVolumeId()),
 	))
 	defer span.End()
-	defer common.MeasureOp(ctx, "Controller/CreateSnapshot")(nil)
+	defer common.MeasureOp(ctx, "Controller/CreateSnapshot")(&err)
 
 	// Check arguments
 	log.WithFields(log.Fields{

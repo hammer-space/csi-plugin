@@ -75,7 +75,7 @@ func initOpMetrics() {
 //	defer common.MeasureOp(ctx, "FormatDevice", attribute.String("fsType", fsType))(nil)
 //
 // Metrics are labeled by `operation` plus any supplied attributes.
-func MeasureOp(ctx context.Context, operation string, attrs ...attribute.KeyValue) func(error) {
+func MeasureOp(ctx context.Context, operation string, attrs ...attribute.KeyValue) func(*error) {
 	opMetricsOnce.Do(initOpMetrics)
 	start := time.Now()
 	labels := make([]attribute.KeyValue, 0, len(attrs)+1)
@@ -83,10 +83,10 @@ func MeasureOp(ctx context.Context, operation string, attrs ...attribute.KeyValu
 	labels = append(labels, attrs...)
 	opt := metric.WithAttributes(labels...)
 	opInflight.Add(ctx, 1, opt)
-	return func(err error) {
+	return func(errp *error) {
 		opInflight.Add(ctx, -1, opt)
 		opDuration.Record(ctx, time.Since(start).Seconds(), opt)
-		if err != nil {
+		if errp != nil && *errp != nil {
 			opErrors.Add(ctx, 1, opt)
 		}
 	}
