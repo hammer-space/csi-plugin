@@ -53,6 +53,12 @@ type CSIDriver struct {
 	snapshotLocks map[string]*keyLock
 	hsclient      *client.HammerspaceClient
 	NodeID        string
+	// freezer runs fsfreeze inside the pod(s) holding a source volume
+	// during CreateSnapshot, so XFS reaches a quiesce point before Anvil
+	// captures the file bytes. Nil when the driver is not running
+	// in-cluster (local dev) — in that case snapshots are still taken but
+	// consistency is not enforced.
+	freezer *Freezer
 }
 
 func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver {
@@ -75,6 +81,7 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		volumeLocks:   make(map[string]*keyLock),
 		snapshotLocks: make(map[string]*keyLock),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
+		freezer:       NewFreezer(),
 	}
 
 }

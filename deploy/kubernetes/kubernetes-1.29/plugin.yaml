@@ -163,7 +163,16 @@ metadata:
 rules:
   - apiGroups: [""]
     resources: ["pods"]
-    verbs: ["list", "watch"]
+    verbs: ["get", "list", "watch"]
+  # pods/exec: needed by the driver's Freezer to run `fsfreeze --freeze`
+  # inside the csi-node DaemonSet pod holding a source volume's mount
+  # during CreateSnapshot. Without this the driver falls back to
+  # snapshotting without quiescing, which for XFS can produce an
+  # inconsistent-log snapshot that log-recovery empties on restore.
+  # See pkg/driver/freezer.go.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
   - apiGroups: [""]
     resources: ["persistentvolumes"]
     verbs: ["get", "patch", "list", "watch", "create", "delete", "update"]

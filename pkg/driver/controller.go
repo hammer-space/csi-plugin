@@ -1368,12 +1368,35 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
+		// Consistency-freeze: for FILE-BACKED source volumes only, locate
+		// every pod that has this volume mounted and issue
+		// `fsfreeze --freeze` on the mount path. This forces XFS/ext4 to
+		// quiesce (log flushed, no in-flight transactions) so Anvil's
+		// byte-level snapshot captures a clean on-disk state. If the pod
+		// is missing fsfreeze, or we can't find pods for this volume, we
+		// log and proceed — matching the best-effort semantics of Velero
+		// pre-hooks. See freezer.go.
+		//
+		// share != nil means the source is a share-backed (NFS) volume,
+		// where Anvil owns the filesystem end-to-end and there's no local
+		// journal to quiesce. FIFREEZE also fails EOPNOTSUPP on NFS
+		// mounts. Skip the freeze in that case.
+		fileBackedSource := share == nil
+		var frozen []FrozenTarget
+		if d.freezer != nil && fileBackedSource {
+			frozen = d.freezer.FreezeForVolumeHandle(ctx, req.GetSourceVolumeId())
+		}
 		// Create the snapshot
 		var hsSnapName string
 		if share != nil {
 			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
 		} else {
 			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
+		}
+		// Always unfreeze, even if snapshot failed — otherwise the app pod
+		// stays blocked on writes indefinitely.
+		if d.freezer != nil && fileBackedSource {
+			d.freezer.Unfreeze(ctx, frozen)
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
