@@ -244,6 +244,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 		attribute.String("backing_share", backingShareName),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "UnmountBackingShareIfUnused")(nil)
 	log.Infof("UnmountBackingShareIfUnused is called with backing share name %s", backingShareName)
 	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil || backingShare == nil {

@@ -163,6 +163,7 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 		attribute.String("staging.target", req.GetStagingTargetPath()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeStageVolume")(nil)
 	volumeID := req.GetVolumeId()
 	volumeContext := req.GetVolumeContext()
 	stagingTarget := req.GetStagingTargetPath()
@@ -218,6 +219,7 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 		attribute.String("staging.target", req.GetStagingTargetPath()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeUnstageVolume")(nil)
 	volumeID := req.GetVolumeId()
 	stagingTarget := req.GetStagingTargetPath()
 
@@ -257,6 +259,7 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		attribute.String("target.path", req.GetTargetPath()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodePublishVolume")(nil)
 
 	volume_id := req.GetVolumeId()
 	targetPath := req.GetTargetPath()
@@ -354,6 +357,7 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 		attribute.String("target.path", req.GetTargetPath()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeUnpublishVolume")(nil)
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)

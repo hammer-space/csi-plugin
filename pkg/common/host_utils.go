@@ -217,6 +217,7 @@ func MakeEmptyRawFile(ctx context.Context, pathname string, size int64) error {
 		attribute.Int64("size", size),
 	))
 	defer span.End()
+	defer MeasureOp(ctx, "MakeEmptyRawFile")(nil)
 	log.Infof("creating file '%s'", pathname)
 	sizeStr := strconv.FormatInt(size, 10)
 	output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
@@ -257,6 +258,7 @@ func FormatDevice(ctx context.Context, device, fsType string) error {
 		attribute.String("fsType", fsType),
 	))
 	defer span.End()
+	defer MeasureOp(ctx, "FormatDevice", attribute.String("fsType", fsType))(nil)
 	log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
 	args := []string{device}
 	if fsType == "xfs" {
@@ -349,6 +351,7 @@ func MountShare(ctx context.Context, sourcePath, targetPath string, mountFlags [
 		attribute.StringSlice("flags", mountFlags),
 	))
 	defer span.End()
+	defer MeasureOp(ctx, "MountShare")(nil)
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
 	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
@@ -579,6 +582,7 @@ func UnmountFilesystem(ctx context.Context, targetPath string) error {
 		attribute.String("target", targetPath),
 	))
 	defer span.End()
+	defer MeasureOp(ctx, "UnmountFilesystem")(nil)
 	log.Infof("UnmountFilesystem is called with targetPath %s", targetPath)
 	mounter := mount.New("")
 

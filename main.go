@@ -16,20 +16,28 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	"github.com/hammer-space/csi-plugin/pkg/driver"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/prometheus"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
 	"go.opentelemetry.io/otel/propagation"
+	metric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
@@ -45,35 +53,90 @@ func init() {
 	log.SetOutput(os.Stdout)
 	log.SetLevel(log.DebugLevel)
 	log.SetReportCaller(false)
-	// Initialize OpenTelemetry Tracer
-	if _, err := initTracer(); err != nil {
-		log.Fatalf("failed to init tracer: %v", err)
+	// Initialize OpenTelemetry (traces + metrics), configured via env vars.
+	if err := initTelemetry(); err != nil {
+		log.Fatalf("failed to init telemetry: %v", err)
 	}
 }
 
-// Setup tracing
-func initTracer() (*sdktrace.TracerProvider, error) {
-	log.Info("Creating TracerProvider with stdouttrace exporter")
-	exp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
-	if err != nil {
-		return nil, err
-	}
+// initTelemetry wires OTel providers according to standard env vars:
+//
+//	OTEL_TRACES_EXPORTER   = none | console | otlp    (default: none)
+//	OTEL_METRICS_EXPORTER  = none | prometheus | otlp (default: none)
+//	OTEL_EXPORTER_OTLP_ENDPOINT = host:4317           (used when *_EXPORTER=otlp)
+//	OTEL_METRICS_PROMETHEUS_LISTEN = :9090            (Prometheus scrape port)
+//
+// With defaults, both providers are no-ops so instrumentation stays cheap.
+func initTelemetry() error {
 	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName("hammerspace-csi"),
 		semconv.ServiceVersion(common.Version),
 	))
 	if err != nil {
-		return nil, err
+		return err
 	}
-	tp := sdktrace.NewTracerProvider(
-		sdktrace.WithBatcher(exp),
-		sdktrace.WithResource(res),
-	)
-	otel.SetTracerProvider(tp)
-	log.Info("OpenTelemetry TracerProvider set with stdouttrace exporter")
+
+	// ---- Traces ----
+	switch os.Getenv("OTEL_TRACES_EXPORTER") {
+	case "console":
+		exp, err := stdouttrace.New(stdouttrace.WithPrettyPrint())
+		if err != nil {
+			return err
+		}
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res)))
+		log.Info("OTel traces: stdouttrace exporter enabled")
+	case "otlp":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		exp, err := otlptracegrpc.New(ctx)
+		if err != nil {
+			return err
+		}
+		otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp), sdktrace.WithResource(res)))
+		log.Infof("OTel traces: otlp exporter -> %s", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	default:
+		log.Info("OTel traces: disabled (OTEL_TRACES_EXPORTER=none)")
+	}
 	otel.SetTextMapPropagator(propagation.TraceContext{})
-	return tp, nil
+
+	// ---- Metrics ----
+	switch os.Getenv("OTEL_METRICS_EXPORTER") {
+	case "prometheus":
+		promExp, err := prometheus.New()
+		if err != nil {
+			return err
+		}
+		otel.SetMeterProvider(metric.NewMeterProvider(metric.WithReader(promExp), metric.WithResource(res)))
+		listen := os.Getenv("OTEL_METRICS_PROMETHEUS_LISTEN")
+		if listen == "" {
+			listen = ":9090"
+		}
+		go func() {
+			mux := http.NewServeMux()
+			mux.Handle("/metrics", promhttp.Handler())
+			mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte("ok")) })
+			log.Infof("OTel metrics: prometheus /metrics listening on %s", listen)
+			if err := http.ListenAndServe(listen, mux); err != nil {
+				log.Errorf("prometheus /metrics listener failed: %v", err)
+			}
+		}()
+	case "otlp":
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		exp, err := otlpmetricgrpc.New(ctx)
+		if err != nil {
+			return err
+		}
+		otel.SetMeterProvider(metric.NewMeterProvider(
+			metric.WithReader(metric.NewPeriodicReader(exp, metric.WithInterval(30*time.Second))),
+			metric.WithResource(res),
+		))
+		log.Infof("OTel metrics: otlp exporter -> %s", os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"))
+	default:
+		log.Info("OTel metrics: disabled (OTEL_METRICS_EXPORTER=none)")
+	}
+	return nil
 }
 
 func validateEnvironmentVars() {

@@ -547,6 +547,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		attribute.String("volume_name", req.Name),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/CreateVolume")(nil)
 
 	startTime := time.Now()
 	// Validate Parameters
@@ -891,6 +892,7 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 		attribute.String("volume.id", req.GetVolumeId()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/DeleteVolume")(nil)
 
 	volumeId := req.GetVolumeId()
 	log.Infof("Delete volume request for volume id, %s", volumeId)
@@ -1296,6 +1298,7 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		attribute.String("source.volume.id", req.GetSourceVolumeId()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/CreateSnapshot")(nil)
 
 	// Check arguments
 	log.WithFields(log.Fields{

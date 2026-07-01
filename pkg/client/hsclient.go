@@ -271,6 +271,10 @@ func (client *HammerspaceClient) doRequest(ctx context.Context, req http.Request
 		attribute.String("http.url", req.URL.String()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "HammerspaceClient.doRequest",
+		attribute.String("http.method", req.Method),
+		attribute.String("http.path", req.URL.Path),
+	)(nil)
 	log.Debugf("sending request %s %s", req.Method, req.URL)
 
 	resp, err := client.httpclient.Do(req.WithContext(ctx))
