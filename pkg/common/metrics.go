@@ -54,6 +54,13 @@ func initOpMetrics() {
 		"hs_csi_operation_duration_seconds",
 		metric.WithDescription("Duration of a CSI operation or internal step, in seconds"),
 		metric.WithUnit("s"),
+		// Sub-second-friendly buckets: the OTel default boundaries (0,5,10,25,...)
+		// are far too coarse for CSI ops, dumping every sub-5s call into one bucket
+		// so histogram_quantile just returns the bucket midpoint. These give real
+		// p50/p95/p99 resolution from milliseconds up to 30s.
+		metric.WithExplicitBucketBoundaries(
+			0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20, 30,
+		),
 	)
 	opErrors, _ = m.Int64Counter(
 		"hs_csi_operation_errors_total",
