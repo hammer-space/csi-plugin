@@ -18,6 +18,7 @@ package common
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"time"
 
@@ -97,4 +98,62 @@ func MeasureOp(ctx context.Context, operation string, attrs ...attribute.KeyValu
 			opErrors.Add(ctx, 1, opt)
 		}
 	}
+}
+
+// Anvil REST request counter. Every call to HammerspaceClient.doRequest records
+// one increment here, labeled by HTTP method, a low-cardinality route template
+// (per-resource IDs collapsed to {id}), and the response status code (0 on a
+// transport error). Unlike the doRequest latency histogram - which is recorded
+// from a deferred closure set up *before* the response is known and therefore
+// can only carry method+path - this is recorded *after* the response, so it
+// carries the real status code. Together they let the dashboard show every Anvil
+// call (GET/POST/PUT/DELETE) split by outcome, including the 404 type-probes that
+// dominate file-backed traffic.
+var (
+	anvilReqOnce sync.Once
+	anvilReqs    metric.Int64Counter
+)
+
+func initAnvilReqMetric() {
+	m := otel.Meter("github.com/hammer-space/csi-plugin")
+	anvilReqs, _ = m.Int64Counter(
+		"hs_csi_anvil_requests_total",
+		metric.WithDescription("Total Anvil REST requests, by HTTP method, route template, and status code"),
+	)
+}
+
+// RecordAnvilRequest counts a single Anvil REST call. Call it exactly once per
+// request, after the response (or transport error, in which case statusCode is
+// 0) is known. Labels map to Prometheus as http_method, http_route,
+// http_status_code.
+func RecordAnvilRequest(ctx context.Context, method, route string, statusCode int) {
+	anvilReqOnce.Do(initAnvilReqMetric)
+	anvilReqs.Add(ctx, 1, metric.WithAttributes(
+		attribute.String("http.method", method),
+		attribute.String("http.route", route),
+		attribute.Int("http.status_code", statusCode),
+	))
+}
+
+// AnvilRoute collapses per-resource identifiers in an Anvil REST URL path down to
+// a stable, low-cardinality template, so metrics don't explode into one series
+// per share/file/task/snapshot. e.g. /mgmt/v1.2/rest/shares/file--pvc-<uuid>
+// becomes /mgmt/v1.2/rest/shares/{id}. Collection "action" segments such as
+// file-snapshots/list are preserved. Query strings never reach here (callers pass
+// req.URL.Path), so /files?path=... is already just /files.
+func AnvilRoute(urlPath string) string {
+	segs := strings.Split(urlPath, "/")
+	for i := 1; i < len(segs); i++ {
+		switch segs[i-1] {
+		case "shares", "tasks", "files", "objectives":
+			if segs[i] != "" {
+				segs[i] = "{id}"
+			}
+		case "file-snapshots":
+			if segs[i] != "" && segs[i] != "list" {
+				segs[i] = "{id}"
+			}
+		}
+	}
+	return strings.Join(segs, "/")
 }

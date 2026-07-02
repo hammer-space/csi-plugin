@@ -266,6 +266,9 @@ func (client *HammerspaceClient) EnsureLogin() error {
 }
 
 func (client *HammerspaceClient) doRequest(ctx context.Context, req http.Request) (int, string, map[string][]string, error) {
+	// Low-cardinality route template (share/file/task IDs collapsed to {id}),
+	// used for both the latency histogram path label and the per-request counter.
+	route := common.AnvilRoute(req.URL.Path)
 	ctx, span := tracer.Start(ctx, "HammerspaceClient.doRequest", trace.WithAttributes(
 		attribute.String("http.method", req.Method),
 		attribute.String("http.url", req.URL.String()),
@@ -273,7 +276,7 @@ func (client *HammerspaceClient) doRequest(ctx context.Context, req http.Request
 	defer span.End()
 	defer common.MeasureOp(ctx, "HammerspaceClient.doRequest",
 		attribute.String("http.method", req.Method),
-		attribute.String("http.path", req.URL.Path),
+		attribute.String("http.path", route),
 	)(nil)
 	log.Debugf("sending request %s %s", req.Method, req.URL)
 
@@ -285,10 +288,16 @@ func (client *HammerspaceClient) doRequest(ctx context.Context, req http.Request
 	}
 	if err != nil {
 		span.RecordError(err)
+		// Count the attempt even on transport failure (status 0), so the
+		// request rate/count reflects every call the driver makes.
+		common.RecordAnvilRequest(ctx, req.Method, route, 0)
 		return 0, "", nil, err
 	}
 	defer resp.Body.Close()
 	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+	// Count every completed request with its real method + route + status, so
+	// non-GET verbs and the 404 type-probes are all visible in metrics.
+	common.RecordAnvilRequest(ctx, req.Method, route, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	bodyString := string(body)
 	responseLog := log.WithFields(log.Fields{
