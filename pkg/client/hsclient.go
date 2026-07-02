@@ -42,7 +42,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
-	"github.com/jpillora/backoff"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -52,8 +51,15 @@ import (
 
 const (
 	BasePath                   = "/mgmt/v1.2/rest"
-	taskPollTimeout            = 3600 * time.Second // Seconds
-	taskPollIntervalCap        = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
+	taskPollTimeout            = 3600 * time.Second // overall deadline for a single task poll
+	// Share-create tasks always take longer than ~2s and almost always finish
+	// under ~15s. So poll at a tight fixed 2s cadence while completion is likely,
+	// then relax to 4s. This keeps detection latency ~2s in the common case; the
+	// previous exponential backoff (capped at 30s) could add up to a full 30s of
+	// detection lag after the task had already completed.
+	taskPollFastInterval = 2 * time.Second  // poll every 2s ...
+	taskPollFastWindow   = 30 * time.Second // ... for the first 30s ...
+	taskPollSlowInterval = 4 * time.Second  // ... then back off to every 4s
 	taskStatusValidationFailed = "VALIDATION_FAILED"
 	taskStatusResumed          = "RESUMED"
 	taskStatusFailed           = "FAILED"
@@ -369,19 +375,20 @@ func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, task
 		span.End()
 	}()
 
-	b := &backoff.Backoff{
-		Max:    taskPollIntervalCap,
-		Factor: 1.5,
-		Jitter: true,
-	}
 	taskUrl, _ := url.Parse(taskLocation)
 	taskId := path.Base(taskUrl.Path)
 	startTime := time.Now()
 
 	var task common.Task
 	for time.Since(startTime) < taskPollTimeout {
-		d := b.Duration()
-		time.Sleep(d)
+		// Sleep-first: share-create tasks never complete in under ~2s, so there
+		// is no point checking immediately. Poll every 2s for the first 30s, then
+		// relax to every 4s for the long tail.
+		interval := taskPollFastInterval
+		if time.Since(startTime) >= taskPollFastWindow {
+			interval = taskPollSlowInterval
+		}
+		time.Sleep(interval)
 		attempts++
 
 		req, err := client.generateRequest(ctx, "GET", "/tasks/"+taskId, "")
