@@ -106,14 +106,17 @@ func (c *CSIDriver) acquireVolumeLock(ctx context.Context, volID string) (func()
 	}
 	c.locksMu.Unlock()
 
+	probe := common.StartLockProbe(ctx, "volume")
 	lctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := lk.lock(lctx); err != nil {
+		probe.Failed()
 		log.WithError(err).Errorf("Error acquiring volume lock for %s", volID)
 		return nil, status.Errorf(codes.Aborted, "could not acquire volume lock for %s: %v", volID, err)
 	}
-	return func() { lk.unlock() }, nil
+	release := probe.Acquired()
+	return func() { lk.unlock(); release() }, nil
 }
 
 func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (func(), error) {
@@ -126,14 +129,17 @@ func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (fun
 	}
 	c.locksMu.Unlock()
 
+	probe := common.StartLockProbe(ctx, "snapshot")
 	lctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
 	if err := lk.lock(lctx); err != nil {
+		probe.Failed()
 		log.WithError(err).Errorf("Error acquiring snapshot lock for %s", snapID)
 		return nil, status.Errorf(codes.Aborted, "could not acquire snapshot lock for %s: %v", snapID, err)
 	}
-	return func() { lk.unlock() }, nil
+	release := probe.Acquired()
+	return func() { lk.unlock(); release() }, nil
 }
 
 func (c *CSIDriver) goServe(started chan<- bool) {

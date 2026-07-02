@@ -157,3 +157,91 @@ func AnvilRoute(urlPath string) string {
 	}
 	return strings.Join(segs, "/")
 }
+
+// Lock metrics. The driver serializes CSI operations behind keyed in-memory
+// locks (per-volume and per-backing-share via volumeLocks, per-snapshot via
+// snapshotLocks). A lock that is acquired but never released - e.g. when the
+// holder is stuck in an uninterruptible mount syscall so its deferred unlock
+// never runs - is otherwise invisible. These instruments make it observable:
+//
+//	hs_csi_locks_held                  (up/down) - locks currently held; a LEAK
+//	                                               shows as a value stuck > 0 with
+//	                                               no further acquire/release.
+//	hs_csi_lock_wait_seconds           (hist)    - time blocked acquiring (contention)
+//	hs_csi_lock_hold_seconds           (hist)    - time a lock was held before release
+//	hs_csi_lock_acquire_failures_total (counter) - acquires that timed out (-> Aborted)
+//
+// all keyed by `lock_type` (volume | snapshot).
+var (
+	lockMetricsOnce sync.Once
+	locksHeld       metric.Int64UpDownCounter
+	lockWait        metric.Float64Histogram
+	lockHold        metric.Float64Histogram
+	lockFails       metric.Int64Counter
+)
+
+func initLockMetrics() {
+	m := otel.Meter("github.com/hammer-space/csi-plugin")
+	locksHeld, _ = m.Int64UpDownCounter(
+		"hs_csi_locks_held",
+		metric.WithDescription("CSI keyed locks currently held (a leak shows as a stuck non-zero value)"),
+	)
+	buckets := metric.WithExplicitBucketBoundaries(0.001, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 30)
+	lockWait, _ = m.Float64Histogram(
+		"hs_csi_lock_wait_seconds",
+		metric.WithDescription("Time spent blocked acquiring a CSI keyed lock"),
+		metric.WithUnit("s"), buckets,
+	)
+	lockHold, _ = m.Float64Histogram(
+		"hs_csi_lock_hold_seconds",
+		metric.WithDescription("Time a CSI keyed lock was held before release"),
+		metric.WithUnit("s"), buckets,
+	)
+	lockFails, _ = m.Int64Counter(
+		"hs_csi_lock_acquire_failures_total",
+		metric.WithDescription("CSI keyed-lock acquisitions that failed / timed out"),
+	)
+}
+
+// LockProbe instruments the lifecycle of one keyed-lock acquisition. Create it
+// immediately BEFORE blocking on the acquire, then call exactly one of Failed()
+// (acquire errored/timed out) or Acquired() (lock obtained). Acquired returns a
+// release closure to run on unlock, which records the hold duration and drops
+// the held gauge. Wiring:
+//
+//	p := common.StartLockProbe(ctx, "volume")
+//	if err := lk.lock(lctx); err != nil { p.Failed(); return ... }
+//	release := p.Acquired()
+//	return func() { lk.unlock(); release() }, nil
+type LockProbe struct {
+	ctx      context.Context
+	lockType string
+	start    time.Time
+}
+
+func StartLockProbe(ctx context.Context, lockType string) *LockProbe {
+	lockMetricsOnce.Do(initLockMetrics)
+	return &LockProbe{ctx: ctx, lockType: lockType, start: time.Now()}
+}
+
+func (p *LockProbe) opt() metric.MeasurementOption {
+	return metric.WithAttributes(attribute.String("lock_type", p.lockType))
+}
+
+// Failed records a failed/timed-out acquire (wait time + a failure increment).
+func (p *LockProbe) Failed() {
+	lockWait.Record(p.ctx, time.Since(p.start).Seconds(), p.opt())
+	lockFails.Add(p.ctx, 1, p.opt())
+}
+
+// Acquired records the wait time, bumps the held gauge, and returns a release
+// func that records the hold duration and decrements the held gauge.
+func (p *LockProbe) Acquired() func() {
+	lockWait.Record(p.ctx, time.Since(p.start).Seconds(), p.opt())
+	locksHeld.Add(p.ctx, 1, p.opt())
+	held := time.Now()
+	return func() {
+		lockHold.Record(p.ctx, time.Since(held).Seconds(), p.opt())
+		locksHeld.Add(p.ctx, -1, p.opt())
+	}
+}
