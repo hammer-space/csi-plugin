@@ -942,20 +942,27 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	}
 	defer unlock()
 
+	// A file-backed volume lives *inside* a backing share, so its volume ID is
+	// structurally distinguishable from a share-backed one. Decide from the ID
+	// instead of probing Anvil with a GetShare that, for file-backed volumes,
+	// always 404s.
+	if isFileBackedVolumeID(volumeId) {
+		err = d.deleteFileBackedVolume(ctx, volumeId)
+		return &csi.DeleteVolumeResponse{}, err
+	}
+
 	volumeName := GetVolumeNameFromPath(volumeId)
 	share, err := d.hsclient.GetShare(ctx, volumeName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
-	if share == nil { // Share does not exist, may be a file-backed volume
+	if share == nil { // legacy/single-segment ID with no share: treat as file-backed
 		err = d.deleteFileBackedVolume(ctx, volumeId)
-
-		return &csi.DeleteVolumeResponse{}, err
-	} else { // Share exists and is a Filesystem
-		err = d.deleteShareBackedVolume(ctx, share)
 		return &csi.DeleteVolumeResponse{}, err
 	}
-
+	// Share exists and is a Filesystem
+	err = d.deleteShareBackedVolume(ctx, share)
+	return &csi.DeleteVolumeResponse{}, err
 }
 
 // ControllerGetVolume implements the ControllerServer interface for CSI.
@@ -992,27 +999,26 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 	))
 	defer span.End()
 
-	fileBacked := false
-
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
 	}
 
-	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(ctx, volumeName)
-	if share == nil {
-		fileBacked = true
-	}
-
-	//  Check if the specified backing share or file exists
-	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
-		if err != nil {
-			log.Error(err)
-		}
-		if !backingFileExists {
-			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
-		} else {
+	// Decide file-backed vs share-backed structurally from the volume ID, avoiding
+	// a GetShare probe that always 404s for file-backed volumes. The branches below
+	// still confirm the volume actually exists (GetFile / GetShare).
+	fileBacked := isFileBackedVolumeID(req.GetVolumeId())
+	if !fileBacked {
+		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
+		share, _ := d.hsclient.GetShare(ctx, volumeName)
+		if share == nil {
+			// Fallback for legacy/unexpected IDs: confirm via file existence.
+			backingFileExists, ferr := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
+			if ferr != nil {
+				log.Error(ferr)
+			}
+			if !backingFileExists {
+				return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+			}
 			fileBacked = true
 		}
 	}
@@ -1364,9 +1370,18 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	if _, exists := recentlyCreatedSnapshots[req.GetName()]; !exists {
 		// find source volume (is it file or share?
 		volumeName := GetVolumeNameFromPath(req.GetSourceVolumeId())
-		share, err := d.hsclient.GetShare(ctx, volumeName)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "%s", err.Error())
+		// Decide file- vs share-backed structurally from the source volume ID,
+		// avoiding a GetShare probe that 404s for file-backed sources; fall back to
+		// GetShare only for a non-file-backed ID (legacy/unexpected handles).
+		fileBackedSource := isFileBackedVolumeID(req.GetSourceVolumeId())
+		if !fileBackedSource {
+			share, gerr := d.hsclient.GetShare(ctx, volumeName)
+			if gerr != nil {
+				return nil, status.Errorf(codes.Internal, "%s", gerr.Error())
+			}
+			if share == nil {
+				fileBackedSource = true
+			}
 		}
 		// Consistency-freeze: for FILE-BACKED source volumes only, locate
 		// every pod that has this volume mounted and issue
@@ -1377,18 +1392,16 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		// log and proceed — matching the best-effort semantics of Velero
 		// pre-hooks. See freezer.go.
 		//
-		// share != nil means the source is a share-backed (NFS) volume,
-		// where Anvil owns the filesystem end-to-end and there's no local
-		// journal to quiesce. FIFREEZE also fails EOPNOTSUPP on NFS
-		// mounts. Skip the freeze in that case.
-		fileBackedSource := share == nil
+		// A share-backed (NFS) volume has Anvil owning the filesystem
+		// end-to-end, with no local journal to quiesce; FIFREEZE also fails
+		// EOPNOTSUPP on NFS mounts. Skip the freeze in that case.
 		var frozen []FrozenTarget
 		if d.freezer != nil && fileBackedSource {
 			frozen = d.freezer.FreezeForVolumeHandle(ctx, req.GetSourceVolumeId())
 		}
 		// Create the snapshot
 		var hsSnapName string
-		if share != nil {
+		if !fileBackedSource {
 			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
 		} else {
 			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
@@ -1447,13 +1460,31 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 
 	// If the snapshot does not exist then return an idempotent response.
 
+	// File-vs-share discriminator, decided structurally from the source volume
+	// path (the "|"-suffix of the snapshot ID): a file-backed volume is a FILE
+	// inside a backing share (multi-segment path -> file snapshot); a native NFS
+	// volume IS a share (single-segment path -> share snapshot). This avoids a
+	// GetShare probe that 404s for every file-backed snapshot; GetShare is kept
+	// as a fallback for non-file-backed paths.
+	// (Historical: the original `GetVolumeNameFromPath(path) != ""` test was
+	// ALWAYS true, so every delete was routed to DeleteShareSnapshot and
+	// file-backed snapshots were orphaned on the Anvil, blocking source-volume
+	// deletion.)
 	shareName := GetVolumeNameFromPath(path)
 
 	var err error
-	if shareName != "" {
-		err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
-	} else {
+	if isFileBackedVolumeID(path) {
 		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+	} else {
+		share, gerr := d.hsclient.GetShare(ctx, shareName)
+		if gerr != nil {
+			return nil, status.Error(codes.Internal, gerr.Error())
+		}
+		if share != nil {
+			err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
+		} else {
+			err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+		}
 	}
 
 	if err != nil {

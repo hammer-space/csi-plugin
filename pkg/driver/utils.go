@@ -191,6 +191,18 @@ func GetVolumeNameFromPath(path string) string {
 	return filepath.Base(path)
 }
 
+// isFileBackedVolumeID reports, with no REST call, whether a volume ID refers to
+// a file-backed volume. CreateVolume builds file-backed IDs as
+// "<SharePathPrefix><backingShare>/<file>" - an extra path segment living inside
+// the backing share - and share-backed IDs as "<SharePathPrefix><share>", a
+// single segment directly under the prefix. So a volume is file-backed exactly
+// when its ID sits one level below the share-path prefix. Deciding this from the
+// ID lets callers skip the GetShare probe that, for file-backed volumes, always
+// returns 404.
+func isFileBackedVolumeID(volumeID string) bool {
+	return filepath.Dir(volumeID) != common.SharePathPrefix
+}
+
 func GetSnapshotNameFromSnapshotId(snapshotId string) (string, error) {
 	tokens := strings.SplitN(snapshotId, "|", 2)
 	if len(tokens) != 2 {
