@@ -373,7 +373,21 @@ func MountShare(ctx context.Context, sourcePath, targetPath string, mountFlags [
 	mo := mountFlags
 
 	mounter := mount.New("")
-	err = mounter.Mount(sourcePath, targetPath, "nfs", mo)
+	// Bound the mount syscall with a timeout. A `hard` NFS mount against an
+	// unreachable server (e.g. a data portal that has gone away) blocks
+	// uninterruptibly; without this bound the caller holds its volume /
+	// backing-share lock forever, leaking it and wedging every serialized
+	// operation behind that lock. On timeout we return an error so the deferred
+	// unlock runs and the op is retried. The mount goroutine may linger, but it
+	// holds no lock.
+	mountErr := make(chan error, 1)
+	go func() { mountErr <- mounter.Mount(sourcePath, targetPath, "nfs", mo) }()
+	select {
+	case err = <-mountErr:
+	case <-time.After(defaultMountCheckTimeout):
+		return status.Errorf(codes.DeadlineExceeded,
+			"mount %s -> %s timed out after %s (data portal unreachable?)", sourcePath, targetPath, defaultMountCheckTimeout)
+	}
 	if err != nil {
 		if os.IsPermission(err) {
 			return status.Error(codes.PermissionDenied, err.Error())
@@ -562,19 +576,36 @@ func CheckNFSExports(address string) (bool, error) {
 }
 
 func IsShareMounted(targetPath string) bool {
-	mounter := mount.New("")
-	isMounted, err := mounter.IsMountPoint(targetPath)
+	// Use the timeout-bounded check: IsMountPoint stat()s the path, which hangs
+	// uninterruptibly on a stale NFS mount whose server is gone (e.g. after the
+	// driver is re-pointed to a new Anvil). SafeIsMountPoint returns
+	// context.DeadlineExceeded instead of hanging; treat that as "not cleanly
+	// mounted" so callers re-establish the mount rather than block forever.
+	isMounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warnf("Check [IsShareMounted] target path is empty, %s", EmptyTargetPath)
-			return false
 		} else {
 			log.Warnf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
-			return false
 		}
+		return false
 	}
 	log.Debugf("Target path %s isMounted %t", targetPath, isMounted)
 	return isMounted
+}
+
+// ForceUnmountStale best-effort clears a (possibly hung) mount at targetPath so a
+// fresh mount can be established. It shells out to `umount -f -l` (force + lazy),
+// which detaches even when the NFS server is unreachable and never blocks - a
+// plain unmount syscall would itself hang on a dead mount. Safe to call when
+// nothing is mounted (it just logs).
+func ForceUnmountStale(targetPath string) {
+	out, err := ExecCommand("umount", "-f", "-l", targetPath)
+	if err != nil {
+		log.Warnf("ForceUnmountStale: umount -f -l %s: %v (output: %s)", targetPath, err, strings.TrimSpace(string(out)))
+		return
+	}
+	log.Infof("ForceUnmountStale: cleared stale mount at %s", targetPath)
 }
 
 func UnmountFilesystem(ctx context.Context, targetPath string) error {

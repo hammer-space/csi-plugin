@@ -220,10 +220,19 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	}
 	if backingShare != nil {
 		backingDir := common.ShareStagingDir + backingShare.ExportPath
-		// Mount backing share
+		// IsShareMounted is timeout-safe: a stale mount whose server is gone
+		// (e.g. left over after the driver was re-pointed to a new Anvil) reports
+		// false instead of hanging. We only reuse a mount that is cleanly and
+		// healthily mounted here.
 		isMounted := common.IsShareMounted(backingDir)
 		log.Infof("Checked mount for %s: isMounted=%t", backingDir, isMounted)
 		if !isMounted {
+			// "Not cleanly mounted" can still mean a hung/stale NFS mount is
+			// lingering at this path (its server is unreachable). Force-clear it
+			// best-effort so the mount below re-establishes against the CURRENT
+			// data portal rather than stacking onto - or reusing - a dead mount.
+			// This is what makes file-backed provisioning survive an Anvil swap.
+			common.ForceUnmountStale(backingDir)
 			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.MountFlags, hsVol.FQDN)
 			if err != nil {
 				log.Errorf("failed to mount backing share, %v", err)
