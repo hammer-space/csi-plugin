@@ -609,7 +609,8 @@ func UnmountFilesystem(ctx context.Context, targetPath string) error {
 	return nil
 }
 
-func SetMetadataTags(localPath string, tags map[string]string) error {
+func SetMetadataTags(ctx context.Context, localPath string, tags map[string]string) error {
+	defer MeasureOp(ctx, "SetMetadataTags")(nil)
 	// hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
 	attributeSetOutput, err := ExecCommand("hs",
 		"attribute",

@@ -356,6 +356,19 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 }
 
 func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, taskLocation string) (bool, error) {
+	// The task-completion poll (CreateShare returns 202 + a task, then we poll
+	// GET /tasks/{id} until terminal) is typically the dominant cost of share
+	// creation - the share-backed analog of the file-visibility poll. Give it a
+	// dedicated metric + span with an attempt count so the dashboard and traces
+	// can localize it instead of it hiding inside Controller/CreateVolume.
+	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletion")(nil)
+	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletion")
+	attempts := 0
+	defer func() {
+		span.SetAttributes(attribute.Int("attempts", attempts))
+		span.End()
+	}()
+
 	b := &backoff.Backoff{
 		Max:    taskPollIntervalCap,
 		Factor: 1.5,
@@ -369,6 +382,7 @@ func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, task
 	for time.Since(startTime) < taskPollTimeout {
 		d := b.Duration()
 		time.Sleep(d)
+		attempts++
 
 		req, err := client.generateRequest(ctx, "GET", "/tasks/"+taskId, "")
 		if err != nil {
@@ -691,6 +705,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
 	comment string) error {
+	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShare")(nil)
 
 	log.Debug("Creating share: " + name)
 	extendedInfo := common.GetCommonExtendedInfo()
@@ -766,6 +781,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 }
 
 func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, snapshotPath string) error {
+	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShareFromSnapshot")(nil)
 	log.WithFields(log.Fields{
 		"name":          name,
 		"deleteDelay":   deleteDelay,

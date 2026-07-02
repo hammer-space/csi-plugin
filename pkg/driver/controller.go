@@ -217,6 +217,11 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 }
 
 func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
+	ctx, span := tracer.Start(ctx, "ensureShareBackedVolumeExists", trace.WithAttributes(
+		attribute.String("volume.name", hsVolume.Name),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "ensureShareBackedVolumeExists")(nil)
 
 	// Check if the Mount Volume Exists
 	share, err := d.hsclient.GetShare(ctx, hsVolume.Name)
@@ -302,7 +307,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	log.Debugf("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
 
 	// The hs client expects a trailing slash for directories
-	err = common.SetMetadataTags(targetPath+"/", hsVolume.AdditionalMetadataTags)
+	err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
 	if err != nil {
 		log.Warnf("failed to set additional metadata on share %v", err)
 	}
@@ -312,6 +317,12 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 }
 
 func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error) {
+	ctx, span := tracer.Start(ctx, "ensureBackingShareExists", trace.WithAttributes(
+		attribute.String("backing_share", backingShareName),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "ensureBackingShareExists")(nil)
+
 	share, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
@@ -346,7 +357,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
-		err = common.SetMetadataTags(targetPath+"/", hsVolume.AdditionalMetadataTags)
+		err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
 		if err != nil {
 			log.Warnf("failed to set additional metadata on share %v", err)
 		}
@@ -509,7 +520,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 	}
 
 	// Set additional metadata on file
-	err = common.SetMetadataTags(deviceFile, hsVolume.AdditionalMetadataTags)
+	err = common.SetMetadataTags(ctx, deviceFile, hsVolume.AdditionalMetadataTags)
 	if err != nil {
 		log.Errorf("Failed to set additional metadata on backing file for volume: %v\n", err)
 	}
