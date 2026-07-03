@@ -260,6 +260,44 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	return nil
 }
 
+// acquireBackingMount guarantees the backing share is mounted and takes one
+// in-flight reference on it. It must be called WITHOUT the per-backing-share lock
+// held: the mount/unmount decision is serialized by its own short mountRefsMu, so
+// the caller's subsequent per-file work (mkfs) runs concurrently with other
+// creates on the same share. The share is mounted only on the 0->1 transition;
+// every other concurrent create just bumps the count.
+func (d *CSIDriver) acquireBackingMount(ctx context.Context, backingShare *common.ShareResponse, hsVol *common.HSVolume) error {
+	backingDir := common.ShareStagingDir + backingShare.ExportPath
+	d.mountRefsMu.Lock()
+	defer d.mountRefsMu.Unlock()
+	if d.mountRefs[backingDir] == 0 {
+		if err := d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVol); err != nil {
+			return err
+		}
+	}
+	d.mountRefs[backingDir]++
+	return nil
+}
+
+// releaseBackingMount drops one in-flight reference taken by acquireBackingMount
+// and unmounts the backing share once the last concurrent file operation using it
+// has finished (refcount reaches 0). UnmountBackingShareIfUnused still applies its
+// own loopback-device safety check before actually unmounting.
+func (d *CSIDriver) releaseBackingMount(ctx context.Context, backingShare *common.ShareResponse) {
+	backingDir := common.ShareStagingDir + backingShare.ExportPath
+	d.mountRefsMu.Lock()
+	defer d.mountRefsMu.Unlock()
+	if d.mountRefs[backingDir] > 0 {
+		d.mountRefs[backingDir]--
+	}
+	if d.mountRefs[backingDir] == 0 {
+		delete(d.mountRefs, backingDir)
+		if _, err := d.UnmountBackingShareIfUnused(ctx, backingShare.Name); err != nil {
+			log.Warnf("releaseBackingMount: unmount of %s failed: %v", backingDir, err)
+		}
+	}
+}
+
 func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShareName string) (bool, error) {
 	ctx, span := tracer.Start(ctx, "UnmountBackingShareIfUnused", trace.WithAttributes(
 		attribute.String("backing_share", backingShareName),

@@ -412,14 +412,17 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 			return status.Error(codes.NotFound, common.UnknownError)
 		}
 	} else {
-		// Create empty file
-		defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
-
-		err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume)
+		// Create empty file. Take a refcounted reference on the backing mount so it
+		// stays mounted for the duration of this create but is NOT held under the
+		// per-backing-share lock; the mkfs below therefore runs concurrently with
+		// other creates on the same share. The share is unmounted only once the last
+		// in-flight create releases (see acquire/releaseBackingMount).
+		err = d.acquireBackingMount(ctx, backingShare, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
 		}
+		defer d.releaseBackingMount(ctx, backingShare)
 
 		log.Debugf("ensureDeviceFileExists mounted backing share %s", backingShare.Name)
 
@@ -533,23 +536,26 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *
 		"backingShareName": backingShareName,
 		"hsVolume":         hsVolume,
 	}).Debugf("ensureFileBackedVolumeExists is called.")
-	// Check if backing share exists
-	// Acquire BEFORE defer; with timeout so we never hang forever
+	// The backing share is a shared resource: two concurrent first-volume creates
+	// must not both CreateShare it. Serialize ONLY the share create-if-not-exists
+	// under the per-backing-share lock, then release it immediately. The per-volume
+	// device file created afterwards is independent, so releasing the lock here lets
+	// file creation (mkfs) run concurrently across the provisioner worker threads
+	// instead of serializing every file on the share behind this one lock. The
+	// backing mount is kept alive for the duration by acquire/releaseBackingMount.
 	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
 	if err != nil {
 		// surfaces to kubelet instead of hanging forever
 		return err
 	}
-	defer unlock()
-
 	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	unlock()
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	log.Debugf("Backing share existed %s", backingShareName)
-	err = d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
 
-	return err
+	return d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
 }
 
 func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (_ *csi.CreateVolumeResponse, err error) {

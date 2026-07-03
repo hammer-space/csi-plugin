@@ -51,7 +51,15 @@ type CSIDriver struct {
 	locksMu       sync.Mutex
 	volumeLocks   map[string]*keyLock
 	snapshotLocks map[string]*keyLock
-	hsclient      *client.HammerspaceClient
+	// mountRefs counts in-flight file operations per backing-share mount. It lets
+	// many file-backed CreateVolume calls share a single backing-share mount and run
+	// their per-file mkfs concurrently: the share is mounted on the first reference
+	// and unmounted only when the last in-flight file operation completes. This
+	// replaces holding the coarse per-backing-share lock across the whole per-file
+	// create (which serialized all file creation on a share to ~1 at a time).
+	mountRefsMu sync.Mutex
+	mountRefs   map[string]int
+	hsclient    *client.HammerspaceClient
 	NodeID        string
 	// freezer runs fsfreeze inside the pod(s) holding a source volume
 	// during CreateSnapshot, so XFS reaches a quiesce point before Anvil
@@ -80,6 +88,7 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		hsclient:      client,
 		volumeLocks:   make(map[string]*keyLock),
 		snapshotLocks: make(map[string]*keyLock),
+		mountRefs:     make(map[string]int),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
 		freezer:       NewFreezer(),
 	}
