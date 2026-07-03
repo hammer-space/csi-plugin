@@ -263,6 +263,15 @@ func FormatDevice(ctx context.Context, device, fsType string) error {
 	args := []string{device}
 	if fsType == "xfs" {
 		args = []string{"-m", "reflink=0", device}
+	} else if fsType == "ext4" || fsType == "ext3" {
+		// Defer inode-table and journal zeroing to lazy background init.
+		// Without this, mkfs.ext* eagerly zeroes the inode table and journal at
+		// create time (~tens of MB per volume). For file-backed volumes those
+		// writes go over NFS to the backing share, so they saturate the storage
+		// data path (the DSX disk) and dominate CreateVolume latency. Lazy init
+		// drops create-time writes to ~KB; the kernel finishes initialization in
+		// the background after first mount.
+		args = []string{"-E", "lazy_itable_init=1,lazy_journal_init=1", device}
 	}
 	output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
 	if err != nil {
