@@ -262,7 +262,11 @@ func FormatDevice(ctx context.Context, device, fsType string) error {
 	log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
 	args := []string{device}
 	if fsType == "xfs" {
-		args = []string{"-m", "reflink=0", device}
+		// -K: skip the block discard/TRIM pass at mkfs time. Over an NFS-backed
+		// file this discard is slow and pure overhead (the backing share manages
+		// its own space reclaim), so it needlessly inflates mkfs.xfs latency and
+		// load on the storage data path.
+		args = []string{"-m", "reflink=0", "-K", device}
 	} else if fsType == "ext4" || fsType == "ext3" {
 		// Defer inode-table and journal zeroing to lazy background init.
 		// Without this, mkfs.ext* eagerly zeroes the inode table and journal at
