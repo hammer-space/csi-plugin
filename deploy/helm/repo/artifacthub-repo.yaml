@@ -1,0 +1,5 @@
+repositoryID: ba19dd93-de8e-41da-b66c-4f5c557ee0f3  # use `uuidgen` to generate
+name: hammerspace-csi-chart
+displayName: Hammerspace CSI Helm Chart
+description: Helm chart for deploying the Hammerspace CSI plugin
+url: https://github.com/hammer-space/csi-plugin/deploy/helm/repo

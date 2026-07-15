@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: csi-node
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    matchLabels:
+      app: csi-node
+  template:
+    metadata:
+      labels:
+        app: csi-node
+    spec:
+      serviceAccount: csi-node
+      hostNetwork: true
+      containers:
+        - name: csi-resizer
+          imagePullPolicy: Always
+          image: {{ .Values.image.resizer }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+        - name: driver-registrar
+          imagePullPolicy: Always
+          image: {{ .Values.image.registrar }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", '[ -n "$REG_SOCKET" ] && rm -rf "$REG_SOCKET" || echo "REG_SOCKET not set, skipping delete"']
+          args:
+            - "--v=5"
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--kubelet-registration-path=$(REG_SOCKET)"
+          securityContext:
+            privileged: true
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: REG_SOCKET
+              value: /var/lib/kubelet/plugins_registry/com.hammerspace.csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: hs-csi-plugin-node
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: {{ .Values.image.csiPlugin }}
+          envFrom:
+            - configMapRef:
+                name: csi-env-config
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HS_TLS_VERIFY
+              value: "false"
+            - name: CSI_MAJOR_VERSION
+              value: "1"
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+              mountPropagation: Bidirectional
+            - name: mountpoint-dir
+              mountPath: /var/lib/kubelet/
+              mountPropagation: Bidirectional
+            - name: dev-dir
+              mountPath: /dev
+            - name: staging-dir
+              mountPath: /tmp
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/com.hammerspace.csi
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: /var/lib/kubelet/
+        - name: registration-dir
+          hostPath:
+            path: /var/lib/kubelet/plugins_registry/
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: staging-dir
+          hostPath:
+            path: /tmp
