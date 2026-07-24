@@ -1,4 +1,4 @@
-# Hammerspace CSI plugin manifest, validated on Kubernetes 1.36 (and works on
+# Hammerspace CSI plugin manifest, validated on Kubernetes 1.35 (parity with 1.35/1.36) (and works on
 # 1.30+ in practice). It is the 1.29 manifest plus the observability wiring:
 #   - a host-networked `metrics` port (9090 controller / 9091 node), and
 #   - OTel env vars on both driver containers.
