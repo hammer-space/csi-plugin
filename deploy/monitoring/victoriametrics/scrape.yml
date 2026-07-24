@@ -1,0 +1,41 @@
+# Example VictoriaMetrics / Prometheus scrape config for the Hammerspace CSI driver.
+#
+# The CSI controller (StatefulSet csi-provisioner) and node (DaemonSet csi-node)
+# pods run with hostNetwork: true, so their Prometheus /metrics endpoints are
+# reachable on the Kubernetes NODE host IPs:
+#   - controller: <provisioner-host>:9090   (OTEL_METRICS_PROMETHEUS_LISTEN, default :9090)
+#   - node:       <every-node>:9091          (set OTEL_METRICS_PROMETHEUS_LISTEN=:9091 on the DaemonSet)
+#
+# Enable metrics on the driver by setting these env vars on both containers
+# (see deploy/monitoring/README.md):
+#   OTEL_METRICS_EXPORTER=prometheus
+#   OTEL_METRICS_PROMETHEUS_LISTEN=:9090   # controller
+#   OTEL_METRICS_PROMETHEUS_LISTEN=:9091   # node
+#
+# Replace the target IPs below with your Kubernetes node IPs. Only the node
+# running csi-provisioner answers on :9090 (others show up=0, harmless); every
+# node answers on :9091. This file drops in as VictoriaMetrics
+# `-promscrape.config=` or under a Prometheus `scrape_configs:` block.
+
+scrape_configs:
+  - job_name: hs-csi-controller
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 10.0.0.11:9090   # replace with your k8s node IPs
+          - 10.0.0.12:9090
+          - 10.0.0.13:9090
+        labels:
+          service: hs-csi
+          role: controller
+
+  - job_name: hs-csi-node
+    scrape_interval: 15s
+    static_configs:
+      - targets:
+          - 10.0.0.11:9091   # replace with your k8s node IPs
+          - 10.0.0.12:9091
+          - 10.0.0.13:9091
+        labels:
+          service: hs-csi
+          role: node

@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `objectiveTarget` StorageClass parameter (`share` (default) | `file` | `both`) for file-backed volumes. With the default `share`, CreateVolume skips the per-file objective-set and the Anvil file-visibility poll that only exists to gate it — the backing share already carries the objectives — so provisioning returns as soon as the local `mkfs` completes and the `GET /files` poll storm under concurrency is eliminated. Use `file`/`both` to also apply per-file objectives.
 - OpenTelemetry tracing and Prometheus metrics for the driver (`OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, etc.); `hs_csi_operation_*` and `hs_csi_anvil_requests_total` instruments across the controller/node RPCs, the file- and share-backed provisioning steps, and every Anvil REST call. See `docs/observability.md`.
 - Minimum size gates for file-backed volumes (xfs < 300 MiB, ext4 < 20 MiB rejected) and an `fsfreeze` of the source volume before snapshot for crash-consistent file-backed snapshots.
+- `deploy/kubernetes/kubernetes-1.36/plugin.yaml` — manifest validated on k8s 1.36 (1.29 base + host-networked metrics port + OTel env vars).
+- `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
+- Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
 
 ### Changed
 - Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.

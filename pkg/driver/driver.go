@@ -60,7 +60,7 @@ type CSIDriver struct {
 	mountRefsMu sync.Mutex
 	mountRefs   map[string]int
 	hsclient    *client.HammerspaceClient
-	NodeID        string
+	NodeID      string
 	// freezer runs fsfreeze inside the pod(s) holding a source volume
 	// during CreateSnapshot, so XFS reaches a quiesce point before Anvil
 	// captures the file bytes. Nil when the driver is not running

@@ -50,16 +50,16 @@ import (
 )
 
 const (
-	BasePath                   = "/mgmt/v1.2/rest"
-	taskPollTimeout            = 3600 * time.Second // overall deadline for a single task poll
+	BasePath        = "/mgmt/v1.2/rest"
+	taskPollTimeout = 3600 * time.Second // overall deadline for a single task poll
 	// Share-create tasks always take longer than ~2s and almost always finish
 	// under ~15s. So poll at a tight fixed 2s cadence while completion is likely,
 	// then relax to 4s. This keeps detection latency ~2s in the common case; the
 	// previous exponential backoff (capped at 30s) could add up to a full 30s of
 	// detection lag after the task had already completed.
-	taskPollFastInterval = 2 * time.Second  // poll every 2s ...
-	taskPollFastWindow   = 30 * time.Second // ... for the first 30s ...
-	taskPollSlowInterval = 4 * time.Second  // ... then back off to every 4s
+	taskPollFastInterval       = 2 * time.Second  // poll every 2s ...
+	taskPollFastWindow         = 30 * time.Second // ... for the first 30s ...
+	taskPollSlowInterval       = 4 * time.Second  // ... then back off to every 4s
 	taskStatusValidationFailed = "VALIDATION_FAILED"
 	taskStatusResumed          = "RESUMED"
 	taskStatusFailed           = "FAILED"

@@ -133,10 +133,10 @@ func (f *Freezer) Unfreeze(ctx context.Context, frozen []FrozenTarget) {
 // FrozenTarget for why we target csi-node instead of the user's app pod.
 //
 // The lookup chain is:
-//   1. PV whose spec.csi.volumeHandle matches → its ClaimRef → PV name
-//   2. Running pods that reference that PVC → their node names + pod UIDs
-//   3. For each such node, the csi-node DaemonSet pod running there
-//   4. The kubelet-managed mount path for this volume in that user pod
+//  1. PV whose spec.csi.volumeHandle matches → its ClaimRef → PV name
+//  2. Running pods that reference that PVC → their node names + pod UIDs
+//  3. For each such node, the csi-node DaemonSet pod running there
+//  4. The kubelet-managed mount path for this volume in that user pod
 func (f *Freezer) findMountsForVolumeHandle(ctx context.Context, volumeHandle string) ([]FrozenTarget, error) {
 	// Step 1: PV with matching csi.volumeHandle → its claim ref
 	pvs, err := f.clientset.CoreV1().PersistentVolumes().List(ctx, metav1.ListOptions{})

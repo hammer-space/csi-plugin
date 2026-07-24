@@ -150,6 +150,13 @@ local debugging).
 
 ## 8. Grafana dashboard
 
+The dashboard JSON and an example scrape config are committed in-repo under
+[`deploy/monitoring/`](../deploy/monitoring/) — import
+`deploy/monitoring/grafana/hs-csi-driver-dashboard.json` and adapt
+`deploy/monitoring/victoriametrics/scrape.yml`. See
+[`deploy/monitoring/README.md`](../deploy/monitoring/README.md) for the full
+enable-metrics → scrape → import walkthrough.
+
 Dashboard **"Hammerspace CSI Driver"** (uid `hs-csi-driver`) is backed by the
 VictoriaMetrics datasource. Relevant rows:
 

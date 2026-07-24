@@ -189,6 +189,29 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 	return vParams, nil
 }
 
+// checkFileBackedMinSize rejects a file-backed volume whose requested size is
+// below the per-fsType minimum (xfsprogs 6.4+ deprecates sub-300MiB XFS; ext4
+// below ~20MiB has almost no usable space). Non file-backed fsTypes and sizes
+// at/above the floor return nil.
+func checkFileBackedMinSize(fsType string, requestedSize int64) error {
+	const mib = 1024 * 1024
+	switch fsType {
+	case "xfs":
+		if requestedSize < common.MinXfsSizeBytes {
+			return status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
+				common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
+				requestedSize, requestedSize/mib)
+		}
+	case "ext4":
+		if requestedSize < common.MinExt4SizeBytes {
+			return status.Errorf(codes.InvalidArgument, common.Ext4SizeBelowMinimum,
+				common.MinExt4SizeBytes, common.MinExt4SizeBytes/mib,
+				requestedSize, requestedSize/mib)
+		}
+	}
+	return nil
+}
+
 func getMountFlagsFromCapabilities(capabilities []*csi.VolumeCapability) []string {
 	for _, capability := range capabilities {
 		if mount := capability.GetMount(); mount != nil {
@@ -668,26 +691,12 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		requestedSize = common.DefaultBackingFileSizeBytes
 	}
 
-	// Reject file-backed volumes below the per-fsType minimum. See the
-	// constants in pkg/common/config.go for the reasoning behind each floor
-	// (xfsprogs 6.4+ deprecation warning for XFS; usable-space threshold
-	// for ext4). Fail fast here with codes.InvalidArgument so kubelet
-	// surfaces the reason, instead of silently formatting a broken FS.
+	// Reject file-backed volumes below the per-fsType minimum, failing fast with
+	// codes.InvalidArgument so kubelet surfaces the reason instead of silently
+	// formatting a broken FS. See checkFileBackedMinSize / the config.go floors.
 	if fileBacked {
-		const mib = 1024 * 1024
-		switch fsType {
-		case "xfs":
-			if requestedSize < common.MinXfsSizeBytes {
-				return nil, status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
-					common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
-					requestedSize, requestedSize/mib)
-			}
-		case "ext4":
-			if requestedSize < common.MinExt4SizeBytes {
-				return nil, status.Errorf(codes.InvalidArgument, common.Ext4SizeBelowMinimum,
-					common.MinExt4SizeBytes, common.MinExt4SizeBytes/mib,
-					requestedSize, requestedSize/mib)
-			}
+		if err := checkFileBackedMinSize(fsType, requestedSize); err != nil {
+			return nil, err
 		}
 	}
 
