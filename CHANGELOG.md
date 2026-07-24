@@ -5,6 +5,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [Unreleased]
+### Added
+- `objectiveTarget` StorageClass parameter (`share` (default) | `file` | `both`) for file-backed volumes. With the default `share`, CreateVolume skips the per-file objective-set and the Anvil file-visibility poll that only exists to gate it — the backing share already carries the objectives — so provisioning returns as soon as the local `mkfs` completes and the `GET /files` poll storm under concurrency is eliminated. Use `file`/`both` to also apply per-file objectives.
+- OpenTelemetry tracing and Prometheus metrics for the driver (`OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, etc.); `hs_csi_operation_*` and `hs_csi_anvil_requests_total` instruments across the controller/node RPCs, the file- and share-backed provisioning steps, and every Anvil REST call. See `docs/observability.md`.
+- Minimum size gates for file-backed volumes (xfs < 300 MiB, ext4 < 20 MiB rejected) and an `fsfreeze` of the source volume before snapshot for crash-consistent file-backed snapshots.
+
+### Changed
+- Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
+- Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
+- Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.
+
+### Fixed
+- `acquireVolumeLock`/`acquireSnapshotLock` return `codes.Aborted` on a lock-acquire timeout instead of calling `os.Exit(1)`, which under concurrent load crashed the whole controller.
+- Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
+- Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
+
 ## [1.2.9]
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.
