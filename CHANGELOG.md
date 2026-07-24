@@ -19,8 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
 - Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.
 
+### Removed
+- Dropped `ext3` as a supported file-backed filesystem; `CreateVolume` now rejects `fsType=ext3` with `InvalidArgument` (use `ext4` or `xfs`).
+
 ### Fixed
+- `releaseBackingMount` no longer holds `mountRefsMu` while calling `UnmountBackingShareIfUnused` (which re-acquires the same non-reentrant mutex via the `mountRefs` refcount check): the volume that dropped the last reference self-deadlocked, wedging all subsequent file-backed provisioning. The decrement now happens under the lock and the unmount runs after releasing it. Caught by live xfs validation (a single file-backed PVC is the exact refcount-1 trigger).
 - `acquireVolumeLock`/`acquireSnapshotLock` return `codes.Aborted` on a lock-acquire timeout instead of calling `os.Exit(1)`, which under concurrent load crashed the whole controller.
+- Only force-unmount a stale backing-share mount after repeated (not a single) mount-check timeouts, so a slow-but-healthy NFS stat under concurrency can't force-unmount a live shared mount out from under in-flight pods.
+- `UnmountBackingShareIfUnused` now honors the `mountRefs` refcount, so a concurrent delete can't unmount a backing share out from under an in-flight `mkfs` (which has no loop device yet).
+- Run snapshot `Unfreeze` on a context detached from the gRPC request cancellation, so a cancelled/expired `CreateSnapshot` can't leave the source pod's filesystem frozen.
+- `AnvilRoute` collapses `share-snapshots` share/snapshot identifiers to `{id}`, preventing unbounded `hs_csi_anvil_requests_total` metric cardinality.
 - Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
 - Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
 

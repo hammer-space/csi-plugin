@@ -225,6 +225,47 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
+// mountState classifies an existing backing-share staging mount.
+type mountState int
+
+const (
+	mountHealthy mountState = iota // cleanly mounted; reuse it
+	mountAbsent                    // nothing mounted; just mount
+	mountStale                     // confirmed unreachable; force-clear then mount
+)
+
+// mountStaleProbes is how many CONSECUTIVE SafeIsMountPoint timeouts we require
+// before treating a backing mount as stale and force-unmounting it. A single
+// timeout is more likely a slow-but-healthy NFS stat under the concurrency this
+// driver now allows than a dead server; only a run of timeouts indicates the
+// server is actually gone. Kept small so a genuinely dead mount is still cleared
+// promptly.
+const mountStaleProbes = 2
+
+// classifyMount probes path up to `probes` times to decide whether a backing
+// mount is healthy, absent, or stale. `probe` is common.SafeIsMountPoint in
+// production and is injectable for tests; it returns (mounted, nil) when it can
+// answer, an os.ErrNotExist error when the path does not exist, and
+// context.DeadlineExceeded on timeout. "stale" is concluded only after `probes`
+// consecutive timeouts, so a live-but-slow shared mount is never force-unmounted
+// out from under in-flight pods on a false positive.
+func classifyMount(path string, probes int, probe func(string) (bool, error)) mountState {
+	for i := 0; i < probes; i++ {
+		mounted, err := probe(path)
+		if err == nil {
+			if mounted {
+				return mountHealthy
+			}
+			return mountAbsent
+		}
+		if os.IsNotExist(err) {
+			return mountAbsent
+		}
+		// timeout / other transient error — retry
+	}
+	return mountStale
+}
+
 func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareName string, hsVol *common.HSVolume) error {
 	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
@@ -232,29 +273,33 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	}
 	if backingShare != nil {
 		backingDir := common.ShareStagingDir + backingShare.ExportPath
-		// IsShareMounted is timeout-safe: a stale mount whose server is gone
-		// (e.g. left over after the driver was re-pointed to a new Anvil) reports
-		// false instead of hanging. We only reuse a mount that is cleanly and
-		// healthily mounted here.
-		isMounted := common.IsShareMounted(backingDir)
-		log.Infof("Checked mount for %s: isMounted=%t", backingDir, isMounted)
-		if !isMounted {
-			// "Not cleanly mounted" can still mean a hung/stale NFS mount is
-			// lingering at this path (its server is unreachable). Force-clear it
-			// best-effort so the mount below re-establishes against the CURRENT
-			// data portal rather than stacking onto - or reusing - a dead mount.
-			// This is what makes file-backed provisioning survive an Anvil swap.
-			common.ForceUnmountStale(backingDir)
-			err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.MountFlags, hsVol.FQDN)
-			if err != nil {
-				log.Errorf("failed to mount backing share, %v", err)
-				return err
-			}
-
-			log.Infof("mounted backing share, %s", backingDir)
-		} else {
+		// Classify the existing mount. We only force-unmount when it is CONFIRMED
+		// stale (mountStaleProbes consecutive mount-check timeouts) — never on a
+		// single timeout, which can be a slow-but-healthy stat under load and
+		// would otherwise `umount -f -l` a live shared backing mount out from
+		// under other in-flight file-backed pods (the same outage this path is
+		// meant to prevent, via a false positive).
+		state := classifyMount(backingDir, mountStaleProbes, common.SafeIsMountPoint)
+		log.Infof("Checked mount for %s: state=%d", backingDir, state)
+		switch state {
+		case mountHealthy:
 			log.Infof("backing share already mounted, %s", backingDir)
+			return nil
+		case mountStale:
+			// A hung/stale NFS mount is lingering (server unreachable). Force-clear
+			// it best-effort so the mount below re-establishes against the CURRENT
+			// data portal rather than reusing a dead mount — this is what makes
+			// file-backed provisioning survive an Anvil swap.
+			log.Warnf("backing share %s appears stale after %d consecutive mount-check timeouts; force-clearing before remount", backingDir, mountStaleProbes)
+			common.ForceUnmountStale(backingDir)
+		case mountAbsent:
+			// nothing mounted here; fall through to mount
 		}
+		if err := d.MountShareAtBestDataportal(ctx, backingShare.ExportPath, backingDir, hsVol.MountFlags, hsVol.FQDN); err != nil {
+			log.Errorf("failed to mount backing share, %v", err)
+			return err
+		}
+		log.Infof("mounted backing share, %s", backingDir)
 		return nil
 	}
 	return nil
@@ -285,6 +330,31 @@ func (d *CSIDriver) acquireBackingMount(ctx context.Context, backingShare *commo
 // own loopback-device safety check before actually unmounting.
 func (d *CSIDriver) releaseBackingMount(ctx context.Context, backingShare *common.ShareResponse) {
 	backingDir := common.ShareStagingDir + backingShare.ExportPath
+	// Decide-then-release: drop the refcount under the lock, but run the actual
+	// unmount WITHOUT mountRefsMu held. UnmountBackingShareIfUnused re-acquires the
+	// same mutex via backingMountInUse, and sync.Mutex is not reentrant, so calling
+	// it while still holding the lock self-deadlocks this goroutine — which then
+	// never releases mountRefsMu (or the volume lock held above it in CreateVolume),
+	// wedging every subsequent file-backed create. It only fires for whichever
+	// volume drops the LAST reference (refcount 0), so it stays hidden until a share
+	// has exactly one in-flight create (e.g. a single file-backed PVC).
+	if !d.dropBackingRef(backingDir) {
+		return
+	}
+	// A concurrent acquireBackingMount racing in here re-bumps the refcount before
+	// we unmount; UnmountBackingShareIfUnused re-checks backingMountInUse and skips
+	// the unmount in that case, so the share stays mounted for the new create.
+	if _, err := d.UnmountBackingShareIfUnused(ctx, backingShare.Name); err != nil {
+		log.Warnf("releaseBackingMount: unmount of %s failed: %v", backingDir, err)
+	}
+}
+
+// dropBackingRef decrements the in-flight refcount for backingDir under
+// mountRefsMu and reports whether this was the final reference (the count
+// reached 0, and the map entry was removed). It performs NO unmount and holds
+// mountRefsMu only for the decrement itself, so the caller can run the
+// same-mutex-taking unmount decision afterwards without self-deadlocking.
+func (d *CSIDriver) dropBackingRef(backingDir string) (last bool) {
 	d.mountRefsMu.Lock()
 	defer d.mountRefsMu.Unlock()
 	if d.mountRefs[backingDir] > 0 {
@@ -292,10 +362,20 @@ func (d *CSIDriver) releaseBackingMount(ctx context.Context, backingShare *commo
 	}
 	if d.mountRefs[backingDir] == 0 {
 		delete(d.mountRefs, backingDir)
-		if _, err := d.UnmountBackingShareIfUnused(ctx, backingShare.Name); err != nil {
-			log.Warnf("releaseBackingMount: unmount of %s failed: %v", backingDir, err)
-		}
+		return true
 	}
+	return false
+}
+
+// backingMountInUse reports whether any in-flight file-backed operation still
+// holds a reference to the backing-share staging mount at mountPath (see
+// acquire/releaseBackingMount). It is the authoritative "in use" signal shared
+// with UnmountBackingShareIfUnused so the two mechanisms can't disagree and
+// unmount a share out from under an in-flight mkfs.
+func (d *CSIDriver) backingMountInUse(mountPath string) bool {
+	d.mountRefsMu.Lock()
+	defer d.mountRefsMu.Unlock()
+	return d.mountRefs[mountPath] > 0
 }
 
 func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShareName string) (bool, error) {
@@ -311,6 +391,16 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 		return false, err
 	}
 	mountPath := common.ShareStagingDir + backingShare.ExportPath
+	// Honor the mountRefs refcount FIRST. A file-backed CreateVolume holds a
+	// reference for its whole mkfs/format window (which unit G runs without the
+	// per-backing-share lock), and during that window there is no loop device
+	// backing the file yet — so the losetup check below would wrongly report
+	// "unused" and unmount the share out from under an in-flight mkfs. The
+	// refcount is the authoritative in-use signal shared with acquireBackingMount.
+	if d.backingMountInUse(mountPath) {
+		log.Infof("backing share %s still has in-flight reference(s); not unmounting", mountPath)
+		return false, nil
+	}
 	if isMounted := common.IsShareMounted(mountPath); !isMounted {
 		return true, nil
 	}

@@ -267,7 +267,7 @@ func FormatDevice(ctx context.Context, device, fsType string) error {
 		// its own space reclaim), so it needlessly inflates mkfs.xfs latency and
 		// load on the storage data path.
 		args = []string{"-m", "reflink=0", "-K", device}
-	} else if fsType == "ext4" || fsType == "ext3" {
+	} else if fsType == "ext4" {
 		// Defer inode-table and journal zeroing to lazy background init.
 		// Without this, mkfs.ext* eagerly zeroes the inode table and journal at
 		// create time (~tens of MB per volume). For file-backed volumes those

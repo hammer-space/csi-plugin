@@ -39,6 +39,10 @@ func TestAnvilRoute(t *testing.T) {
 		"/mgmt/v1.2/rest/file-snapshots/snap-9":                "/mgmt/v1.2/rest/file-snapshots/{id}",
 		"/mgmt/v1.2/rest/cntl/state":                           "/mgmt/v1.2/rest/cntl/state",
 		"/mgmt/v1.2/rest/data-portals/":                        "/mgmt/v1.2/rest/data-portals/",
+		// share-snapshots: keep the action verb, collapse share + snapshot ids
+		"/mgmt/v1.2/rest/share-snapshots/snapshot-create/k8s-file-backed":                  "/mgmt/v1.2/rest/share-snapshots/snapshot-create/{id}",
+		"/mgmt/v1.2/rest/share-snapshots/snapshot-list/k8s-file-backed":                    "/mgmt/v1.2/rest/share-snapshots/snapshot-list/{id}",
+		"/mgmt/v1.2/rest/share-snapshots/snapshot-delete/k8s-file-backed/2026-07-24T00-00": "/mgmt/v1.2/rest/share-snapshots/snapshot-delete/{id}/{id}",
 	}
 	for in, want := range cases {
 		if got := AnvilRoute(in); got != want {

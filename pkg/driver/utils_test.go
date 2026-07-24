@@ -1,8 +1,11 @@
 package driver
 
 import (
+	"context"
+	"os"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestGetSnapshotNameFromSnapshotId(t *testing.T) {
@@ -100,5 +103,124 @@ func TestIsFileBackedVolumeID(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("isFileBackedVolumeID(%q) = %v, want %v", tc.volumeID, got, tc.want)
 		}
+	}
+}
+
+// TestClassifyMount covers the fix for review comment #1: a single
+// SafeIsMountPoint timeout must NOT be treated as "stale" (which would trigger a
+// force-unmount of a live shared backing mount). Only `probes` CONSECUTIVE
+// timeouts classify as stale; a timeout that recovers on retry is healthy.
+func TestClassifyMount(t *testing.T) {
+	type r struct {
+		mounted bool
+		err     error
+	}
+	// newProbe returns a probe that yields the scripted results in order,
+	// repeating the last one for any extra calls.
+	newProbe := func(results ...r) func(string) (bool, error) {
+		i := 0
+		return func(string) (bool, error) {
+			res := results[i]
+			if i < len(results)-1 {
+				i++
+			}
+			return res.mounted, res.err
+		}
+	}
+	cases := []struct {
+		name    string
+		results []r
+		probes  int
+		want    mountState
+	}{
+		{"healthy on first probe", []r{{true, nil}}, 2, mountHealthy},
+		{"absent (not a mount point)", []r{{false, nil}}, 2, mountAbsent},
+		{"not-exist path -> absent", []r{{false, os.ErrNotExist}}, 2, mountAbsent},
+		{"all timeouts -> stale", []r{{false, context.DeadlineExceeded}, {false, context.DeadlineExceeded}}, 2, mountStale},
+		{"timeout then healthy -> healthy (no false positive)", []r{{false, context.DeadlineExceeded}, {true, nil}}, 2, mountHealthy},
+		{"timeout then absent -> absent", []r{{false, context.DeadlineExceeded}, {false, nil}}, 2, mountAbsent},
+		{"single probe timeout -> stale", []r{{false, context.DeadlineExceeded}}, 1, mountStale},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyMount("/backing", tc.probes, newProbe(tc.results...)); got != tc.want {
+				t.Fatalf("classifyMount = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestDropBackingRefNoDeadlock is a regression test for the self-deadlock found
+// during live xfs validation: releaseBackingMount held mountRefsMu while calling
+// UnmountBackingShareIfUnused, which re-locks the same (non-reentrant) mutex via
+// backingMountInUse — so the last reference to drop wedged the whole file-backed
+// mount subsystem. dropBackingRef must release mountRefsMu before returning, so a
+// same-mutex call (like backingMountInUse, which the real unmount path makes) is
+// safe immediately afterwards. The whole sequence runs under a watchdog: if the
+// lock is ever held across the callout again, this hangs and the test fails.
+func TestDropBackingRefNoDeadlock(t *testing.T) {
+	d := &CSIDriver{mountRefs: map[string]int{}}
+	p := "/tmp/k8s-file-rev"
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Two concurrent creates hold the share; the first release is NOT the last.
+		d.mountRefs[p] = 2
+		if last := d.dropBackingRef(p); last {
+			t.Errorf("dropBackingRef at refcount 2->1 reported last=true")
+		}
+		// Mimic the real unmount path taking the same mutex right after the drop.
+		// Before the fix, this is exactly where the goroutine deadlocked.
+		if !d.backingMountInUse(p) {
+			t.Errorf("refcount 1 should still read as in-use")
+		}
+		// Second release IS the last: entry must be deleted and read not-in-use.
+		if last := d.dropBackingRef(p); !last {
+			t.Errorf("dropBackingRef at refcount 1->0 reported last=false")
+		}
+		if d.backingMountInUse(p) {
+			t.Errorf("refcount 0 should read as not-in-use after final drop")
+		}
+		if _, ok := d.mountRefs[p]; ok {
+			t.Errorf("map entry should be deleted at refcount 0")
+		}
+		// Dropping below zero must stay at last=true and not underflow.
+		if last := d.dropBackingRef(p); !last {
+			t.Errorf("dropBackingRef on absent key should report last=true")
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("dropBackingRef/backingMountInUse deadlocked: mountRefsMu held across callout")
+	}
+}
+
+// TestBackingMountInUse covers the fix for review comment #2: the mountRefs
+// refcount is the authoritative in-use signal that UnmountBackingShareIfUnused
+// now consults (so it can't unmount a share out from under an in-flight mkfs
+// that holds a reference but has no loop device yet).
+func TestBackingMountInUse(t *testing.T) {
+	d := &CSIDriver{mountRefs: map[string]int{}}
+	p := "/tmp/k8s-file-backed"
+
+	if d.backingMountInUse(p) {
+		t.Fatal("empty refcount should report not-in-use")
+	}
+	d.mountRefs[p] = 1
+	if !d.backingMountInUse(p) {
+		t.Fatal("refcount 1 should report in-use")
+	}
+	d.mountRefs[p] = 2
+	if !d.backingMountInUse(p) {
+		t.Fatal("refcount 2 should report in-use")
+	}
+	// An unrelated path's references must not make this path read as in-use.
+	d.mountRefs["/tmp/other-share"] = 5
+	d.mountRefs[p] = 0
+	if d.backingMountInUse(p) {
+		t.Fatal("refcount 0 should report not-in-use even when another path is referenced")
 	}
 }

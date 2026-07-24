@@ -208,6 +208,11 @@ func checkFileBackedMinSize(fsType string, requestedSize int64) error {
 				common.MinExt4SizeBytes, common.MinExt4SizeBytes/mib,
 				requestedSize, requestedSize/mib)
 		}
+	case "ext3":
+		// ext3 is no longer a supported file-backed filesystem — reject it up
+		// front (rather than silently formatting it like ext4 with no size
+		// floor). Use ext4 or xfs.
+		return status.Error(codes.InvalidArgument, common.Ext3NotSupported)
 	}
 	return nil
 }
@@ -1456,9 +1461,13 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
 		}
 		// Always unfreeze, even if snapshot failed — otherwise the app pod
-		// stays blocked on writes indefinitely.
+		// stays blocked on writes indefinitely. Use a context detached from the
+		// gRPC request cancellation (context.WithoutCancel): if the snapshotter
+		// sidecar's deadline expires while SnapshotFile/SnapshotShare above is
+		// still running, a cancelled ctx would make the unfreeze exec fail fast
+		// without ever reaching the pod, leaving the workload's filesystem frozen.
 		if d.freezer != nil && fileBackedSource {
-			d.freezer.Unfreeze(ctx, frozen)
+			d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())

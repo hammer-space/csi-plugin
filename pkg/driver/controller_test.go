@@ -281,6 +281,9 @@ func TestCheckFileBackedMinSize(t *testing.T) {
 		{"ext4 at floor", "ext4", common.MinExt4SizeBytes, false},
 		{"ext4 above floor", "ext4", 100 * mib, false},
 		{"ext4 tiny", "ext4", 1, true},
+		{"ext3 rejected large", "ext3", 100 * mib, true},   // ext3 unsupported at any size
+		{"ext3 rejected small", "ext3", 1, true},           // ext3 unsupported at any size
+		{"ext3 rejected at floor", "ext3", 20 * mib, true}, // ext3 unsupported even at/above the ext4 floor
 		{"other fsType not gated", "btrfs", 1, false},
 		{"empty fsType not gated", "", 1, false},
 	}

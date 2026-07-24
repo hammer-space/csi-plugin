@@ -153,6 +153,15 @@ func AnvilRoute(urlPath string) string {
 			if segs[i] != "" && segs[i] != "list" {
 				segs[i] = "{id}"
 			}
+		case "snapshot-create", "snapshot-list", "snapshot-delete":
+			// /share-snapshots/<action>/<share>[/<snapshot>] — keep the action
+			// verb, collapse the share name and (for delete) the trailing
+			// snapshot name, both of which are unbounded identifiers.
+			for j := i; j < len(segs); j++ {
+				if segs[j] != "" {
+					segs[j] = "{id}"
+				}
+			}
 		}
 	}
 	return strings.Join(segs, "/")
