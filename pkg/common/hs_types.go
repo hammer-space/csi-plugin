@@ -32,6 +32,7 @@ type HSVolumeParameters struct {
 	CacheEnabled           bool
 	FQDN                   string
 	MountFlags             []string
+	ObjectiveTarget        string
 }
 
 type HSVolume struct {
@@ -51,6 +52,7 @@ type HSVolume struct {
 	AdditionalMetadataTags map[string]string
 	FQDN                   string
 	MountFlags             []string
+	ObjectiveTarget        string
 }
 
 ///// Request and Response objects for interacting with the HS API

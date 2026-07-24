@@ -167,6 +167,25 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		}
 	}
 
+	// objectiveTarget controls where objectives are applied for file-backed
+	// volumes, and therefore whether CreateVolume pays for the per-file
+	// visibility poll (which exists only to gate the per-file objective-set):
+	//   share (default) - objectives live on the backing SHARE only; skip the
+	//                     per-file objective-set and its Anvil visibility poll,
+	//                     so CreateVolume returns as soon as the local mkfs
+	//                     completes. Best for the common single-site shape.
+	//   file / both     - additionally apply per-file objectives (pays the
+	//                     poll). Use for per-volume / multi-site policy.
+	switch target := params["objectiveTarget"]; target {
+	case "", "share":
+		vParams.ObjectiveTarget = "share"
+	case "file", "both":
+		vParams.ObjectiveTarget = target
+	default:
+		return vParams, status.Errorf(codes.InvalidArgument,
+			"invalid objectiveTarget %q (must be one of: share, file, both)", target)
+	}
+
 	return vParams, nil
 }
 
@@ -444,17 +463,31 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
-	// Step 4: Apply metadata with a fresh deadline, but inherit trace context
-	// from the caller so spans stay attached to the CreateVolume trace.
+	// Step 4: Apply objectives + metadata on a fresh deadline, but inherit
+	// trace context so spans stay attached to the CreateVolume trace.
 	// context.WithoutCancel detaches from the gRPC handler's cancellation
 	// (which would otherwise kill the long poll loop) while preserving the
 	// OTel span context attached via tracer.Start above.
 	metadataCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 	defer cancel()
 
-	err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
-	if err != nil {
-		log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
+	// objectiveTarget=share (default): the backing share already carries the
+	// objectives, so we skip the per-file objective-set AND the Anvil
+	// visibility poll that exists only to gate it. CreateVolume then returns
+	// as soon as the local mkfs above completes (seconds, not tens of seconds),
+	// and we avoid the GET /files 500-storm the poll generates under load.
+	// Metadata tags still apply - they operate on the freshly-created local
+	// file over the mount and need no Anvil round-trip.
+	if hsVolume.ObjectiveTarget == "file" || hsVolume.ObjectiveTarget == "both" {
+		err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
+		if err != nil {
+			log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
+		}
+	} else {
+		log.Debugf("objectiveTarget=share: skipping per-file objective+visibility poll for %s", hsVolume.Path)
+		if err := common.SetMetadataTags(metadataCtx, deviceFile, hsVolume.AdditionalMetadataTags); err != nil {
+			log.Warnf("Failed to set additional metadata on backing file for volume %s: %v", deviceFile, err)
+		}
 	}
 
 	return nil
@@ -689,6 +722,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
 		MountFlags:             getMountFlagsFromCapabilities(req.VolumeCapabilities),
+		ObjectiveTarget:        vParams.ObjectiveTarget,
 	}
 
 	// if it's file backed, we should check capacity of backing share
