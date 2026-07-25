@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"context"
@@ -305,22 +306,59 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 	return nil
 }
 
-// acquireBackingMount guarantees the backing share is mounted and takes one
-// in-flight reference on it. It must be called WITHOUT the per-backing-share lock
-// held: the mount/unmount decision is serialized by its own short mountRefsMu, so
-// the caller's subsequent per-file work (mkfs) runs concurrently with other
-// creates on the same share. The share is mounted only on the 0->1 transition;
-// every other concurrent create just bumps the count.
-func (d *CSIDriver) acquireBackingMount(ctx context.Context, backingShare *common.ShareResponse, hsVol *common.HSVolume) error {
-	backingDir := common.ShareStagingDir + backingShare.ExportPath
+// mountLockFor returns the per-backing-directory lock that serializes the actual
+// mount/unmount of that share. Using a distinct lock per directory (instead of the
+// global mountRefsMu) is what lets the slow NFS mount run without freezing refcount
+// operations on other shares. The lock is created on first use and never deleted —
+// there are only a handful of distinct backing shares, so the map stays tiny, and
+// keeping entries avoids a delete-vs-lookup race. The global mountRefsMu is held
+// only to look up/insert the entry (microseconds).
+func (d *CSIDriver) mountLockFor(backingDir string) *sync.Mutex {
 	d.mountRefsMu.Lock()
 	defer d.mountRefsMu.Unlock()
-	if d.mountRefs[backingDir] == 0 {
+	ml, ok := d.mountLocks[backingDir]
+	if !ok {
+		ml = &sync.Mutex{}
+		d.mountLocks[backingDir] = ml
+	}
+	return ml
+}
+
+// acquireBackingMount guarantees the backing share is mounted and takes one
+// in-flight reference on it. It must be called WITHOUT the per-backing-share volume
+// lock held, so the caller's subsequent per-file work (mkfs) runs concurrently with
+// other creates on the same share.
+//
+// The mount is serialized by a PER-DIRECTORY lock (mountLockFor), never by the
+// global mountRefsMu. EnsureBackingShareMounted performs a real NFS mount that can
+// block for up to the ~5 min command-exec timeout against a slow or dead portal.
+// The previous code held mountRefsMu across that mount, so a single slow mount froze
+// EVERY other file-backed operation — including refcount reads (backingMountInUse)
+// and releases on unrelated shares — for the whole mount window. With a per-dir
+// lock, a slow mount on one share only blocks new mounts of THAT share; mountRefsMu
+// is taken only for the microsecond map updates below.
+//
+// The reference is reserved BEFORE mounting (bumpBackingRef, so the count is >=1
+// throughout the mount). That closes a window the old global-lock design covered
+// incidentally: a concurrent delete's UnmountBackingShareIfUnused must not observe
+// refcount 0 mid-mount and unmount the share out from under us. The per-dir lock
+// additionally guarantees two concurrent first-creates can't both mount the target.
+func (d *CSIDriver) acquireBackingMount(ctx context.Context, backingShare *common.ShareResponse, hsVol *common.HSVolume) error {
+	backingDir := common.ShareStagingDir + backingShare.ExportPath
+
+	ml := d.mountLockFor(backingDir)
+	ml.Lock()
+	defer ml.Unlock()
+
+	// Reserve the reference first; `first` is true only on the 0->1 transition.
+	if first := d.bumpBackingRef(backingDir); first {
 		if err := d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVol); err != nil {
+			// Roll back the reservation so a failed mount doesn't leak a reference
+			// that would keep the (unmounted) share pinned as "in use" forever.
+			d.dropBackingRef(backingDir)
 			return err
 		}
 	}
-	d.mountRefs[backingDir]++
 	return nil
 }
 
@@ -330,23 +368,41 @@ func (d *CSIDriver) acquireBackingMount(ctx context.Context, backingShare *commo
 // own loopback-device safety check before actually unmounting.
 func (d *CSIDriver) releaseBackingMount(ctx context.Context, backingShare *common.ShareResponse) {
 	backingDir := common.ShareStagingDir + backingShare.ExportPath
-	// Decide-then-release: drop the refcount under the lock, but run the actual
-	// unmount WITHOUT mountRefsMu held. UnmountBackingShareIfUnused re-acquires the
-	// same mutex via backingMountInUse, and sync.Mutex is not reentrant, so calling
-	// it while still holding the lock self-deadlocks this goroutine — which then
-	// never releases mountRefsMu (or the volume lock held above it in CreateVolume),
-	// wedging every subsequent file-backed create. It only fires for whichever
-	// volume drops the LAST reference (refcount 0), so it stays hidden until a share
-	// has exactly one in-flight create (e.g. a single file-backed PVC).
+
+	// Take the SAME per-dir lock as acquireBackingMount so this unmount can't race a
+	// concurrent (re)mount of the same target, and — as in acquire — so the slow
+	// unmount runs under the per-dir lock rather than the global mountRefsMu.
+	ml := d.mountLockFor(backingDir)
+	ml.Lock()
+	defer ml.Unlock()
+
+	// Decide-then-act: drop the refcount under the global mutex (dropBackingRef holds
+	// it only for the decrement), then run the unmount with the global mutex RELEASED.
+	// UnmountBackingShareIfUnused re-acquires the global mutex via backingMountInUse,
+	// and sync.Mutex is not reentrant, so holding it across the call self-deadlocks
+	// the goroutine — the bug found during live xfs validation, which then never
+	// released mountRefsMu (or the volume lock above it) and wedged all file-backed
+	// creates. It only triggers for whichever volume drops the LAST reference.
 	if !d.dropBackingRef(backingDir) {
 		return
 	}
-	// A concurrent acquireBackingMount racing in here re-bumps the refcount before
-	// we unmount; UnmountBackingShareIfUnused re-checks backingMountInUse and skips
-	// the unmount in that case, so the share stays mounted for the new create.
+	// Because we hold ml, no acquireBackingMount for this dir can re-mount until we
+	// return; UnmountBackingShareIfUnused still re-checks backingMountInUse (belt and
+	// suspenders, and to stay correct against the direct, non-ml unmount callers).
 	if _, err := d.UnmountBackingShareIfUnused(ctx, backingShare.Name); err != nil {
 		log.Warnf("releaseBackingMount: unmount of %s failed: %v", backingDir, err)
 	}
+}
+
+// bumpBackingRef adds one in-flight reference for backingDir under mountRefsMu and
+// reports whether this was the 0->1 transition (i.e. the caller is responsible for
+// mounting). It holds mountRefsMu only for the increment.
+func (d *CSIDriver) bumpBackingRef(backingDir string) (first bool) {
+	d.mountRefsMu.Lock()
+	defer d.mountRefsMu.Unlock()
+	first = d.mountRefs[backingDir] == 0
+	d.mountRefs[backingDir]++
+	return first
 }
 
 // dropBackingRef decrements the in-flight refcount for backingDir under

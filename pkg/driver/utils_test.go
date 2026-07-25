@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 )
@@ -195,6 +196,76 @@ func TestDropBackingRefNoDeadlock(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("dropBackingRef/backingMountInUse deadlocked: mountRefsMu held across callout")
+	}
+}
+
+// TestBumpBackingRefFirst covers bumpBackingRef reporting the 0->1 transition,
+// which is what tells acquireBackingMount it owns the mount. The reference is taken
+// BEFORE mounting so a concurrent delete can't see refcount 0 mid-mount.
+func TestBumpBackingRefFirst(t *testing.T) {
+	d := &CSIDriver{mountRefs: map[string]int{}}
+	p := "/tmp/k8s-file-rev"
+
+	if first := d.bumpBackingRef(p); !first {
+		t.Fatal("first bump on an unmounted share should report first=true")
+	}
+	if first := d.bumpBackingRef(p); first {
+		t.Fatal("second bump should report first=false (already mounted)")
+	}
+	if d.mountRefs[p] != 2 {
+		t.Fatalf("refcount = %d, want 2", d.mountRefs[p])
+	}
+	// Drain back to 0, then the next bump is a fresh 0->1 transition again.
+	d.dropBackingRef(p)
+	d.dropBackingRef(p)
+	if first := d.bumpBackingRef(p); !first {
+		t.Fatal("bump after draining to 0 should report first=true again")
+	}
+}
+
+// TestBackingMountLockDoesNotBlockRefcount is the core regression test for moving
+// the slow NFS mount off the global mountRefsMu: while a per-directory mount lock is
+// held (simulating an in-progress or hung mount that can last up to ~5 min), the
+// global refcount operations — bumpBackingRef, backingMountInUse, dropBackingRef,
+// for the SAME dir and OTHER dirs — must still complete immediately. If the mount
+// ever moves back under mountRefsMu, those ops would block behind the held mount
+// lock and this watchdog fails.
+func TestBackingMountLockDoesNotBlockRefcount(t *testing.T) {
+	d := &CSIDriver{mountRefs: map[string]int{}, mountLocks: map[string]*sync.Mutex{}}
+	dir1 := "/tmp/k8s-file-rev"
+	dir2 := "/tmp/other-share"
+
+	// mountLockFor must be stable per dir and distinct across dirs.
+	if d.mountLockFor(dir1) != d.mountLockFor(dir1) {
+		t.Fatal("mountLockFor returned different locks for the same dir")
+	}
+	if d.mountLockFor(dir1) == d.mountLockFor(dir2) {
+		t.Fatal("mountLockFor returned the same lock for different dirs")
+	}
+
+	// Simulate a slow/hung mount: hold dir1's per-dir mount lock for the whole test.
+	ml := d.mountLockFor(dir1)
+	ml.Lock()
+	defer ml.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		// Refcount ops on the SAME dir whose mount is "in progress" must not block.
+		d.bumpBackingRef(dir1)
+		if !d.backingMountInUse(dir1) {
+			t.Errorf("dir1 should read in-use after bump")
+		}
+		d.dropBackingRef(dir1)
+		// ...and neither must ops on an unrelated dir.
+		d.bumpBackingRef(dir2)
+		d.dropBackingRef(dir2)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("refcount ops blocked behind a held mount lock: mount is back under mountRefsMu")
 	}
 }
 

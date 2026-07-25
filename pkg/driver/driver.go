@@ -59,8 +59,15 @@ type CSIDriver struct {
 	// create (which serialized all file creation on a share to ~1 at a time).
 	mountRefsMu sync.Mutex
 	mountRefs   map[string]int
-	hsclient    *client.HammerspaceClient
-	NodeID      string
+	// mountLocks holds one lock per backing-share staging directory. It serializes
+	// the actual mount/unmount of a given backing share so the slow (up to ~5 min)
+	// NFS mount never runs under the global mountRefsMu. mountRefsMu then guards only
+	// the two maps below and is always held for microseconds; a slow mount on one
+	// share can no longer wedge refcount reads (backingMountInUse) or releases on
+	// every other in-flight file-backed operation. See acquireBackingMount.
+	mountLocks map[string]*sync.Mutex
+	hsclient   *client.HammerspaceClient
+	NodeID     string
 	// freezer runs fsfreeze inside the pod(s) holding a source volume
 	// during CreateSnapshot, so XFS reaches a quiesce point before Anvil
 	// captures the file bytes. Nil when the driver is not running
@@ -89,6 +96,7 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		volumeLocks:   make(map[string]*keyLock),
 		snapshotLocks: make(map[string]*keyLock),
 		mountRefs:     make(map[string]int),
+		mountLocks:    make(map[string]*sync.Mutex),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
 		freezer:       NewFreezer(),
 	}
