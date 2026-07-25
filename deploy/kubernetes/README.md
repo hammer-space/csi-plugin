@@ -10,6 +10,26 @@ Apply all from within this directory:
 kubectl apply -f *.yaml
 ```
 
+## Anvil credentials
+
+The driver authenticates to Anvil with an administrative user stored in a Secret
+named `com.hammerspace.csi.credentials`. **`example_secret.yaml` is a template
+full of `<PLACEHOLDER>` values — do not `kubectl apply` it as-is, and do not
+commit a filled-in copy.** The recommended path is to create the Secret
+imperatively:
+
+```bash
+kubectl create secret generic com.hammerspace.csi.credentials \
+  --namespace kube-system \
+  --from-literal=username='<PLACEHOLDER>' \
+  --from-literal=password='<PLACEHOLDER>' \
+  --from-literal=endpoint='https://<PLACEHOLDER>'
+```
+
+For encryption at rest, least-privilege RBAC, GitOps-safe storage (Sealed
+Secrets), and external secret managers (External Secrets Operator / Secrets Store
+CSI Driver), see [`SECRETS.md`](./SECRETS.md).
+
 
 ## Plugin Updates
 

@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
 - Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
 
+### Security
+- Hardened the example credential handling in `deploy/kubernetes`: `example_secret.yaml` is now a clearly-marked `<PLACEHOLDER>` template (no committed base64 admin/admin), `kubectl create secret` is documented as the primary path, and a new [`deploy/kubernetes/SECRETS.md`](deploy/kubernetes/SECRETS.md) covers a least-privilege Anvil service account (scoped Hammerspace role instead of a full admin), least-privilege Kubernetes RBAC, Sealed Secrets, and External Secrets Operator / Secrets Store CSI.
+- Scoped the `secrets` RBAC grant on the `csi-provisioner` and `csi-node` ClusterRoles (k8s 1.34–1.36 manifests) from cluster-wide `get, list` down to `get` on the single named credential Secret via `resourceNames`. Driver credentials are injected by the kubelet via `secretKeyRef` and need no ServiceAccount access to other Secrets.
+
 ## [1.2.9]
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.

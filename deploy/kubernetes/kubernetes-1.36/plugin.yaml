@@ -217,9 +217,17 @@ rules:
   - apiGroups: [""]
     resources: ["endpoints"]
     verbs: ["list", "watch", "create", "update", "delete", "get"]
+  # Least-privilege: the driver's Anvil credentials are injected into the pods by
+  # the kubelet via secretKeyRef, which needs no ServiceAccount RBAC. This grant is
+  # scoped to only the named credential Secret (get, not cluster-wide list) so a
+  # compromised provisioner ServiceAccount can't enumerate or read other Secrets.
+  # If you set per-volume secrets on a StorageClass
+  # (csi.storage.k8s.io/provisioner-secret-name), add those Secret name(s) here.
+  # See deploy/kubernetes/SECRETS.md.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames: ["com.hammerspace.csi.credentials"]
+    verbs: ["get"]
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshotclasses"]
     verbs: ["get", "list", "watch"]
@@ -416,9 +424,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["list", "watch"]
+  # Least-privilege: the node driver's credentials are injected by the kubelet via
+  # secretKeyRef (no ServiceAccount RBAC needed). Scoped to only the named
+  # credential Secret (get, not cluster-wide list). See deploy/kubernetes/SECRETS.md.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list"]
+    resourceNames: ["com.hammerspace.csi.credentials"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["nodes"]
     verbs: ["get", "list", "update"]
