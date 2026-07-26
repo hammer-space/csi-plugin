@@ -21,15 +21,16 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
 
 * Kubernetes version 1.13 or higher
 * Per-minor manifests live under `deploy/kubernetes/kubernetes-<major>.<minor>/plugin.yaml`.
-  Pick the one matching your `kubectl`/cluster minor version. Bundled: **1.25–1.29**
-  (historical) and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently supported +
+  Pick the one matching your `kubectl`/cluster minor version. Bundled: **1.29**
+  and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently supported +
   validated set** — the driver in this release was tested end-to-end on live k8s
   **1.34** and **1.35** clusters (and 1.36). Those three manifests are the 1.29
   manifest plus the observability wiring (a host-networked metrics port and OTel
   env vars); see [`docs/observability.md`](../../docs/observability.md) and
-  [`deploy/monitoring/README.md`](../monitoring/README.md). The 1.25–1.29 manifests
-  are kept for older clusters and pin their contemporary driver image. For a minor
-  with no bundled manifest, copy the nearest lower version and bump sidecar tags.
+  [`deploy/monitoring/README.md`](../monitoring/README.md). Manifests for
+  Kubernetes minors older than 1.29 have been moved to [`archive/`](./archive/);
+  they are unsupported and pin their contemporary driver image. For a minor with
+  no bundled manifest, copy the nearest lower version and bump sidecar tags.
 * BlockVolume support requires kubelet has the [feature gates](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/) BlockVolume and CSIBlockVolume set to true.
     Example in /var/lib/kubelet/config.yaml
     ```yaml
