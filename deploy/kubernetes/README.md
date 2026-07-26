@@ -2,8 +2,6 @@
 
 This directory contains example manifests for deploying the plugin to Kubernetes.
 
-Documentation on how to write these manifests can be found [here](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/container-storage-interface.md#recommended-mechanism-for-deploying-csi-drivers-on-kubernetes)
-
 To deploy all necessary components, customize these files and apply them:
 Apply all from within this directory:
 ```bash

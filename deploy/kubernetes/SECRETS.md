@@ -185,7 +185,7 @@ docs.
 ## GitOps-safe: Sealed Secrets
 
 If you drive your cluster from git and want the *encrypted* credential to live in
-the repo safely, [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
+the repo safely, [Sealed Secrets](https://github.com/bitnami/sealed-secrets)
 is the lightest-weight option. You encrypt a normal Secret with the cluster's
 public key using the `kubeseal` CLI; only the in-cluster controller can decrypt
 it, so the resulting `SealedSecret` is safe to commit.
@@ -265,6 +265,6 @@ Rough guidance:
 
 - [Kubernetes — Secrets](https://kubernetes.io/docs/concepts/configuration/secret/)
 - [Kubernetes CSI — StorageClass Secrets](https://kubernetes-csi.github.io/docs/secrets-and-credentials-storage-class.html)
-- [Sealed Secrets](https://github.com/bitnami-labs/sealed-secrets)
+- [Sealed Secrets](https://github.com/bitnami/sealed-secrets)
 - [External Secrets Operator](https://external-secrets.io/)
 - [Secrets Store CSI Driver — Best Practices](https://secrets-store-csi-driver.sigs.k8s.io/topics/best-practices)
