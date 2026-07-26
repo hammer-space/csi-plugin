@@ -24,9 +24,9 @@ kubectl create secret generic com.hammerspace.csi.credentials \
   --from-literal=endpoint='https://<PLACEHOLDER>'
 ```
 
-For encryption at rest, least-privilege RBAC, GitOps-safe storage (Sealed
-Secrets), and external secret managers (External Secrets Operator / Secrets Store
-CSI Driver), see [`SECRETS.md`](./SECRETS.md).
+For a least-privilege Anvil service account, least-privilege Kubernetes RBAC,
+GitOps-safe storage (Sealed Secrets), and external secret managers (External
+Secrets Operator / Secrets Store CSI Driver), see [`SECRETS.md`](./SECRETS.md).
 
 
 ## Plugin Updates
