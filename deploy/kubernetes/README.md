@@ -1,4 +1,4 @@
-# Kubernetes v1.13+ Installation/Configurations
+# Kubernetes Installation/Configuration
 
 This directory contains example manifests for deploying the plugin to Kubernetes.
 
@@ -19,10 +19,11 @@ If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the 
 ## Kubernetes  Cluster Prerequisites
 Kubernetes documentation for CSI support can be found [here](https://kubernetes-csi.github.io/)
 
-* Kubernetes version 1.13 or higher
-* Per-minor manifests live under `deploy/kubernetes/kubernetes-<major>.<minor>/plugin.yaml`.
-  Pick the one matching your `kubectl`/cluster minor version. Bundled: **1.29**
-  and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently supported +
+* There is no single blanket minimum Kubernetes version — the required version is
+  specific to the manifest you deploy. Per-minor manifests live under
+  `deploy/kubernetes/kubernetes-<major>.<minor>/plugin.yaml`, and each targets that
+  Kubernetes minor, so apply the one matching your `kubectl`/cluster version.
+  Bundled: **1.29** and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently supported +
   validated set** — the driver in this release was tested end-to-end on live k8s
   **1.34** and **1.35** clusters (and 1.36). Those three manifests are the 1.29
   manifest plus the observability wiring (a host-networked metrics port and OTel
