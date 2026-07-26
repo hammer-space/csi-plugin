@@ -10,7 +10,7 @@ Implements the Identity, Node, and Controller interfaces as single Golang binary
 
 CSI Mode | CSI Spec Version | `CSI_MAJOR_VERSION` | Compatibility | Notes
 -------- | ---------------- | ------------------- | ------------- | -----
-CSI v1   | v1.9.0           | `1`                 | Kubernetes 1.13+ | Default mode for current deployments. Active example manifests are for Kubernetes 1.29 and 1.34–1.36; manifests for older minors (1.13 through 1.28) are archived under `deploy/kubernetes/archive/`.
+CSI v1   | v1.9.0           | `1`                 | Kubernetes 1.29, 1.34–1.36 | Default mode for current deployments. There is no blanket minimum — deploy the per-minor manifest matching your cluster's version. **1.34–1.36** are the validated set and **1.29** is bundled for older clusters; manifests for minors older than 1.29 (1.13 through 1.28) are archived, unsupported, under `deploy/kubernetes/archive/`.
 CSI v0.3 | v0.3.0           | `0`                 | Kubernetes 1.10-1.12 | Legacy compatibility mode. Supports filesystem (Mount) volumes only. See `deploy/kubernetes/archive/kubernetes-1.10-1.12/README.md`.
  
 #### Supported Capabilities
