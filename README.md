@@ -74,6 +74,7 @@ Variable                       |     Default           | Description
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
 ``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex ``/mnt/data-portal``
 ``CSI_MAJOR_VERSION``          |     ``"1"``           | CSI interface compatibility mode. Use ``"1"`` for Kubernetes 1.13+ deployments and ``"0"`` only for legacy Kubernetes 1.10-1.12 environments.
+``LOG_LEVEL``                  |     ``info``          | Log verbosity: ``panic``, ``fatal``, ``error``, ``warn``, ``info``, ``debug``, or ``trace``. ``debug`` logs every Anvil REST call, so use it for troubleshooting rather than steady-state operation. An unrecognized value falls back to ``info``.
 
 ## Usage
 Supported volume parameters for CreateVolume requests (maps to Kubernetes storage class params):

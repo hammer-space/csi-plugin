@@ -13,8 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, validated end-to-end on live 1.34 and 1.35 clusters (1.29 base + host-networked metrics port + OTel env vars).
 - `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
 - Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
+- `LOG_LEVEL` environment variable to set log verbosity (`panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`). Unset or unrecognized values fall back to `info`.
 
 ### Changed
+- **The driver now logs at `info` by default instead of `debug`.** Debug logging was hardcoded, so every deployment logged every Anvil REST call regardless of configuration. Set `LOG_LEVEL=debug` to restore the previous verbosity when troubleshooting.
 - Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
 - Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
 - Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.
