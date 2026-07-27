@@ -1,7 +1,16 @@
+# Example VolumeSnapshotClass for the Hammerspace CSI Plugin.
+#
+# Requires the external-snapshotter CRDs and controller to be installed in the
+# cluster; the csi-snapshotter sidecar in plugin.yaml speaks the v1 API.
+#
+# The driver takes no VolumeSnapshotClass parameters — snapshot behavior is
+# derived from the source volume (share-backed volumes get a share snapshot,
+# file-backed volumes get a file snapshot), so no `parameters:` block is needed.
+apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshotClass
-apiVersion: snapshot.storage.k8s.io/v1alpha1
 metadata:
   name: hs-snapshots
-  namespace: kube-system
-snapshotter: com.hammerspace.csi
-parameters:
+driver: com.hammerspace.csi
+# Delete - the Hammerspace snapshot is removed when the VolumeSnapshot is deleted.
+# Retain - the VolumeSnapshotContent and the Hammerspace snapshot are kept.
+deletionPolicy: Delete

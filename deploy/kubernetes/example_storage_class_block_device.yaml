@@ -4,7 +4,6 @@ kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
   name: hs-storage-block
-  namespace: kube-system
 provisioner: com.hammerspace.csi
 volumeBindingMode: WaitForFirstConsumer
 parameters:

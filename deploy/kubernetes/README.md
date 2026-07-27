@@ -171,22 +171,21 @@ spec:
         name: data-dir
       command: [ "stat", "/dev/xvda" ]
   volumes:
-    - name: data-dev
+    - name: data-dir
       persistentVolumeClaim:
         claimName: mydevice
 ```
 
 ### Create a Snapshot
 ```yaml
-apiVersion: snapshot.storage.k8s.io/v1alpha1
+apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
   name: data-snapshot
 spec:
-  snapshotClassName: hs-snapshots
+  volumeSnapshotClassName: hs-snapshots
   source:
-    name: mydevice
-    kind: PersistentVolumeClaim
+    persistentVolumeClaimName: mydevice
 ```
 ## Example Topology Usage
 
@@ -269,7 +268,6 @@ kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
   name: hs-file-backed
-  namespace: kube-system
 provisioner: com.hammerspace.csi
 parameters:
   fsType: "ext4"
