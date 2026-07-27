@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **The driver now logs at `info` by default instead of `debug`.** Debug logging was hardcoded, so every deployment logged every Anvil REST call regardless of configuration. Set `LOG_LEVEL=debug` to restore the previous verbosity when troubleshooting.
+- Log entries are now emitted as one JSON object per line instead of pretty-printed across multiple indented lines, so log collectors that parse container output line by line (Loki, ELK, CloudWatch) can ingest them.
 - Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
 - Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
 - Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.

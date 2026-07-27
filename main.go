@@ -47,9 +47,11 @@ import (
 const DefaultLogLevel = log.InfoLevel
 
 func init() {
-	// Setup logging
+	// Setup logging. Emit one JSON object per line: log collectors (Loki, ELK,
+	// CloudWatch) parse container output line by line, so indented multi-line
+	// JSON is read as several unparseable fragments per entry.
 	log.SetFormatter(&log.JSONFormatter{
-		PrettyPrint:      true,
+		PrettyPrint:      false,
 		DisableTimestamp: false,
 		TimestampFormat:  "2006-01-02 15:04:05",
 	})
