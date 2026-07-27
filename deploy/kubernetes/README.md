@@ -2,11 +2,23 @@
 
 This directory contains example manifests for deploying the plugin to Kubernetes.
 
-To deploy all necessary components, customize these files and apply them:
-Apply all from within this directory:
-```bash
-kubectl apply -f *.yaml
-```
+**New here? Start with [`QUICKSTART.md`](./QUICKSTART.md)** — credentials, driver
+deployment, and a first working volume, with a check after every step.
+
+The examples are meant to be customized and applied individually, not all at
+once (`example_secret.yaml` is a placeholder template, and `example_snapshot.yaml`
+expects an existing PVC).
+
+| File | What it is |
+| --- | --- |
+| [`example_secret.yaml`](./example_secret.yaml) | Anvil credentials template — see [`SECRETS.md`](./SECRETS.md) |
+| [`example_storage_class.yaml`](./example_storage_class.yaml) | Shared filesystem (NFS) volumes — the usual starting point |
+| [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | File-backed ext4/xfs volumes |
+| [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) | Raw block volumes |
+| [`example_fqdn_storage_class.yaml`](./example_fqdn_storage_class.yaml) | FQDN-addressed storage, with a runnable PVC + Pod |
+| [`example_snapshot_class.yaml`](./example_snapshot_class.yaml) | VolumeSnapshotClass |
+| [`example_snapshot.yaml`](./example_snapshot.yaml) | Snapshot a volume and restore it into a new one |
+| `kubernetes-<major>.<minor>/plugin.yaml` | The driver itself |
 
 ## Anvil credentials
 
@@ -95,6 +107,47 @@ to give the user creating the role cluster-admin privileges.
 kubectl create clusterrolebinding i-am-root --clusterrole=cluster-admin --user=<current user>
 ```
 
+## Choosing a volume type
+
+The `fsType` parameter decides how a volume is provisioned. Everything else
+follows from that choice.
+
+| | **Share-backed** (`fsType: nfs`, the default) | **File-backed** (`fsType: ext4` or `xfs`) | **Block** (`volumeMode: Block`) |
+| --- | --- | --- | --- |
+| What it is | A Hammerspace share, mounted over NFS | A file on a backing share, formatted and loop-mounted | A file on a backing share, exposed as a raw device |
+| Shared between pods | Yes — `ReadWriteMany` | No — one pod at a time | No — one pod at a time |
+| Typical use | Shared data, the common case | A pod that needs POSIX/local filesystem semantics | Databases and apps that manage their own format |
+| Needs a backing share | No | Yes — `mountBackingShareName` | Yes — `blockBackingShareName` |
+| Expansion | Online | Requires restarting the pod | Requires restarting the pod |
+| Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
+| Example | [`example_storage_class.yaml`](./example_storage_class.yaml) | [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) |
+
+If you are not sure, use share-backed (`fsType: nfs`). `ext3` is not supported.
+
+## StorageClass parameters
+
+All parameters are optional and are set under `parameters:` in a StorageClass.
+Values are always strings (quote numbers and booleans).
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `fsType` | `nfs` | `nfs` for share-backed volumes; `ext4` or `xfs` for file-backed. Selects the volume type — see above. |
+| `objectives` | none | Comma-separated Hammerspace objectives to apply in addition to the cluster defaults. Ex: `"keep-online,archive"` |
+| `objectiveTarget` | `share` | File-backed volumes only. `share` applies objectives to the backing share only and provisions fastest; `file` or `both` also applies them per file, for per-volume placement policy. |
+| `mountBackingShareName` | none | File-backed volumes: the share that holds the backing files. Auto-created if missing; never deleted by the driver. |
+| `blockBackingShareName` | none | Block volumes: as above, for raw block backing files. |
+| `exportOptions` | none | NFS export rules as `;`-separated `<subnet>,<accessPermissions>,<rootSquash>` triples. Ex: `"*,RW,false; 172.16.0.0/20,RO,true"` |
+| `volumeNameFormat` | `csi-%s` | Naming pattern for provisioned shares. Must contain `%s` exactly once and no `/`. |
+| `additionalMetadataTags` | none | Comma-separated `key=value` metadata applied to created shares and files. |
+| `comment` | `Created by CSI driver` | Share description on the Anvil. Max 255 characters. |
+| `deleteDelay` | `-1` | Milliseconds Hammerspace waits before actually deleting a share after the volume is deleted. `-1` uses the cluster default (86400000 = 24h); `0` purges immediately. |
+| `cacheEnabled` | `false` | Enable Hammerspace caching for the share. |
+| `fqdn` | none | Address storage via this FQDN instead of a data-portal IP. Must resolve from the controller and node pods, or it is ignored with a warning. See [the FQDN example](./example_fqdn_storage_class.yaml). |
+
+Storage-class fields outside `parameters:` behave as they do for any CSI driver
+— `reclaimPolicy`, `volumeBindingMode`, `allowVolumeExpansion`, and
+`mountOptions` (used for the NFS mount).
+
 ## Example Usage
 
 ### Create a Filesystem Volume
@@ -177,6 +230,11 @@ spec:
 ```
 
 ### Create a Snapshot
+
+Requires the [external-snapshotter](https://github.com/kubernetes-csi/external-snapshotter)
+CRDs and controller, plus a VolumeSnapshotClass
+([`example_snapshot_class.yaml`](./example_snapshot_class.yaml)).
+
 ```yaml
 apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
@@ -187,6 +245,37 @@ spec:
   source:
     persistentVolumeClaimName: mydevice
 ```
+
+The driver snapshots share-backed volumes with a share snapshot and file-backed
+volumes with a file snapshot (freezing the source filesystem briefly for a
+crash-consistent image); there is nothing to configure.
+
+### Restore a Snapshot
+
+Reference the snapshot as a PVC `dataSource`. This provisions a **new**,
+independent volume — see [`example_snapshot.yaml`](./example_snapshot.yaml) for
+the snapshot and restore together.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mydevice-restored
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: hs-storage
+  dataSource:
+    name: data-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+```
+
+Cloning a PVC directly (PVC-to-PVC `dataSource`) is not supported.
+
 ## Example Topology Usage
 
 ### Create an Application Using the Filesystem Volume, only schedule to nodes that are data-portals
