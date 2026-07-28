@@ -2,7 +2,7 @@
 
 This plugin uses Hammerspace backend as distributed data storage for containers.
 
-Supports CSI Spec v1.1.0 for `CSI_MAJOR_VERSION=1` and legacy CSI Spec v0.3.0 compatibility for `CSI_MAJOR_VERSION=0`.
+Supports CSI Spec v1.9.0 for `CSI_MAJOR_VERSION=1` and legacy CSI Spec v0.3.0 compatibility for `CSI_MAJOR_VERSION=0`.
  
 Implements the Identity, Node, and Controller interfaces as single Golang binary.
 
