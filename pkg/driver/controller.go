@@ -351,7 +351,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	}
-	log.Debugf("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
+	log.Infof("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
 
 	// The hs client expects a trailing slash for directories
 	err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
@@ -392,7 +392,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
-		log.Infof("Checking if get share response back non nil share.")
+		log.Debugf("Checking if get share response back non nil share.")
 		if share == nil {
 			log.Errorf("Error while creating share from ensure backing share exist method.")
 			return nil, fmt.Errorf("requested share [%s] not found", backingShareName)
@@ -488,7 +488,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 				return err
 			}
 		}
-		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
+		log.Infof("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
 	// Step 4: Apply objectives + metadata on a fresh deadline, but inherit
@@ -755,7 +755,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 				return nil, status.Error(codes.Internal, "unexpected type for free capacity")
 			}
 		} else {
-			log.Infof("getting free capacity from (/cntl/state) api response")
+			log.Debugf("getting free capacity from (/cntl/state) api response")
 			// Call your function to get the free capacity from the API response here
 			available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
 			if err != nil {
@@ -827,7 +827,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 
 	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
 		// This function is called when user want new nfs share inside one base share
-		log.Debugf("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
+		log.Infof("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
 		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
@@ -838,7 +838,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		volID = fmt.Sprintf("%s/%s", volumePath, volumeName)
 	} else if fileBacked {
 		// This function will be called in case of Block and File backed share
-		log.Debugf("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
+		log.Infof("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
 		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
@@ -851,7 +851,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		// In that case all new created share will have path like /k8s-nfs-share/pvc-csi-uuid
 		// Then we create snapshot of that share /pvc-csi-uuid which will be inside /k8s-nfs-share/.snapshot
 		// Then restore the snapshot to the new created share from snapshot content source.
-		log.Debugf("Creating share for NFS volume with path %s", hsVolume.Path)
+		log.Infof("Creating share for NFS volume with path %s", hsVolume.Path)
 		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
 		if err != nil {
 			return nil, err
@@ -904,7 +904,7 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 	defer span.End()
 	var exists bool
 	if exists, _ = d.hsclient.DoesFileExist(ctx, filepath); exists {
-		log.Debugf("found file-backed volume to delete, %s", filepath)
+		log.Infof("found file-backed volume to delete, %s", filepath)
 	}
 
 	// Check if file has snapshots and fail
@@ -1094,7 +1094,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 		if file == nil || err != nil {
 			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 		} else {
-			log.Debugf("found file-backed volume to resize, %s", req.GetVolumeId())
+			log.Infof("found file-backed volume to resize, %s", req.GetVolumeId())
 			// Check backing share size to determine if we can handle new size (look at create volume for how we do this)
 			// && check the size of the file only resize if requested is larger than what we have
 			// if we are good, then return saying we need a resize on next mount
@@ -1210,9 +1210,9 @@ func (d *CSIDriver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Val
 	}
 
 	if fileBacked {
-		log.Infof("Validating volume capabilities for file-backed volume %s", volumeName)
+		log.Debugf("Validating volume capabilities for file-backed volume %s", volumeName)
 	} else if share != nil {
-		log.Infof("Validating volume capabilities for share-backed volume %s", volumeName)
+		log.Debugf("Validating volume capabilities for share-backed volume %s", volumeName)
 	}
 
 	// Calculate Capabilties
