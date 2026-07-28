@@ -75,6 +75,7 @@ own on-disk format.
 | Grow while in use | **Yes** | Needs a pod restart | Needs a pod restart |
 | Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
 | Snapshot type | Hammerspace share snapshot | File snapshot (source frozen briefly) | File snapshot |
+| At high volume counts | One Hammerspace share per volume, so the Anvil management API is the limit | **Scales to thousands of volumes** | **Scales to thousands of volumes** |
 
 #### Which should I use?
 
@@ -85,9 +86,13 @@ own on-disk format.
   — and only one pod needs the data.
 * **Use block** when the application wants a raw device and manages its own
   format.
-* **Avoid file-backed and block for many small volumes.** Each one is a file on
-  a shared backing share and needs `mkfs` at creation, so provisioning is more
-  expensive than a share-backed volume.
+* **Prefer file-backed when provisioning very large numbers of volumes.** Each
+  share-backed volume is a separate Hammerspace share, and every share create is
+  an Anvil management task, so the management API becomes the limiting factor as
+  volume counts grow. File-backed volumes are files inside a single backing
+  share, so the per-volume work is a local `mkfs` that parallelizes across nodes
+  — environments provisioning thousands of PVCs should use file-backed. See
+  [`docs/file-backed-performance.md`](docs/file-backed-performance.md).
 
 `ext3` is not supported; use `ext4` or `xfs`.
 
@@ -126,10 +131,9 @@ Variable                       |     Default           | Description
 *``CSI_ENDPOINT``              |                       | Location on host for gRPC socket (Ex: /tmp/csi.sock)
 *``CSI_NODE_NAME``             |                       | Identifier for the host the plugin is running on
 *``HS_ENDPOINT``               |                       | Hammerspace API gateway
-*``HS_USERNAME``               |                       | Hammerspace username (admin role credentials)
+*``HS_USERNAME``               |                       | Hammerspace username for the driver. Use a dedicated least-privilege account rather than a full administrator — see [`deploy/kubernetes/SECRETS.md`](deploy/kubernetes/SECRETS.md)
 *``HS_PASSWORD``               |                       | Hammerspace password
 ``HS_TLS_VERIFY``              |     ``false``         | Whether to validate the Hammerspace API gateway certificates
-``HS_DATA_PORTAL_MOUNT_PREFIX``|                       | Override the prefix for data portal mounts. Ex ``/mnt/data-portal``
 ``CSI_MAJOR_VERSION``          |     ``"1"``           | CSI interface compatibility mode. Use ``"1"`` for Kubernetes 1.13+ deployments and ``"0"`` only for legacy Kubernetes 1.10-1.12 environments.
 
 ## Usage

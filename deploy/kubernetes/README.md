@@ -120,9 +120,14 @@ follows from that choice.
 | Needs a backing share | No | Yes — `mountBackingShareName` | Yes — `blockBackingShareName` |
 | Expansion | Online | Requires restarting the pod | Requires restarting the pod |
 | Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
+| At high volume counts | One share per volume, so the Anvil management API is the limit | **Scales to thousands** | **Scales to thousands** |
 | Example | [`example_storage_class.yaml`](./example_storage_class.yaml) | [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) |
 
-If you are not sure, use share-backed (`fsType: nfs`). `ext3` is not supported.
+If you are not sure, use share-backed (`fsType: nfs`) — unless you are
+provisioning very large numbers of volumes, where file-backed scales better
+because the volumes are files inside a single share rather than a share each.
+See [`docs/file-backed-performance.md`](../../docs/file-backed-performance.md).
+`ext3` is not supported.
 
 ## StorageClass parameters
 
