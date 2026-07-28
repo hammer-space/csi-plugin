@@ -14,44 +14,101 @@ CSI v1   | v1.9.0           | `1`                 | Kubernetes 1.29, 1.34–1.36
 CSI v0.3 | v0.3.0           | `0`                 | Kubernetes 1.10-1.12 | Legacy compatibility mode. Supports filesystem (Mount) volumes only. See `deploy/kubernetes/archive/kubernetes-1.10-1.12/README.md`.
  
 #### Supported Capabilities
+Controller service
 * CREATE_DELETE_VOLUME
+* LIST_VOLUMES
 * GET_CAPACITY
 * CREATE_DELETE_SNAPSHOT
+* LIST_SNAPSHOTS
+* EXPAND_VOLUME (online and offline)
+
+Node service
 * STAGE_UNSTAGE_VOLUME
 * GET_VOLUME_STATS
-* LIST_VOLUMES
 * EXPAND_VOLUME
-* LIST_SNAPSHOTS
+
+Plugin
+* CONTROLLER_SERVICE
+* VOLUME_ACCESSIBILITY_CONSTRAINTS (topology — see [Topology support](#topology-support))
 
 #### Unsupported Capabilities
-* CLONE_VOLUME
+The driver does not attach volumes (`ControllerPublishVolume` is not implemented);
+volumes are staged and published on the node.
+
+* CLONE_VOLUME — cloning a PVC directly. Restoring from a snapshot is supported.
+* PUBLISH_UNPUBLISH_VOLUME, PUBLISH_READONLY, LIST_VOLUMES_PUBLISHED_NODES
+* GET_VOLUME, VOLUME_CONDITION (controller and node)
+* SINGLE_NODE_MULTI_WRITER (controller and node)
+* MODIFY_VOLUME (VolumeAttributesClass)
+* VOLUME_MOUNT_GROUP (node)
+* GROUP_CONTROLLER_SERVICE (volume group snapshots)
 
 ## Volume Types
-File-backed Block Volume (raw device)
-- Storage is exposed to the container as a raw device
-- Exists as a special device file on a Hammerspace share (backing share)
 
-File-backed Mounted volume (filesystem)
-- Storage is exposed to the container as a directory
-- Exists as a special device file on a Hammerspace share (backing share) which contains a filesystem
+The driver can provision three kinds of volume. Which one you get is decided by
+the `fsType` StorageClass parameter and the PVC's `volumeMode` — you do not
+choose it directly.
 
-Share-backed Mounted volume (shared filesystem)
-- Storage is exposed to the container as a directory
-- Exists as a Hammerspace share
-- Mounted via NFS
+**Share-backed volume — a shared folder over NFS.** Each volume is its own
+Hammerspace share, mounted over NFS. Many pods on many nodes can read and write
+it at the same time, and it can be grown while in use. This is the default
+(`fsType: nfs`) and the right answer for most workloads.
+
+**File-backed volume — a private disk for one pod.** The volume is a single
+large file on a backing share, formatted with ext4 or xfs and mounted as a
+loop device. Because it is a real local filesystem, it behaves exactly like a
+normal disk — useful for software that depends on POSIX semantics that NFS does
+not provide, such as file locking or `O_DIRECT`. Only one pod may use it at a
+time.
+
+**Block volume — a raw device.** The same idea as a file-backed volume, except
+the driver hands the container an unformatted block device and the application
+decides what to put on it. Used by databases and other software that manages its
+own on-disk format.
+
+| | Share-backed | File-backed | Block |
+| --- | --- | --- | --- |
+| How to request | `fsType: nfs` (default) | `fsType: ext4` or `xfs` | `volumeMode: Block` in the PVC |
+| Appears in the container as | A directory | A directory | A raw device |
+| Shared between pods | **Yes** (`ReadWriteMany`) | No — one pod | No — one pod |
+| Backing share required | No | Yes (`mountBackingShareName`) | Yes (`blockBackingShareName`) |
+| Grow while in use | **Yes** | Needs a pod restart | Needs a pod restart |
+| Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
+| Snapshot type | Hammerspace share snapshot | File snapshot (source frozen briefly) | File snapshot |
+
+#### Which should I use?
+
+* **Start with share-backed.** It is the default, needs no backing share, is the
+  only type several pods can share, and grows without disruption.
+* **Use file-backed** when an application misbehaves on NFS — typically file
+  locking, `O_DIRECT`, or a database that refuses to run on a network filesystem
+  — and only one pod needs the data.
+* **Use block** when the application wants a raw device and manages its own
+  format.
+* **Avoid file-backed and block for many small volumes.** Each one is a file on
+  a shared backing share and needs `mkfs` at creation, so provisioning is more
+  expensive than a share-backed volume.
+
+`ext3` is not supported; use `ext4` or `xfs`.
 
 ## Plugin Dependencies
 
-Ensure that nfs-utils is installed on the Kubernetes hosts
+Ensure that NFS client support is installed on the Kubernetes hosts.
 
-Ubuntu
+Debian, Ubuntu, and derivatives
 ```bash
 $ apt install nfs-common
 ```
 
-CentOS
+Red Hat Enterprise Linux and compatible distributions (RHEL, Rocky Linux,
+AlmaLinux, CentOS Stream, Fedora)
 ```bash
-$ yum install nfs-utils
+$ dnf install nfs-utils    # or: yum install nfs-utils
+```
+
+SUSE Linux Enterprise and openSUSE
+```bash
+$ zypper install nfs-client
 ```
 
 The plugin container(s) must run as privileged containers
