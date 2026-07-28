@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treated all known terminal task states consistently so failed, halted, cancelled, validation-failed, and resumed tasks stop polling and report failure.
 - Avoided passing StorageClass NFS mount options to local filesystem mounts for file-backed volumes; those options are now only used for the backing NFS share mount.
 - Prevented duplicate or conflicting NFS version mount flags by treating both `nfsvers=` and `vers=` as version options, removing them before fallback retries, and passing NFSv3 fallback options as separate mount arguments.
+- Honored the StorageClass `fqdn` parameter in deployments without data-portals (e.g. Anvil-only/no-DSX). Previously the resolved FQDN/floating IP was discarded because the mount loops only ran per data-portal, so an empty `data-portals` list caused provisioning to fail with `could not mount to any data-portals`.
 
 ### Changed
 - Removed the driver-specific `clientMountOptions` StorageClass parameter; CSI node mounts now rely on Kubernetes `mountOptions` / CSI `mountFlags`.
