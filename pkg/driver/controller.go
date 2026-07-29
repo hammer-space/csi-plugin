@@ -931,13 +931,25 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 			return err
 		}
 		defer unlock()
-		// mount the share to delete the file
-		defer d.UnmountBackingShareIfUnused(ctx, residingShareName)
-		err = d.EnsureBackingShareMounted(ctx, residingShareName, hsVolume) // check if share is mounted
-		if err != nil {
+		// Route the mount through acquire/releaseBackingMount — the same refcounted
+		// mechanism the create path uses — instead of a bare EnsureBackingShareMounted
+		// plus a deferred UnmountBackingShareIfUnused. This makes delete a first-class
+		// participant in the backing-mount refcount: it holds a reference for the whole
+		// delete (so a concurrent create that has already taken its own reference can't
+		// have the share unmounted out from under it), and it serializes its mount and
+		// unmount under the same per-directory lock (mountLockFor) as create rather than
+		// mutating the mount with no shared lock held. GetShare gives us the ShareResponse
+		// acquireBackingMount needs; the file is known to exist here, so the share does too.
+		backingShare, err := d.hsclient.GetShare(ctx, residingShareName)
+		if err != nil || backingShare == nil {
+			log.Errorf("failed to get backing share %s while deleting file-backed volume: %v", residingShareName, err)
+			return status.Errorf(codes.Internal, "unable to get backing share %s: %v", residingShareName, err)
+		}
+		if err = d.acquireBackingMount(ctx, backingShare, hsVolume); err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
+		defer d.releaseBackingMount(ctx, backingShare)
 		// Delete File
 		volumeName := GetVolumeNameFromPath(filepath)
 		err = common.DeleteFile(destination + "/" + volumeName)
