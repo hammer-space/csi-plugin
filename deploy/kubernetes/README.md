@@ -46,7 +46,7 @@ Secrets Operator / Secrets Store CSI Driver), see [`SECRETS.md`](./SECRETS.md).
 To deploy updates to the plugin, simply change the image tag ```hammerspaceinc/csi-plugin``` of the StatefulSet and DaemonSet to the new plugin image, make any other update to environment variables, and reapply the yaml files.
 
 If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the existing plugin pods so the new image is pulled and the pods are recreated automatically. Otherwise, changing the image tag will trigger an update to occur. Ex. ```hammerspaceinc/csi-plugin:v1.2.9``` -> ```hammerspaceinc/csi-plugin:v1.3.0```
-## Kubernetes  Cluster Prerequisites
+## Kubernetes Cluster Prerequisites
 Kubernetes documentation for CSI support can be found [here](https://kubernetes-csi.github.io/)
 
 * There is no single blanket minimum Kubernetes version — the required version is
@@ -80,7 +80,7 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
       Topology: true
     ...
     ```
-* Voluem expansion support requires v1.14+ ``ExpandCSIVolumes`` and ``ExpandInUsePersistentVolumes``
+* Volume expansion support requires v1.14+ ``ExpandCSIVolumes`` and ``ExpandInUsePersistentVolumes``
     Example in /var/lib/kubelet/config.yaml
     ```yaml
     ...
@@ -100,7 +100,7 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
 
 ### NOTE on Google Kubernetes Engine
 GKE does not allow the creation of ClusterRoles
-that are more powerful than the given user. An insecure work around to this is
+that are more powerful than the given user. An insecure workaround to this is
 to give the user creating the role cluster-admin privileges.
 
 ```bash
