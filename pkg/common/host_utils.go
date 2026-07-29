@@ -28,6 +28,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -49,6 +50,53 @@ const LOOP_CTL_GET_FREE = 0x4C82
 var (
 	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
 )
+
+// inFlightMount tracks a single mount syscall that is (or was) running for a
+// target path. Its done channel is closed when the syscall returns; err then
+// holds the result.
+type inFlightMount struct {
+	done chan struct{}
+	err  error
+}
+
+// mountInFlight deduplicates concurrent/retried mount syscalls by target path.
+//
+// A `hard` NFS mount against a dead data portal blocks uninterruptibly in the
+// kernel, so MountShare can't kill the goroutine running it — it can only time
+// out and return. Left unguarded, every retried CreateVolume/NodeStageVolume
+// against that same target would fork ANOTHER blocked goroutine, so the count
+// grows without bound over a long outage. Keyed by target path, this registry
+// lets a retry attach to the already-running attempt instead of spawning a new
+// one, bounding lingering mount goroutines to at most one per distinct target.
+var (
+	mountInFlightMu sync.Mutex
+	mountInFlight   = map[string]*inFlightMount{}
+)
+
+// beginMount starts mountFn for targetPath, unless a mount for that same target is
+// already running, in which case it returns the in-flight attempt and does NOT call
+// mountFn again. The returned inFlightMount's done channel is closed when the syscall
+// returns; its err holds the result. Callers wait on it with their own timeout, so a
+// timed-out caller leaves the single shared goroutine running rather than forking a
+// new one on the next retry.
+func beginMount(targetPath string, mountFn func() error) *inFlightMount {
+	mountInFlightMu.Lock()
+	defer mountInFlightMu.Unlock()
+	if att, ok := mountInFlight[targetPath]; ok {
+		return att
+	}
+	att := &inFlightMount{done: make(chan struct{})}
+	mountInFlight[targetPath] = att
+	go func() {
+		mountErr := mountFn()
+		mountInFlightMu.Lock()
+		delete(mountInFlight, targetPath)
+		mountInFlightMu.Unlock()
+		att.err = mountErr
+		close(att.done)
+	}()
+	return att
+}
 
 func init() {
 	// Read environment variables for mount check timeout
@@ -391,12 +439,18 @@ func MountShare(ctx context.Context, sourcePath, targetPath string, mountFlags [
 	// uninterruptibly; without this bound the caller holds its volume /
 	// backing-share lock forever, leaking it and wedging every serialized
 	// operation behind that lock. On timeout we return an error so the deferred
-	// unlock runs and the op is retried. The mount goroutine may linger, but it
-	// holds no lock.
-	mountErr := make(chan error, 1)
-	go func() { mountErr <- mounter.Mount(sourcePath, targetPath, "nfs", mo) }()
+	// unlock runs and the op is retried.
+	//
+	// The blocked mount goroutine can't be killed (the syscall is uninterruptible),
+	// but it holds no lock, and beginMount keeps a retry against the same target from
+	// forking a fresh one each time — so at most one such goroutine lingers per target,
+	// and it drains on its own when the portal recovers or the mount fails.
+	att := beginMount(targetPath, func() error {
+		return mounter.Mount(sourcePath, targetPath, "nfs", mo)
+	})
 	select {
-	case err = <-mountErr:
+	case <-att.done:
+		err = att.err
 	case <-time.After(defaultMountCheckTimeout):
 		return status.Errorf(codes.DeadlineExceeded,
 			"mount %s -> %s timed out after %s (data portal unreachable?)", sourcePath, targetPath, defaultMountCheckTimeout)
