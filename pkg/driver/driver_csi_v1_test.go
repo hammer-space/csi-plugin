@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // TestAcquireAndReleaseVolumeLock ensures a lock can be acquired and released.
@@ -56,6 +59,13 @@ func TestAcquireVolumeLockTimeout(t *testing.T) {
 
 	if err == nil {
 		t.Fatalf("expected timeout error but got none")
+	}
+	// PR A: a lock-acquire timeout must return codes.Aborted (retryable) rather
+	// than calling os.Exit(1), which previously crashed the whole controller
+	// under concurrent load. If this regresses to os.Exit, the test binary dies
+	// here and the failure is unmistakable.
+	if status.Code(err) != codes.Aborted {
+		t.Fatalf("expected codes.Aborted on lock timeout, got %v (err: %v)", status.Code(err), err)
 	}
 	if elapsed < 250*time.Millisecond {
 		t.Fatalf("expected blocking for ~300ms, got only %v", elapsed)

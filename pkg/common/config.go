@@ -30,6 +30,20 @@ const (
 	DefaultBackingFileSizeBytes = 1073741824
 	DefaultVolumeNameFormat     = "%s"
 
+	// MinXfsSizeBytes is the minimum size (300 MiB) below which xfsprogs 6.4+
+	// warns "Filesystem should be larger than 300MB" and marks the resulting
+	// filesystem "deprecated and will not be supported in future releases".
+	// The mkfs.xfs command still returns 0 in that case, so we must reject
+	// the request in CreateVolume before formatting.
+	MinXfsSizeBytes = 300 * 1024 * 1024
+
+	// MinExt4SizeBytes is the minimum size (20 MiB) below which we refuse to
+	// format ext4. mkfs.ext4 accepts filesystems as small as ~8 MiB but the
+	// journal + reserved-block overhead means anything smaller than ~20 MiB
+	// has almost no usable space; we reject early so users get a clean error
+	// instead of a "filesystem full" surprise on the first write.
+	MinExt4SizeBytes = 20 * 1024 * 1024
+
 	// Topology keys
 	TopologyKeyDataPortal = "topology.csi.hammerspace.com/is-data-portal"
 )

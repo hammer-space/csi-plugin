@@ -167,7 +167,54 @@ func parseVolParams(params map[string]string) (common.HSVolumeParameters, error)
 		}
 	}
 
+	// objectiveTarget controls where objectives are applied for file-backed
+	// volumes, and therefore whether CreateVolume pays for the per-file
+	// visibility poll (which exists only to gate the per-file objective-set):
+	//   share (default) - objectives live on the backing SHARE only; skip the
+	//                     per-file objective-set and its Anvil visibility poll,
+	//                     so CreateVolume returns as soon as the local mkfs
+	//                     completes. Best for the common single-site shape.
+	//   file / both     - additionally apply per-file objectives (pays the
+	//                     poll). Use for per-volume / multi-site policy.
+	switch target := params["objectiveTarget"]; target {
+	case "", "share":
+		vParams.ObjectiveTarget = "share"
+	case "file", "both":
+		vParams.ObjectiveTarget = target
+	default:
+		return vParams, status.Errorf(codes.InvalidArgument,
+			"invalid objectiveTarget %q (must be one of: share, file, both)", target)
+	}
+
 	return vParams, nil
+}
+
+// checkFileBackedMinSize rejects a file-backed volume whose requested size is
+// below the per-fsType minimum (xfsprogs 6.4+ deprecates sub-300MiB XFS; ext4
+// below ~20MiB has almost no usable space). Non file-backed fsTypes and sizes
+// at/above the floor return nil.
+func checkFileBackedMinSize(fsType string, requestedSize int64) error {
+	const mib = 1024 * 1024
+	switch fsType {
+	case "xfs":
+		if requestedSize < common.MinXfsSizeBytes {
+			return status.Errorf(codes.InvalidArgument, common.XfsSizeBelowMinimum,
+				common.MinXfsSizeBytes, common.MinXfsSizeBytes/mib,
+				requestedSize, requestedSize/mib)
+		}
+	case "ext4":
+		if requestedSize < common.MinExt4SizeBytes {
+			return status.Errorf(codes.InvalidArgument, common.Ext4SizeBelowMinimum,
+				common.MinExt4SizeBytes, common.MinExt4SizeBytes/mib,
+				requestedSize, requestedSize/mib)
+		}
+	case "ext3":
+		// ext3 is no longer a supported file-backed filesystem — reject it up
+		// front (rather than silently formatting it like ext4 with no size
+		// floor). Use ext4 or xfs.
+		return status.Error(codes.InvalidArgument, common.Ext3NotSupported)
+	}
+	return nil
 }
 
 func getMountFlagsFromCapabilities(capabilities []*csi.VolumeCapability) []string {
@@ -217,6 +264,11 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 }
 
 func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume *common.HSVolume) error {
+	ctx, span := tracer.Start(ctx, "ensureShareBackedVolumeExists", trace.WithAttributes(
+		attribute.String("volume.name", hsVolume.Name),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "ensureShareBackedVolumeExists")(nil)
 
 	// Check if the Mount Volume Exists
 	share, err := d.hsclient.GetShare(ctx, hsVolume.Name)
@@ -292,7 +344,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 	log.Debugf("Creating empty folder with path %s", targetPath)
 
-	defer common.UnmountFilesystem(targetPath)
+	defer common.UnmountFilesystem(ctx, targetPath)
 
 	log.Debugf("Created empty folder with path %s", targetPath)
 	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
@@ -302,7 +354,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	log.Debugf("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
 
 	// The hs client expects a trailing slash for directories
-	err = common.SetMetadataTags(targetPath+"/", hsVolume.AdditionalMetadataTags)
+	err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
 	if err != nil {
 		log.Warnf("failed to set additional metadata on share %v", err)
 	}
@@ -312,6 +364,12 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 }
 
 func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareName string, hsVolume *common.HSVolume) (*common.ShareResponse, error) {
+	ctx, span := tracer.Start(ctx, "ensureBackingShareExists", trace.WithAttributes(
+		attribute.String("backing_share", backingShareName),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "ensureBackingShareExists")(nil)
+
 	share, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
@@ -341,12 +399,12 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		}
 		// generate unique target path on host for setting file metadata
 		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
-		defer common.UnmountFilesystem(targetPath)
+		defer common.UnmountFilesystem(ctx, targetPath)
 		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
-		err = common.SetMetadataTags(targetPath+"/", hsVolume.AdditionalMetadataTags)
+		err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
 		if err != nil {
 			log.Warnf("failed to set additional metadata on share %v", err)
 		}
@@ -401,18 +459,21 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 			return status.Error(codes.NotFound, common.UnknownError)
 		}
 	} else {
-		// Create empty file
-		defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
-
-		err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume)
+		// Create empty file. Take a refcounted reference on the backing mount so it
+		// stays mounted for the duration of this create but is NOT held under the
+		// per-backing-share lock; the mkfs below therefore runs concurrently with
+		// other creates on the same share. The share is unmounted only once the last
+		// in-flight create releases (see acquire/releaseBackingMount).
+		err = d.acquireBackingMount(ctx, backingShare, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return err
 		}
+		defer d.releaseBackingMount(ctx, backingShare)
 
 		log.Debugf("ensureDeviceFileExists mounted backing share %s", backingShare.Name)
 
-		err = common.MakeEmptyRawFile(deviceFile, hsVolume.Size)
+		err = common.MakeEmptyRawFile(ctx, deviceFile, hsVolume.Size)
 		if err != nil {
 			log.Errorf("failed to create backing file for volume, %v", err)
 			return err
@@ -421,7 +482,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		// Add filesystem
 		log.Debugf("ensureDeviceFileExists created empty raw file over backing share %s and path %s", backingShare.Name, deviceFile)
 		if hsVolume.FSType != "" {
-			err = common.FormatDevice(deviceFile, hsVolume.FSType)
+			err = common.FormatDevice(ctx, deviceFile, hsVolume.FSType)
 			if err != nil {
 				log.Errorf("failed to format volume, %v", err)
 				return err
@@ -430,13 +491,31 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
-	// Step 4: Use a fresh context to apply metadata
-	metadataCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	// Step 4: Apply objectives + metadata on a fresh deadline, but inherit
+	// trace context so spans stay attached to the CreateVolume trace.
+	// context.WithoutCancel detaches from the gRPC handler's cancellation
+	// (which would otherwise kill the long poll loop) while preserving the
+	// OTel span context attached via tracer.Start above.
+	metadataCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Minute)
 	defer cancel()
 
-	err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
-	if err != nil {
-		log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
+	// objectiveTarget=share (default): the backing share already carries the
+	// objectives, so we skip the per-file objective-set AND the Anvil
+	// visibility poll that exists only to gate it. CreateVolume then returns
+	// as soon as the local mkfs above completes (seconds, not tens of seconds),
+	// and we avoid the GET /files 500-storm the poll generates under load.
+	// Metadata tags still apply - they operate on the freshly-created local
+	// file over the mount and need no Anvil round-trip.
+	if hsVolume.ObjectiveTarget == "file" || hsVolume.ObjectiveTarget == "both" {
+		err = d.applyObjectiveAndMetadata(metadataCtx, backingShare, hsVolume, deviceFile)
+		if err != nil {
+			log.Warnf("Unable to apply objective and metadata over backing share %s, device path %s: %v", backingShare.Name, deviceFile, err)
+		}
+	} else {
+		log.Debugf("objectiveTarget=share: skipping per-file objective+visibility poll for %s", hsVolume.Path)
+		if err := common.SetMetadataTags(metadataCtx, deviceFile, hsVolume.AdditionalMetadataTags); err != nil {
+			log.Warnf("Failed to set additional metadata on backing file for volume %s: %v", deviceFile, err)
+		}
 	}
 
 	return nil
@@ -444,20 +523,35 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 
 // ensure from hs system /share/file exist to apply objective and metadata
 func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
+	ctx, span := tracer.Start(ctx, "applyObjectiveAndMetadata", trace.WithAttributes(
+		attribute.String("backing_share", backingShare.Name),
+		attribute.String("path", hsVolume.Path),
+	))
+	defer span.End()
+
+	// Poll Anvil's metadata API until the backing file we just created over
+	// NFS becomes visible to the management plane. The loop is the dominant
+	// cost of CreateVolume in our traces (often tens of seconds), so it gets
+	// its own span and per-attempt count.
+	pollCtx, pollSpan := tracer.Start(ctx, "applyObjectiveAndMetadata.waitForFileVisible", trace.WithAttributes(
+		attribute.String("path", hsVolume.Path),
+	))
 	b := &backoff.Backoff{
-		Max:    5 * time.Second,
+		Max:    1 * time.Second,
 		Factor: 1.5,
 		Jitter: true,
 	}
 	startTime := time.Now()
 	var backingFileExists bool
 	var err error
+	attempts := 0
 	for time.Since(startTime) < (10 * time.Minute) {
 		dur := b.Duration()
 		time.Sleep(dur)
+		attempts++
 		// Wait for file to exist on metadata server
 		log.Debugf("Checking existance of file %s", hsVolume.Path)
-		backingFileExists, err = d.hsclient.DoesFileExist(ctx, hsVolume.Path)
+		backingFileExists, err = d.hsclient.DoesFileExist(pollCtx, hsVolume.Path)
 		if err != nil {
 			log.Warnf("Error checking file existence: %v", err)
 			time.Sleep(time.Second)
@@ -469,6 +563,11 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 		}
 		log.Warnf("File does not exist yet: %s", hsVolume.Path)
 	}
+	pollSpan.SetAttributes(
+		attribute.Int("attempts", attempts),
+		attribute.Bool("file_visible", backingFileExists),
+	)
+	pollSpan.End()
 
 	if !backingFileExists {
 		log.Errorf("backing file failed to show up in API after 10 minutes")
@@ -485,7 +584,7 @@ func (d *CSIDriver) applyObjectiveAndMetadata(ctx context.Context, backingShare 
 	}
 
 	// Set additional metadata on file
-	err = common.SetMetadataTags(deviceFile, hsVolume.AdditionalMetadataTags)
+	err = common.SetMetadataTags(ctx, deviceFile, hsVolume.AdditionalMetadataTags)
 	if err != nil {
 		log.Errorf("Failed to set additional metadata on backing file for volume: %v\n", err)
 	}
@@ -498,31 +597,35 @@ func (d *CSIDriver) ensureFileBackedVolumeExists(ctx context.Context, hsVolume *
 		"backingShareName": backingShareName,
 		"hsVolume":         hsVolume,
 	}).Debugf("ensureFileBackedVolumeExists is called.")
-	// Check if backing share exists
-	// Acquire BEFORE defer; with timeout so we never hang forever
+	// The backing share is a shared resource: two concurrent first-volume creates
+	// must not both CreateShare it. Serialize ONLY the share create-if-not-exists
+	// under the per-backing-share lock, then release it immediately. The per-volume
+	// device file created afterwards is independent, so releasing the lock here lets
+	// file creation (mkfs) run concurrently across the provisioner worker threads
+	// instead of serializing every file on the share behind this one lock. The
+	// backing mount is kept alive for the duration by acquire/releaseBackingMount.
 	unlock, err := d.acquireVolumeLock(ctx, backingShareName)
 	if err != nil {
 		// surfaces to kubelet instead of hanging forever
 		return err
 	}
-	defer unlock()
-
 	backingShare, err := d.ensureBackingShareExists(ctx, backingShareName, hsVolume)
+	unlock()
 	if err != nil {
 		return status.Errorf(codes.Internal, "%s", err.Error())
 	}
 	log.Debugf("Backing share existed %s", backingShareName)
-	err = d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
 
-	return err
+	return d.ensureDeviceFileExists(ctx, backingShare, hsVolume)
 }
 
-func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (*csi.CreateVolumeResponse, error) {
+func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeRequest) (_ *csi.CreateVolumeResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/CreateVolume", trace.WithAttributes(
 		attribute.String("volume_name", req.Name),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/CreateVolume")(&err)
 
 	startTime := time.Now()
 	// Validate Parameters
@@ -593,6 +696,15 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		requestedSize = common.DefaultBackingFileSizeBytes
 	}
 
+	// Reject file-backed volumes below the per-fsType minimum, failing fast with
+	// codes.InvalidArgument so kubelet surfaces the reason instead of silently
+	// formatting a broken FS. See checkFileBackedMinSize / the config.go floors.
+	if fileBacked {
+		if err := checkFileBackedMinSize(fsType, requestedSize); err != nil {
+			return nil, err
+		}
+	}
+
 	var backingShareName string
 	if blockRequested {
 		backingShareName = vParams.BlockBackingShareName
@@ -624,6 +736,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		Comment:                vParams.Comment,
 		FQDN:                   vParams.FQDN,
 		MountFlags:             getMountFlagsFromCapabilities(req.VolumeCapabilities),
+		ObjectiveTarget:        vParams.ObjectiveTarget,
 	}
 
 	// if it's file backed, we should check capacity of backing share
@@ -785,6 +898,10 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 }
 
 func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string) error {
+	ctx, span := tracer.Start(ctx, "deleteFileBackedVolume", trace.WithAttributes(
+		attribute.String("file.path", filepath),
+	))
+	defer span.End()
 	var exists bool
 	if exists, _ = d.hsclient.DoesFileExist(ctx, filepath); exists {
 		log.Debugf("found file-backed volume to delete, %s", filepath)
@@ -814,13 +931,25 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 			return err
 		}
 		defer unlock()
-		// mount the share to delete the file
-		defer d.UnmountBackingShareIfUnused(ctx, residingShareName)
-		err = d.EnsureBackingShareMounted(ctx, residingShareName, hsVolume) // check if share is mounted
-		if err != nil {
+		// Route the mount through acquire/releaseBackingMount — the same refcounted
+		// mechanism the create path uses — instead of a bare EnsureBackingShareMounted
+		// plus a deferred UnmountBackingShareIfUnused. This makes delete a first-class
+		// participant in the backing-mount refcount: it holds a reference for the whole
+		// delete (so a concurrent create that has already taken its own reference can't
+		// have the share unmounted out from under it), and it serializes its mount and
+		// unmount under the same per-directory lock (mountLockFor) as create rather than
+		// mutating the mount with no shared lock held. GetShare gives us the ShareResponse
+		// acquireBackingMount needs; the file is known to exist here, so the share does too.
+		backingShare, err := d.hsclient.GetShare(ctx, residingShareName)
+		if err != nil || backingShare == nil {
+			log.Errorf("failed to get backing share %s while deleting file-backed volume: %v", residingShareName, err)
+			return status.Errorf(codes.Internal, "unable to get backing share %s: %v", residingShareName, err)
+		}
+		if err = d.acquireBackingMount(ctx, backingShare, hsVolume); err != nil {
 			log.Errorf("failed to ensure backing share is mounted, %v", err)
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
+		defer d.releaseBackingMount(ctx, backingShare)
 		// Delete File
 		volumeName := GetVolumeNameFromPath(filepath)
 		err = common.DeleteFile(destination + "/" + volumeName)
@@ -857,12 +986,13 @@ func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.S
 	return nil
 }
 
-func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (*csi.DeleteVolumeResponse, error) {
+func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (_ *csi.DeleteVolumeResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/DeleteVolume", trace.WithAttributes(
 		attribute.String("volume.id", req.GetVolumeId()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/DeleteVolume")(&err)
 
 	volumeId := req.GetVolumeId()
 	log.Infof("Delete volume request for volume id, %s", volumeId)
@@ -878,20 +1008,27 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	}
 	defer unlock()
 
+	// A file-backed volume lives *inside* a backing share, so its volume ID is
+	// structurally distinguishable from a share-backed one. Decide from the ID
+	// instead of probing Anvil with a GetShare that, for file-backed volumes,
+	// always 404s.
+	if isFileBackedVolumeID(volumeId) {
+		err = d.deleteFileBackedVolume(ctx, volumeId)
+		return &csi.DeleteVolumeResponse{}, err
+	}
+
 	volumeName := GetVolumeNameFromPath(volumeId)
 	share, err := d.hsclient.GetShare(ctx, volumeName)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
-	if share == nil { // Share does not exist, may be a file-backed volume
+	if share == nil { // legacy/single-segment ID with no share: treat as file-backed
 		err = d.deleteFileBackedVolume(ctx, volumeId)
-
-		return &csi.DeleteVolumeResponse{}, err
-	} else { // Share exists and is a Filesystem
-		err = d.deleteShareBackedVolume(ctx, share)
 		return &csi.DeleteVolumeResponse{}, err
 	}
-
+	// Share exists and is a Filesystem
+	err = d.deleteShareBackedVolume(ctx, share)
+	return &csi.DeleteVolumeResponse{}, err
 }
 
 // ControllerGetVolume implements the ControllerServer interface for CSI.
@@ -928,27 +1065,26 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 	))
 	defer span.End()
 
-	fileBacked := false
-
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.VolumeNotFound)
 	}
 
-	volumeName := GetVolumeNameFromPath(req.GetVolumeId())
-	share, _ := d.hsclient.GetShare(ctx, volumeName)
-	if share == nil {
-		fileBacked = true
-	}
-
-	//  Check if the specified backing share or file exists
-	if share == nil {
-		backingFileExists, err := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
-		if err != nil {
-			log.Error(err)
-		}
-		if !backingFileExists {
-			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
-		} else {
+	// Decide file-backed vs share-backed structurally from the volume ID, avoiding
+	// a GetShare probe that always 404s for file-backed volumes. The branches below
+	// still confirm the volume actually exists (GetFile / GetShare).
+	fileBacked := isFileBackedVolumeID(req.GetVolumeId())
+	if !fileBacked {
+		volumeName := GetVolumeNameFromPath(req.GetVolumeId())
+		share, _ := d.hsclient.GetShare(ctx, volumeName)
+		if share == nil {
+			// Fallback for legacy/unexpected IDs: confirm via file existence.
+			backingFileExists, ferr := d.hsclient.DoesFileExist(ctx, req.GetVolumeId())
+			if ferr != nil {
+				log.Error(ferr)
+			}
+			if !backingFileExists {
+				return nil, status.Error(codes.NotFound, common.VolumeNotFound)
+			}
 			fileBacked = true
 		}
 	}
@@ -1261,13 +1397,14 @@ func (d *CSIDriver) ControllerGetCapabilities(ctx context.Context, req *csi.Cont
 	}, nil
 }
 
-func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (*csi.CreateSnapshotResponse, error) {
+func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotRequest) (_ *csi.CreateSnapshotResponse, err error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/CreateSnapshot", trace.WithAttributes(
 		attribute.String("snapshot.name", req.GetName()),
 		attribute.String("source.volume.id", req.GetSourceVolumeId()),
 	))
 	defer span.End()
+	defer common.MeasureOp(ctx, "Controller/CreateSnapshot")(&err)
 
 	// Check arguments
 	log.WithFields(log.Fields{
@@ -1299,16 +1436,50 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	if _, exists := recentlyCreatedSnapshots[req.GetName()]; !exists {
 		// find source volume (is it file or share?
 		volumeName := GetVolumeNameFromPath(req.GetSourceVolumeId())
-		share, err := d.hsclient.GetShare(ctx, volumeName)
-		if err != nil {
-			return nil, status.Errorf(codes.Internal, "%s", err.Error())
+		// Decide file- vs share-backed structurally from the source volume ID,
+		// avoiding a GetShare probe that 404s for file-backed sources; fall back to
+		// GetShare only for a non-file-backed ID (legacy/unexpected handles).
+		fileBackedSource := isFileBackedVolumeID(req.GetSourceVolumeId())
+		if !fileBackedSource {
+			share, gerr := d.hsclient.GetShare(ctx, volumeName)
+			if gerr != nil {
+				return nil, status.Errorf(codes.Internal, "%s", gerr.Error())
+			}
+			if share == nil {
+				fileBackedSource = true
+			}
+		}
+		// Consistency-freeze: for FILE-BACKED source volumes only, locate
+		// every pod that has this volume mounted and issue
+		// `fsfreeze --freeze` on the mount path. This forces XFS/ext4 to
+		// quiesce (log flushed, no in-flight transactions) so Anvil's
+		// byte-level snapshot captures a clean on-disk state. If the pod
+		// is missing fsfreeze, or we can't find pods for this volume, we
+		// log and proceed — matching the best-effort semantics of Velero
+		// pre-hooks. See freezer.go.
+		//
+		// A share-backed (NFS) volume has Anvil owning the filesystem
+		// end-to-end, with no local journal to quiesce; FIFREEZE also fails
+		// EOPNOTSUPP on NFS mounts. Skip the freeze in that case.
+		var frozen []FrozenTarget
+		if d.freezer != nil && fileBackedSource {
+			frozen = d.freezer.FreezeForVolumeHandle(ctx, req.GetSourceVolumeId())
 		}
 		// Create the snapshot
 		var hsSnapName string
-		if share != nil {
+		if !fileBackedSource {
 			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
 		} else {
 			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
+		}
+		// Always unfreeze, even if snapshot failed — otherwise the app pod
+		// stays blocked on writes indefinitely. Use a context detached from the
+		// gRPC request cancellation (context.WithoutCancel): if the snapshotter
+		// sidecar's deadline expires while SnapshotFile/SnapshotShare above is
+		// still running, a cancelled ctx would make the unfreeze exec fail fast
+		// without ever reaching the pod, leaving the workload's filesystem frozen.
+		if d.freezer != nil && fileBackedSource {
+			d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
@@ -1359,13 +1530,31 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 
 	// If the snapshot does not exist then return an idempotent response.
 
+	// File-vs-share discriminator, decided structurally from the source volume
+	// path (the "|"-suffix of the snapshot ID): a file-backed volume is a FILE
+	// inside a backing share (multi-segment path -> file snapshot); a native NFS
+	// volume IS a share (single-segment path -> share snapshot). This avoids a
+	// GetShare probe that 404s for every file-backed snapshot; GetShare is kept
+	// as a fallback for non-file-backed paths.
+	// (Historical: the original `GetVolumeNameFromPath(path) != ""` test was
+	// ALWAYS true, so every delete was routed to DeleteShareSnapshot and
+	// file-backed snapshots were orphaned on the Anvil, blocking source-volume
+	// deletion.)
 	shareName := GetVolumeNameFromPath(path)
 
 	var err error
-	if shareName != "" {
-		err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
-	} else {
+	if isFileBackedVolumeID(path) {
 		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+	} else {
+		share, gerr := d.hsclient.GetShare(ctx, shareName)
+		if gerr != nil {
+			return nil, status.Error(codes.Internal, gerr.Error())
+		}
+		if share != nil {
+			err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
+		} else {
+			err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+		}
 	}
 
 	if err != nil {

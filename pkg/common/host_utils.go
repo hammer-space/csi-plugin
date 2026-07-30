@@ -28,21 +28,75 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 	unix "golang.org/x/sys/unix"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"k8s.io/mount-utils"
 )
 
+var commonTracer = otel.Tracer("hammerspace-csi/common")
+
 const LOOP_CTL_GET_FREE = 0x4C82
 
 var (
 	defaultMountCheckTimeout time.Duration = 50 * time.Second // Default timeout for checking mount status
 )
+
+// inFlightMount tracks a single mount syscall that is (or was) running for a
+// target path. Its done channel is closed when the syscall returns; err then
+// holds the result.
+type inFlightMount struct {
+	done chan struct{}
+	err  error
+}
+
+// mountInFlight deduplicates concurrent/retried mount syscalls by target path.
+//
+// A `hard` NFS mount against a dead data portal blocks uninterruptibly in the
+// kernel, so MountShare can't kill the goroutine running it — it can only time
+// out and return. Left unguarded, every retried CreateVolume/NodeStageVolume
+// against that same target would fork ANOTHER blocked goroutine, so the count
+// grows without bound over a long outage. Keyed by target path, this registry
+// lets a retry attach to the already-running attempt instead of spawning a new
+// one, bounding lingering mount goroutines to at most one per distinct target.
+var (
+	mountInFlightMu sync.Mutex
+	mountInFlight   = map[string]*inFlightMount{}
+)
+
+// beginMount starts mountFn for targetPath, unless a mount for that same target is
+// already running, in which case it returns the in-flight attempt and does NOT call
+// mountFn again. The returned inFlightMount's done channel is closed when the syscall
+// returns; its err holds the result. Callers wait on it with their own timeout, so a
+// timed-out caller leaves the single shared goroutine running rather than forking a
+// new one on the next retry.
+func beginMount(targetPath string, mountFn func() error) *inFlightMount {
+	mountInFlightMu.Lock()
+	defer mountInFlightMu.Unlock()
+	if att, ok := mountInFlight[targetPath]; ok {
+		return att
+	}
+	att := &inFlightMount{done: make(chan struct{})}
+	mountInFlight[targetPath] = att
+	go func() {
+		mountErr := mountFn()
+		mountInFlightMu.Lock()
+		delete(mountInFlight, targetPath)
+		mountInFlightMu.Unlock()
+		att.err = mountErr
+		close(att.done)
+	}()
+	return att
+}
 
 func init() {
 	// Read environment variables for mount check timeout
@@ -205,11 +259,18 @@ func GetDeviceMinorNumber(device string) (uint32, error) {
 	return unix.Minor(dev), nil
 }
 
-func MakeEmptyRawFile(pathname string, size int64) error {
+func MakeEmptyRawFile(ctx context.Context, pathname string, size int64) error {
+	_, span := commonTracer.Start(ctx, "MakeEmptyRawFile", trace.WithAttributes(
+		attribute.String("path", pathname),
+		attribute.Int64("size", size),
+	))
+	defer span.End()
+	defer MeasureOp(ctx, "MakeEmptyRawFile")(nil)
 	log.Infof("creating file '%s'", pathname)
 	sizeStr := strconv.FormatInt(size, 10)
 	output, err := ExecCommand("qemu-img", "create", "-fraw", pathname, sizeStr)
 	if err != nil {
+		span.RecordError(err)
 		log.Errorf("%s, %v", output, err.Error())
 		return err
 	}
@@ -239,14 +300,34 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 	return nil
 }
 
-func FormatDevice(device, fsType string) error {
+func FormatDevice(ctx context.Context, device, fsType string) error {
+	_, span := commonTracer.Start(ctx, "FormatDevice", trace.WithAttributes(
+		attribute.String("device", device),
+		attribute.String("fsType", fsType),
+	))
+	defer span.End()
+	defer MeasureOp(ctx, "FormatDevice", attribute.String("fsType", fsType))(nil)
 	log.Infof("formatting file '%s' with '%s' filesystem", device, fsType)
 	args := []string{device}
 	if fsType == "xfs" {
-		args = []string{"-m", "reflink=0", device}
+		// -K: skip the block discard/TRIM pass at mkfs time. Over an NFS-backed
+		// file this discard is slow and pure overhead (the backing share manages
+		// its own space reclaim), so it needlessly inflates mkfs.xfs latency and
+		// load on the storage data path.
+		args = []string{"-m", "reflink=0", "-K", device}
+	} else if fsType == "ext4" {
+		// Defer inode-table and journal zeroing to lazy background init.
+		// Without this, mkfs.ext* eagerly zeroes the inode table and journal at
+		// create time (~tens of MB per volume). For file-backed volumes those
+		// writes go over NFS to the backing share, so they saturate the storage
+		// data path (the DSX disk) and dominate CreateVolume latency. Lazy init
+		// drops create-time writes to ~KB; the kernel finishes initialization in
+		// the background after first mount.
+		args = []string{"-E", "lazy_itable_init=1,lazy_journal_init=1", device}
 	}
 	output, err := ExecCommand(fmt.Sprintf("mkfs.%s", fsType), args...)
 	if err != nil {
+		span.RecordError(err)
 		log.Errorf("Error executing mkfs command. %v", err)
 		if output != nil && strings.Contains(string(output), "will not make a filesystem here") {
 			log.Warningf("Device %s is already mounted", device)
@@ -324,7 +405,14 @@ func DeleteFile(pathname string) error {
 	return nil
 }
 
-func MountShare(sourcePath, targetPath string, mountFlags []string) error {
+func MountShare(ctx context.Context, sourcePath, targetPath string, mountFlags []string) error {
+	_, span := commonTracer.Start(ctx, "MountShare", trace.WithAttributes(
+		attribute.String("source", sourcePath),
+		attribute.String("target", targetPath),
+		attribute.StringSlice("flags", mountFlags),
+	))
+	defer span.End()
+	defer MeasureOp(ctx, "MountShare")(nil)
 	log.Infof("mounting %s to %s, with options %v", sourcePath, targetPath, mountFlags)
 	mounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
@@ -346,7 +434,27 @@ func MountShare(sourcePath, targetPath string, mountFlags []string) error {
 	mo := mountFlags
 
 	mounter := mount.New("")
-	err = mounter.Mount(sourcePath, targetPath, "nfs", mo)
+	// Bound the mount syscall with a timeout. A `hard` NFS mount against an
+	// unreachable server (e.g. a data portal that has gone away) blocks
+	// uninterruptibly; without this bound the caller holds its volume /
+	// backing-share lock forever, leaking it and wedging every serialized
+	// operation behind that lock. On timeout we return an error so the deferred
+	// unlock runs and the op is retried.
+	//
+	// The blocked mount goroutine can't be killed (the syscall is uninterruptible),
+	// but it holds no lock, and beginMount keeps a retry against the same target from
+	// forking a fresh one each time — so at most one such goroutine lingers per target,
+	// and it drains on its own when the portal recovers or the mount fails.
+	att := beginMount(targetPath, func() error {
+		return mounter.Mount(sourcePath, targetPath, "nfs", mo)
+	})
+	select {
+	case <-att.done:
+		err = att.err
+	case <-time.After(defaultMountCheckTimeout):
+		return status.Errorf(codes.DeadlineExceeded,
+			"mount %s -> %s timed out after %s (data portal unreachable?)", sourcePath, targetPath, defaultMountCheckTimeout)
+	}
 	if err != nil {
 		if os.IsPermission(err) {
 			return status.Error(codes.PermissionDenied, err.Error())
@@ -535,22 +643,44 @@ func CheckNFSExports(address string) (bool, error) {
 }
 
 func IsShareMounted(targetPath string) bool {
-	mounter := mount.New("")
-	isMounted, err := mounter.IsMountPoint(targetPath)
+	// Use the timeout-bounded check: IsMountPoint stat()s the path, which hangs
+	// uninterruptibly on a stale NFS mount whose server is gone (e.g. after the
+	// driver is re-pointed to a new Anvil). SafeIsMountPoint returns
+	// context.DeadlineExceeded instead of hanging; treat that as "not cleanly
+	// mounted" so callers re-establish the mount rather than block forever.
+	isMounted, err := SafeIsMountPoint(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Warnf("Check [IsShareMounted] target path is empty, %s", EmptyTargetPath)
-			return false
 		} else {
 			log.Warnf("Error while checking mount point for targetPath %s, Error %v", targetPath, err)
-			return false
 		}
+		return false
 	}
 	log.Debugf("Target path %s isMounted %t", targetPath, isMounted)
 	return isMounted
 }
 
-func UnmountFilesystem(targetPath string) error {
+// ForceUnmountStale best-effort clears a (possibly hung) mount at targetPath so a
+// fresh mount can be established. It shells out to `umount -f -l` (force + lazy),
+// which detaches even when the NFS server is unreachable and never blocks - a
+// plain unmount syscall would itself hang on a dead mount. Safe to call when
+// nothing is mounted (it just logs).
+func ForceUnmountStale(targetPath string) {
+	out, err := ExecCommand("umount", "-f", "-l", targetPath)
+	if err != nil {
+		log.Warnf("ForceUnmountStale: umount -f -l %s: %v (output: %s)", targetPath, err, strings.TrimSpace(string(out)))
+		return
+	}
+	log.Infof("ForceUnmountStale: cleared stale mount at %s", targetPath)
+}
+
+func UnmountFilesystem(ctx context.Context, targetPath string) error {
+	_, span := commonTracer.Start(ctx, "UnmountFilesystem", trace.WithAttributes(
+		attribute.String("target", targetPath),
+	))
+	defer span.End()
+	defer MeasureOp(ctx, "UnmountFilesystem")(nil)
 	log.Infof("UnmountFilesystem is called with targetPath %s", targetPath)
 	mounter := mount.New("")
 
@@ -577,7 +707,8 @@ func UnmountFilesystem(targetPath string) error {
 	return nil
 }
 
-func SetMetadataTags(localPath string, tags map[string]string) error {
+func SetMetadataTags(ctx context.Context, localPath string, tags map[string]string) error {
+	defer MeasureOp(ctx, "SetMetadataTags")(nil)
 	// hs attribute set localpath -e "CSI_DETAILS_TABLE{'<version-string>','<plugin-name-string>','<plugin-version-string>','<plugin-git-hash-string>'}"
 	attributeSetOutput, err := ExecCommand("hs",
 		"attribute",

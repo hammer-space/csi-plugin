@@ -5,6 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [1.3.0]
+### Added
+- `objectiveTarget` StorageClass parameter (`share` (default) | `file` | `both`) for file-backed volumes. With the default `share`, CreateVolume skips the per-file objective-set and the Anvil file-visibility poll that only exists to gate it — the backing share already carries the objectives — so provisioning returns as soon as the local `mkfs` completes and the `GET /files` poll storm under concurrency is eliminated. Use `file`/`both` to also apply per-file objectives.
+- OpenTelemetry tracing and Prometheus metrics for the driver (`OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, etc.); `hs_csi_operation_*` and `hs_csi_anvil_requests_total` instruments across the controller/node RPCs, the file- and share-backed provisioning steps, and every Anvil REST call. See `docs/observability.md`.
+- Minimum size gates for file-backed volumes (xfs < 300 MiB, ext4 < 20 MiB rejected) and an `fsfreeze` of the source volume before snapshot for crash-consistent file-backed snapshots.
+- `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, validated end-to-end on live 1.34 and 1.35 clusters (1.29 base + host-networked metrics port + OTel env vars).
+- `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
+- Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
+
+### Changed
+- Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
+- Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
+- Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.
+
+### Removed
+- Dropped `ext3` as a supported file-backed filesystem; `CreateVolume` now rejects `fsType=ext3` with `InvalidArgument` (use `ext4` or `xfs`).
+
+### Fixed
+- The backing-share NFS mount/unmount no longer runs under the global `mountRefsMu`. `acquireBackingMount`/`releaseBackingMount` now serialize the mount/unmount with a per-backing-directory lock and reserve the refcount before mounting, so `mountRefsMu` is held only for microsecond map updates. Previously a single slow or hung mount (up to the ~5 min command timeout on a dead portal) held `mountRefsMu` for its whole duration, freezing every concurrent file-backed create/delete — including refcount checks on unrelated shares.
+- `releaseBackingMount` no longer holds `mountRefsMu` while calling `UnmountBackingShareIfUnused` (which re-acquires the same non-reentrant mutex via the `mountRefs` refcount check): the volume that dropped the last reference self-deadlocked, wedging all subsequent file-backed provisioning. The decrement now happens under the lock and the unmount runs after releasing it. Caught by live xfs validation (a single file-backed PVC is the exact refcount-1 trigger).
+- `acquireVolumeLock`/`acquireSnapshotLock` return `codes.Aborted` on a lock-acquire timeout instead of calling `os.Exit(1)`, which under concurrent load crashed the whole controller.
+- Only force-unmount a stale backing-share mount after repeated (not a single) mount-check timeouts, so a slow-but-healthy NFS stat under concurrency can't force-unmount a live shared mount out from under in-flight pods.
+- `UnmountBackingShareIfUnused` now honors the `mountRefs` refcount, so a concurrent delete can't unmount a backing share out from under an in-flight `mkfs` (which has no loop device yet).
+- Run snapshot `Unfreeze` on a context detached from the gRPC request cancellation, so a cancelled/expired `CreateSnapshot` can't leave the source pod's filesystem frozen.
+- `AnvilRoute` collapses `share-snapshots` share/snapshot identifiers to `{id}`, preventing unbounded `hs_csi_anvil_requests_total` metric cardinality.
+- Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
+- Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
+
 ## [1.2.9]
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.

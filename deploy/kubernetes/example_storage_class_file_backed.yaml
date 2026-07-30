@@ -14,6 +14,15 @@ parameters:
   mountBackingShareName: k8s-file-storage
   # Objectives to set on shares in addition to HS cluster defaults
   objectives: "keep-online"
+  # Where objectives are applied for file-backed volumes, and therefore whether
+  # CreateVolume pays for the per-file Anvil visibility poll that gates them:
+  #   share (default) - objectives live on the backing share only; the per-file
+  #                     objective-set and its visibility poll are skipped, so
+  #                     CreateVolume returns as soon as the local mkfs completes
+  #                     (much faster, and no GET /files poll storm under load).
+  #   file | both     - also apply objectives per file (pays the visibility
+  #                     poll). Use for per-volume / multi-site placement policy.
+  objectiveTarget: "share"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"
   # Metadata to set on files and shares created by the plugin.

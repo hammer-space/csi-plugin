@@ -1,3 +1,17 @@
+# Hammerspace CSI plugin manifest, validated on Kubernetes 1.35 (parity with 1.35/1.36) (and works on
+# 1.30+ in practice). It is the 1.29 manifest plus the observability wiring:
+#   - a host-networked `metrics` port (9090 controller / 9091 node), and
+#   - OTel env vars on both driver containers.
+#
+# Observability env (see deploy/monitoring/README.md and docs/observability.md):
+#   OTEL_METRICS_EXPORTER=prometheus            metrics on; scrape :9090 / :9091
+#   OTEL_METRICS_PROMETHEUS_LISTEN=:9090|:9091  per-container listen addr
+#   OTEL_TRACES_EXPORTER=console                spans to pod stdout — VERBOSE;
+#                                               set to "none" to disable in prod,
+#                                               or "otlp" (+ OTEL_EXPORTER_OTLP_ENDPOINT)
+#                                               to ship to a collector.
+# Sidecar image tags (csi-provisioner / csi-attacher / csi-snapshotter /
+# csi-resizer / node-driver-registrar) match the 1.29 manifest.
 #### CSI Object
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -111,7 +125,12 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.9
+          image: hammerspaceinc/csi-plugin:v1.3.0
+          ports:
+            - containerPort: 9090
+              name: metrics
+              hostPort: 9090
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -137,6 +156,14 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # OTel toggles — Prometheus /metrics on :9090 (on by default). Set
+            # OTEL_TRACES_EXPORTER=console/otlp to also emit spans (off by default).
+            - name: OTEL_TRACES_EXPORTER
+              value: "none"
+            - name: OTEL_METRICS_EXPORTER
+              value: "prometheus"
+            - name: OTEL_METRICS_PROMETHEUS_LISTEN
+              value: ":9090"
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/
@@ -165,11 +192,10 @@ rules:
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
   # pods/exec: needed by the driver's Freezer to run `fsfreeze --freeze`
-  # inside the csi-node DaemonSet pod holding a source volume's mount
-  # during CreateSnapshot. Without this the driver falls back to
-  # snapshotting without quiescing, which for XFS can produce an
-  # inconsistent-log snapshot that log-recovery empties on restore.
-  # See pkg/driver/freezer.go.
+  # inside the app pod holding a source volume during CreateSnapshot. Without
+  # this the driver falls back to snapshotting without quiescing, which for
+  # XFS can produce an inconsistent-log snapshot that log-recovery empties on
+  # restore. See pkg/driver/freezer.go.
   - apiGroups: [""]
     resources: ["pods/exec"]
     verbs: ["create"]
@@ -293,7 +319,12 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.2.9
+          image: hammerspaceinc/csi-plugin:v1.3.0
+          ports:
+            - containerPort: 9091
+              name: metrics
+              hostPort: 9091
+              protocol: TCP
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -323,6 +354,15 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # OTel toggles. hostNetwork=true means we bind directly to the
+            # node's :9091 (must differ from controller's :9090 in case the
+            # controller lands on the same node).
+            - name: OTEL_TRACES_EXPORTER
+              value: "none"
+            - name: OTEL_METRICS_EXPORTER
+              value: "prometheus"
+            - name: OTEL_METRICS_PROMETHEUS_LISTEN
+              value: ":9091"
           volumeMounts:
             - name: socket-dir
               mountPath: /csi
