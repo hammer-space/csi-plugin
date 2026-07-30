@@ -28,6 +28,8 @@ import (
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
 	log "github.com/sirupsen/logrus"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -155,7 +157,13 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolu
 	}, nil
 }
 
-func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (_ *csi.NodeStageVolumeResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Node/NodeStageVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("staging.target", req.GetStagingTargetPath()),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeStageVolume")(&err)
 	volumeID := req.GetVolumeId()
 	volumeContext := req.GetVolumeContext()
 	stagingTarget := req.GetStagingTargetPath()
@@ -189,7 +197,7 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 
 	marker := GetHashedMarkerPath(common.BaseVolumeMarkerSourcePath, volumeID)
 
-	err := os.WriteFile(marker, []byte(""), 0644)
+	err = os.WriteFile(marker, []byte(""), 0644)
 	if err != nil {
 		log.Warnf("Not able to create marker file path %s err %v", marker, err)
 	}
@@ -205,7 +213,13 @@ func (d *CSIDriver) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolum
 	return &csi.NodeStageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (*csi.NodeUnstageVolumeResponse, error) {
+func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageVolumeRequest) (_ *csi.NodeUnstageVolumeResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Node/NodeUnstageVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("staging.target", req.GetStagingTargetPath()),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeUnstageVolume")(&err)
 	volumeID := req.GetVolumeId()
 	stagingTarget := req.GetStagingTargetPath()
 
@@ -233,13 +247,19 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 		// if no volume are mounted
 		log.Debugf("No volume marker is present on this node. Remove root mount as well..")
 		_ = os.RemoveAll(common.BaseVolumeMarkerSourcePath)
-		_ = common.UnmountFilesystem(common.BaseBackingShareMountPath)
+		_ = common.UnmountFilesystem(ctx, common.BaseBackingShareMountPath)
 	}
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (*csi.NodePublishVolumeResponse, error) {
+func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishVolumeRequest) (_ *csi.NodePublishVolumeResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Node/NodePublishVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("target.path", req.GetTargetPath()),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodePublishVolume")(&err)
 
 	volume_id := req.GetVolumeId()
 	targetPath := req.GetTargetPath()
@@ -331,7 +351,13 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 	return &csi.NodePublishVolumeResponse{}, nil
 }
 
-func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (*csi.NodeUnpublishVolumeResponse, error) {
+func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpublishVolumeRequest) (_ *csi.NodeUnpublishVolumeResponse, err error) {
+	ctx, span := tracer.Start(ctx, "Node/NodeUnpublishVolume", trace.WithAttributes(
+		attribute.String("volume.id", req.GetVolumeId()),
+		attribute.String("target.path", req.GetTargetPath()),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "Node/NodeUnpublishVolume")(&err)
 
 	if req.GetVolumeId() == "" {
 		return nil, status.Error(codes.InvalidArgument, common.EmptyVolumeId)
@@ -388,7 +414,7 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 		}
 	case mode.IsDir(): // directory for mount volumes
 		log.Infof("Detected directory mount at target path %s", targetPath)
-		if err := common.UnmountFilesystem(targetPath); err != nil {
+		if err := common.UnmountFilesystem(ctx, targetPath); err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
 	default:

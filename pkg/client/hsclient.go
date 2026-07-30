@@ -42,7 +42,6 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/hammer-space/csi-plugin/pkg/common"
-	"github.com/jpillora/backoff"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -51,9 +50,16 @@ import (
 )
 
 const (
-	BasePath                   = "/mgmt/v1.2/rest"
-	taskPollTimeout            = 3600 * time.Second // Seconds
-	taskPollIntervalCap        = 30 * time.Second   //Seconds, The maximum duration between calls when polling task objects
+	BasePath        = "/mgmt/v1.2/rest"
+	taskPollTimeout = 3600 * time.Second // overall deadline for a single task poll
+	// Share-create tasks always take longer than ~2s and almost always finish
+	// under ~15s. So poll at a tight fixed 2s cadence while completion is likely,
+	// then relax to 4s. This keeps detection latency ~2s in the common case; the
+	// previous exponential backoff (capped at 30s) could add up to a full 30s of
+	// detection lag after the task had already completed.
+	taskPollFastInterval       = 2 * time.Second  // poll every 2s ...
+	taskPollFastWindow         = 30 * time.Second // ... for the first 30s ...
+	taskPollSlowInterval       = 4 * time.Second  // ... then back off to every 4s
 	taskStatusValidationFailed = "VALIDATION_FAILED"
 	taskStatusResumed          = "RESUMED"
 	taskStatusFailed           = "FAILED"
@@ -130,7 +136,7 @@ func (client *HammerspaceClient) GetPortalFloatingIp(ctx context.Context) (strin
 	if err != nil {
 		return "", err
 	}
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 	if err != nil {
 		return "", err
 	}
@@ -192,7 +198,7 @@ func (client *HammerspaceClient) GetDataPortals(ctx context.Context, nodeID stri
 		return nil, err
 	}
 
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -265,19 +271,39 @@ func (client *HammerspaceClient) EnsureLogin() error {
 	return err
 }
 
-func (client *HammerspaceClient) doRequest(req http.Request) (int, string, map[string][]string, error) {
+func (client *HammerspaceClient) doRequest(ctx context.Context, req http.Request) (int, string, map[string][]string, error) {
+	// Low-cardinality route template (share/file/task IDs collapsed to {id}),
+	// used for both the latency histogram path label and the per-request counter.
+	route := common.AnvilRoute(req.URL.Path)
+	ctx, span := tracer.Start(ctx, "HammerspaceClient.doRequest", trace.WithAttributes(
+		attribute.String("http.method", req.Method),
+		attribute.String("http.url", req.URL.String()),
+	))
+	defer span.End()
+	defer common.MeasureOp(ctx, "HammerspaceClient.doRequest",
+		attribute.String("http.method", req.Method),
+		attribute.String("http.path", route),
+	)(nil)
 	log.Debugf("sending request %s %s", req.Method, req.URL)
 
-	resp, err := client.httpclient.Do(&req)
+	resp, err := client.httpclient.Do(req.WithContext(ctx))
 	// Attempt to login
 	if err == nil && (resp.StatusCode == 401 || resp.StatusCode == 403) {
 		client.EnsureLogin()
-		resp, err = client.httpclient.Do(&req)
+		resp, err = client.httpclient.Do(req.WithContext(ctx))
 	}
 	if err != nil {
+		span.RecordError(err)
+		// Count the attempt even on transport failure (status 0), so the
+		// request rate/count reflects every call the driver makes.
+		common.RecordAnvilRequest(ctx, req.Method, route, 0)
 		return 0, "", nil, err
 	}
 	defer resp.Body.Close()
+	span.SetAttributes(attribute.Int("http.status_code", resp.StatusCode))
+	// Count every completed request with its real method + route + status, so
+	// non-GET verbs and the 404 type-probes are all visible in metrics.
+	common.RecordAnvilRequest(ctx, req.Method, route, resp.StatusCode)
 	body, err := io.ReadAll(resp.Body)
 	bodyString := string(body)
 	responseLog := log.WithFields(log.Fields{
@@ -336,26 +362,41 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 }
 
 func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, taskLocation string) (bool, error) {
-	b := &backoff.Backoff{
-		Max:    taskPollIntervalCap,
-		Factor: 1.5,
-		Jitter: true,
-	}
+	// The task-completion poll (CreateShare returns 202 + a task, then we poll
+	// GET /tasks/{id} until terminal) is typically the dominant cost of share
+	// creation - the share-backed analog of the file-visibility poll. Give it a
+	// dedicated metric + span with an attempt count so the dashboard and traces
+	// can localize it instead of it hiding inside Controller/CreateVolume.
+	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletion")(nil)
+	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletion")
+	attempts := 0
+	defer func() {
+		span.SetAttributes(attribute.Int("attempts", attempts))
+		span.End()
+	}()
+
 	taskUrl, _ := url.Parse(taskLocation)
 	taskId := path.Base(taskUrl.Path)
 	startTime := time.Now()
 
 	var task common.Task
 	for time.Since(startTime) < taskPollTimeout {
-		d := b.Duration()
-		time.Sleep(d)
+		// Sleep-first: share-create tasks never complete in under ~2s, so there
+		// is no point checking immediately. Poll every 2s for the first 30s, then
+		// relax to every 4s for the long tail.
+		interval := taskPollFastInterval
+		if time.Since(startTime) >= taskPollFastWindow {
+			interval = taskPollSlowInterval
+		}
+		time.Sleep(interval)
+		attempts++
 
 		req, err := client.generateRequest(ctx, "GET", "/tasks/"+taskId, "")
 		if err != nil {
 			log.Error("Failed to generate request object")
 			os.Exit(1)
 		}
-		statusCode, respBody, _, err := client.doRequest(*req)
+		statusCode, respBody, _, err := client.doRequest(ctx, *req)
 		if err != nil {
 			return false, err
 		}
@@ -385,7 +426,7 @@ func (client *HammerspaceClient) ListShares(ctx context.Context) ([]common.Share
 		log.Error(err)
 		return nil, err
 	}
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -420,7 +461,7 @@ func (client *HammerspaceClient) ListObjectives(ctx context.Context) ([]common.C
 		return nil, err
 	}
 
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -503,7 +544,7 @@ func (client *HammerspaceClient) ListVolumes(ctx context.Context) ([]common.Volu
 		return nil, err
 	}
 
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 	if err != nil {
 		log.Error(err)
 		return nil, err
@@ -587,7 +628,7 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 
 func (client *HammerspaceClient) GetShare(ctx context.Context, name string) (*common.ShareResponse, error) {
 	req, err := client.generateRequest(ctx, "GET", "/shares/"+url.PathEscape(name), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -610,7 +651,7 @@ func (client *HammerspaceClient) GetShare(ctx context.Context, name string) (*co
 
 func (client *HammerspaceClient) GetShareRawFields(ctx context.Context, name string) (map[string]interface{}, error) {
 	req, err := client.generateRequest(ctx, "GET", "/shares/"+url.PathEscape(name), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -633,7 +674,7 @@ func (client *HammerspaceClient) GetShareRawFields(ctx context.Context, name str
 
 func (client *HammerspaceClient) GetFile(ctx context.Context, path string) (*common.File, error) {
 	req, err := client.generateRequest(ctx, "GET", "/files?path="+url.PathEscape(path), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -671,6 +712,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	exportOptions []common.ShareExportOptions,
 	deleteDelay int64,
 	comment string) error {
+	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShare")(nil)
 
 	log.Debug("Creating share: " + name)
 	extendedInfo := common.GetCommonExtendedInfo()
@@ -708,7 +750,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		log.Errorf("unable to genrate share create request with POST. Error %v", err)
 		return err
 	}
-	statusCode, _, respHeaders, err := client.doRequest(*req)
+	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -746,6 +788,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 }
 
 func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, snapshotPath string) error {
+	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShareFromSnapshot")(nil)
 	log.WithFields(log.Fields{
 		"name":          name,
 		"deleteDelay":   deleteDelay,
@@ -790,7 +833,7 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 		log.Errorf("unable to genrate share create request with POST. Error %v", err)
 		return err
 	}
-	statusCode, _, respHeaders, err := client.doRequest(*req)
+	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -833,7 +876,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Con
 		log.Error("Failed to generate request object")
 		return false, err
 	}
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 	if err != nil {
 		return false, err
 	}
@@ -873,7 +916,7 @@ func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName st
 				objectiveName, shareName, path, err)
 			return err
 		}
-		statusCode, respBody, _, err := client.doRequest(*req)
+		statusCode, respBody, _, err := client.doRequest(ctx, *req)
 		if err != nil {
 			log.Errorf("Failed to set objective %s on share %s at path %s, %v",
 				objectiveName, shareName, path, err)
@@ -909,7 +952,7 @@ func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name strin
 		log.Error(err)
 		return err
 	}
-	statusCode, _, respHeaders, err := client.doRequest(*req)
+	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -954,7 +997,7 @@ func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, d
 	if err != nil {
 		return err
 	}
-	statusCode, body, respHeaders, err := client.doRequest(*req)
+	statusCode, body, respHeaders, err := client.doRequest(ctx, *req)
 	if err != nil {
 		return err
 	}
@@ -991,7 +1034,7 @@ func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, d
 func (client *HammerspaceClient) SnapshotShare(ctx context.Context, shareName string) (string, error) {
 	req, err := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/share-snapshots/snapshot-create/%s", url.PathEscape(shareName)), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -1015,7 +1058,7 @@ func (client *HammerspaceClient) SnapshotShare(ctx context.Context, shareName st
 func (client *HammerspaceClient) GetShareSnapshots(ctx context.Context, shareName string) ([]string, error) {
 	req, _ := client.generateRequest(ctx, "GET",
 		fmt.Sprintf("/share-snapshots/snapshot-list/%s", url.PathEscape(shareName)), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		return nil, err
@@ -1046,7 +1089,7 @@ func (client *HammerspaceClient) DeleteShareSnapshot(ctx context.Context, shareN
 	req, _ := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/share-snapshots/snapshot-delete/%s/%s",
 			url.PathEscape(shareName), url.PathEscape(snapshotName)), "")
-	statusCode, _, _, err := client.doRequest(*req)
+	statusCode, _, _, err := client.doRequest(ctx, *req)
 	trace.SpanFromContext(ctx).SetAttributes(
 		attribute.String("share.name", shareName),
 		attribute.String("snapshot.name", snapshotName),
@@ -1065,7 +1108,7 @@ func (client *HammerspaceClient) DeleteShareSnapshot(ctx context.Context, shareN
 func (client *HammerspaceClient) GetFileSnapshots(ctx context.Context, filePath string) ([]common.FileSnapshot, error) {
 	req, _ := client.generateRequest(ctx, "GET",
 		fmt.Sprintf("/file-snapshots/list?filename-expression=%s", url.PathEscape(filePath)), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		return nil, err
@@ -1092,7 +1135,7 @@ func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePat
 
 	req, _ := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		return err
@@ -1119,7 +1162,7 @@ func (client *HammerspaceClient) SnapshotFile(ctx context.Context, filepath stri
 		return "", err
 	}
 
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -1146,7 +1189,7 @@ func (client *HammerspaceClient) RestoreFileSnapToDestination(ctx context.Contex
 		return err
 	}
 
-	statusCode, _, _, err := client.doRequest(*req)
+	statusCode, _, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -1165,7 +1208,7 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity(ctx context.Context
 		return 0, err
 	}
 
-	statusCode, respBody, _, err := client.doRequest(*req)
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
