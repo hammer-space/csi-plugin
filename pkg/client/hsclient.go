@@ -361,14 +361,22 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 	return req, nil
 }
 
+// WaitForTaskCompletion polls a task to completion, discarding the final
+// task details. Kept for callers that only care whether the task succeeded;
+// see WaitForTaskCompletionResult for callers that need the task itself.
 func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, taskLocation string) (bool, error) {
+	_, success, err := client.WaitForTaskCompletionResult(ctx, taskLocation)
+	return success, err
+}
+
+func (client *HammerspaceClient) WaitForTaskCompletionResult(ctx context.Context, taskLocation string) (*common.Task, bool, error) {
 	// The task-completion poll (CreateShare returns 202 + a task, then we poll
 	// GET /tasks/{id} until terminal) is typically the dominant cost of share
 	// creation - the share-backed analog of the file-visibility poll. Give it a
 	// dedicated metric + span with an attempt count so the dashboard and traces
 	// can localize it instead of it hiding inside Controller/CreateVolume.
-	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletion")(nil)
-	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletion")
+	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletionResult")(nil)
+	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletionResult")
 	attempts := 0
 	defer func() {
 		span.SetAttributes(attribute.Int("attempts", attempts))

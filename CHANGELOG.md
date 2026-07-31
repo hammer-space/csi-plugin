@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AnvilRoute` collapses `share-snapshots` share/snapshot identifiers to `{id}`, preventing unbounded `hs_csi_anvil_requests_total` metric cardinality.
 - Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
 - Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
+- `NodeExpandVolume` now grows file-backed filesystems using the request's actual mount point (`req.GetVolumePath()`) instead of reconstructing the backing-file path. `xfs_growfs` requires a mount point argument and has no fallback for a backing file, so xfs file-backed expansion previously failed on every attempt. (#72)
+- Guarded the `CreateSnapshot` dedup cache (`recentlyCreatedSnapshots`) with its own mutex, independent of the per-snapshot-name lock. The per-name lock only serializes calls for the same snapshot name; concurrent `CreateSnapshot` calls for different names could read/write the shared map at the same instant, which is a fatal, crash-the-process condition in Go. (#73)
 
 ### Security
 - Hardened the example credential handling in `deploy/kubernetes`: `example_secret.yaml` is now a clearly-marked `<PLACEHOLDER>` template (no committed base64 admin/admin), `kubectl create secret` is documented as the primary path, and a new [`deploy/kubernetes/SECRETS.md`](deploy/kubernetes/SECRETS.md) covers a least-privilege Anvil service account (scoped Hammerspace role instead of a full admin), least-privilege Kubernetes RBAC, Sealed Secrets, and External Secrets Operator / Secrets Store CSI.

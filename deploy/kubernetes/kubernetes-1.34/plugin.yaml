@@ -460,6 +460,16 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 
 ---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-volumeattachment-status
+  namespace: kube-system
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:

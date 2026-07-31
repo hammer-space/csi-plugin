@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jpillora/backoff"
@@ -48,8 +49,9 @@ const (
 )
 
 var (
-	recentlyCreatedSnapshots = map[string]*csi.Snapshot{}
-	tracer                   = otel.Tracer("hammerspace-csi/controller")
+	recentlyCreatedSnapshots   = map[string]*csi.Snapshot{}
+	recentlyCreatedSnapshotsMu sync.Mutex
+	tracer                     = otel.Tracer("hammerspace-csi/controller")
 )
 
 func parseVolParams(params map[string]string) (common.HSVolumeParameters, error) {
@@ -1563,7 +1565,15 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	// FIXME: Check to see if snapshot already exists?
 	//  (using their id somehow?, update the share extended info maybe?) what about for file-backed volumes?
 	// do we update extended info on backing share?
-	if _, exists := recentlyCreatedSnapshots[req.GetName()]; !exists {
+	// recentlyCreatedSnapshots is shared across all snapshot names, unlike
+	// acquireSnapshotLock above which only serializes calls for this one name,
+	// so every access to the map itself must go through its own mutex.
+	recentlyCreatedSnapshotsMu.Lock()
+	cachedSnapshot, exists := recentlyCreatedSnapshots[req.GetName()]
+	recentlyCreatedSnapshotsMu.Unlock()
+	if !exists {
+		sourceVolumeID := req.GetSourceVolumeId()
+		var snapID string
 		// find source volume (is it file or share?
 		volumeName := GetVolumeNameFromPath(req.GetSourceVolumeId())
 		// Decide file- vs share-backed structurally from the source volume ID,
@@ -1655,14 +1665,17 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 			ReadyToUse:     true,
 		}
 		// FIXME: this is a hack to reduce the chance we create a snapshot twice
+		recentlyCreatedSnapshotsMu.Lock()
 		recentlyCreatedSnapshots[req.GetName()] = snapshotResponse
+		recentlyCreatedSnapshotsMu.Unlock()
+		cachedSnapshot = snapshotResponse
 	} else {
-		if recentlyCreatedSnapshots[req.GetName()].SourceVolumeId != req.GetSourceVolumeId() {
+		if cachedSnapshot.SourceVolumeId != req.GetSourceVolumeId() {
 			return nil, status.Errorf(codes.AlreadyExists, "snapshot already exists for a different volume")
 		}
 	}
 	return &csi.CreateSnapshotResponse{
-		Snapshot: recentlyCreatedSnapshots[req.GetName()],
+		Snapshot: cachedSnapshot,
 	}, nil
 }
 
@@ -1678,12 +1691,12 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		return nil, status.Error(codes.InvalidArgument, common.EmptySnapshotId)
 	}
 
-	splitSnapId := strings.SplitN(snapshotId, "|", 2)
-	if len(splitSnapId) != 2 {
+	snapshotName, nameErr := GetSnapshotNameFromSnapshotId(snapshotId)
+	sourceVolumeID, volErr := GetSnapshotSourceVolumeId(snapshotId)
+	if nameErr != nil || volErr != nil {
 		log.Warnf("DeleteSnapshot: malformed snapshot ID %s; treating as success (idempotent)", snapshotId)
 		return &csi.DeleteSnapshotResponse{}, nil
 	}
-	snapshotName := splitSnapId[0]
 
 	// If the snapshot does not exist then return an idempotent response.
 
@@ -1697,11 +1710,11 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 	// ALWAYS true, so every delete was routed to DeleteShareSnapshot and
 	// file-backed snapshots were orphaned on the Anvil, blocking source-volume
 	// deletion.)
-	shareName := GetVolumeNameFromPath(path)
+	shareName := GetVolumeNameFromPath(sourceVolumeID)
 
 	var err error
-	if isFileBackedVolumeID(path) {
-		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+	if isFileBackedVolumeID(sourceVolumeID) {
+		err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
 	} else {
 		share, gerr := d.hsclient.GetShare(ctx, shareName)
 		if gerr != nil {
@@ -1710,7 +1723,7 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		if share != nil {
 			err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
 		} else {
-			err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+			err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
 		}
 	}
 

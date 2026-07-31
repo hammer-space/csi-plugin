@@ -258,6 +258,23 @@ func GetFileSnapshotPathsFromSnapshotId(snapshotId string) ([]string, error) {
 	return nil, nil
 }
 
+// GetFileSnapshotsIDFromSnapshotNames is the inverse of
+// GetFileSnapshotPathsFromSnapshotId: it encodes the per-file snapshot paths
+// returned by SnapshotFiles into a single snapshot ID, using the first
+// snapshot path as the ID's representative name (mirroring SnapshotFile's
+// single-file convention) and carrying the full list in a "files:" token.
+func GetFileSnapshotsIDFromSnapshotNames(hsSnapNames []string, sourceVolumeID string) (string, error) {
+	if len(hsSnapNames) == 0 {
+		return "", fmt.Errorf("no file snapshots to encode into a snapshot ID")
+	}
+	payload, err := json.Marshal(hsSnapNames)
+	if err != nil {
+		return "", err
+	}
+	encoded := base64.RawURLEncoding.EncodeToString(payload)
+	return fmt.Sprintf("%s|%s|files:%s", hsSnapNames[0], sourceVolumeID, encoded), nil
+}
+
 func GetBackingShareNameFromPath(volumePath string) string {
 	trimmed := strings.Trim(path.Clean(volumePath), "/")
 	if trimmed == "" || trimmed == "." {
@@ -270,6 +287,44 @@ func GetBackingShareNameFromPath(volumePath string) string {
 // <created snapshot name>|<sharepath or filepath>
 func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
+}
+
+// formatCreateVolumeName applies volumeNameFormat (validated upstream to
+// contain exactly one "%s") to requestName. For snapshot-restore requests it
+// marks the name with restoreVolumeNameSuffix (unless requestName is already
+// marked, e.g. a retried restore), and truncates as needed to stay within
+// Hammerspace's volume name length limit while preserving that marker.
+func formatCreateVolumeName(requestName, volumeNameFormat string, fromSnapshot bool) (string, error) {
+	name := requestName
+	if fromSnapshot && !strings.Contains(name, "restore") {
+		name += restoreVolumeNameSuffix
+	}
+
+	if formatted := fmt.Sprintf(volumeNameFormat, name); len(formatted) <= MaxHammerspaceVolumeNameLength {
+		return formatted, nil
+	}
+
+	overhead := len(fmt.Sprintf(volumeNameFormat, ""))
+	maxNameLen := MaxHammerspaceVolumeNameLength - overhead
+	if maxNameLen <= 0 {
+		return "", fmt.Errorf("volumeNameFormat leaves no room for a volume name within the %d character Hammerspace name limit", MaxHammerspaceVolumeNameLength)
+	}
+
+	if fromSnapshot {
+		if maxNameLen <= len(restoreVolumeNameSuffix) {
+			return "", fmt.Errorf("volumeNameFormat leaves no room for the %q suffix within the %d character Hammerspace name limit", restoreVolumeNameSuffix, MaxHammerspaceVolumeNameLength)
+		}
+		base := strings.TrimSuffix(name, restoreVolumeNameSuffix)
+		maxBaseLen := maxNameLen - len(restoreVolumeNameSuffix)
+		if len(base) > maxBaseLen {
+			base = base[:maxBaseLen]
+		}
+		name = base + restoreVolumeNameSuffix
+	} else if len(name) > maxNameLen {
+		name = name[:maxNameLen]
+	}
+
+	return fmt.Sprintf(volumeNameFormat, name), nil
 }
 
 // mountState classifies an existing backing-share staging mount.

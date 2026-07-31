@@ -515,7 +515,10 @@ func (d *CSIDriver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVol
 			return nil, err
 		}
 		if typeMount {
-			err = common.ExpandFilesystem(common.ShareStagingDir+req.GetVolumeId(), req.VolumeCapability.GetMount().FsType)
+			if req.GetVolumePath() == "" {
+				return nil, status.Error(codes.InvalidArgument, common.EmptyVolumePath)
+			}
+			err = common.ExpandFilesystem(req.GetVolumePath(), req.VolumeCapability.GetMount().FsType)
 			if err != nil {
 				return nil, err
 			}
