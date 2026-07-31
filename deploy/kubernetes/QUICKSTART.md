@@ -157,9 +157,10 @@ kubectl patch pvc myfilesystem -p '{"spec":{"resources":{"requests":{"storage":"
 kubectl get pvc myfilesystem      # CAPACITY updates once the resize completes
 ```
 
-For **file-backed and block** volumes the filesystem is grown on the node, which
-currently requires restarting the pod using the volume. Share-backed (`nfs`)
-volumes need no restart.
+Expansion is **online for every volume type** — the pod keeps running, no restart
+needed. For **file-backed and block** volumes the resize runs on the node; the
+first attempt may log a transient error and succeed on kubelet's automatic retry
+(see [#71](https://github.com/hammer-space/csi-plugin/issues/71)).
 
 ### Snapshot a volume and restore it
 

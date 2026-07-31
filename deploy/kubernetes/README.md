@@ -117,11 +117,17 @@ follows from that choice.
 | What it is | A Hammerspace share, mounted over NFS | A file on a backing share, formatted and loop-mounted | A file on a backing share, exposed as a raw device |
 | Shared between pods | Yes — `ReadWriteMany` | No — one pod at a time | No — one pod at a time |
 | Typical use | Shared data, the common case | A pod that needs POSIX/local filesystem semantics | Databases and apps that manage their own format |
-| Needs a backing share | No | Yes — `mountBackingShareName` | Yes — `blockBackingShareName` |
-| Expansion | Online | Requires restarting the pod | Requires restarting the pod |
+| Needs a backing share | No by default (optionally `mountBackingShareName` — see below) | Yes — `mountBackingShareName` | Yes — `blockBackingShareName` |
+| Expansion | Online | Online — grown on the node | Online — grown on the node |
 | Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
-| At high volume counts | One share per volume, so the Anvil management API is the limit | **Scales to thousands** | **Scales to thousands** |
+| At high volume counts | One share per volume by default (the Anvil management API is the limit); set `mountBackingShareName` to nest PVCs under a single share instead | **Scales to thousands** | **Scales to thousands** |
 | Example | [`example_storage_class.yaml`](./example_storage_class.yaml) | [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) |
+
+Volume expansion is **online for all three types** — grow the PVC while the pod
+keeps running, no restart required. For file-backed and block volumes the resize
+runs on the node; the first `NodeExpandVolume` may log a transient error and
+succeed on kubelet's automatic retry (see
+[#71](https://github.com/hammer-space/csi-plugin/issues/71)).
 
 If you are not sure, use share-backed (`fsType: nfs`) — unless you are
 provisioning very large numbers of volumes, where file-backed scales better
@@ -139,7 +145,7 @@ Values are always strings (quote numbers and booleans).
 | `fsType` | `nfs` | `nfs` for share-backed volumes; `ext4` or `xfs` for file-backed. Selects the volume type — see above. |
 | `objectives` | none | Comma-separated Hammerspace objectives to apply in addition to the cluster defaults. Ex: `"keep-online,archive"` |
 | `objectiveTarget` | `share` | File-backed volumes only. `share` applies objectives to the backing share only and provisions fastest; `file` or `both` also applies them per file, for per-volume placement policy. |
-| `mountBackingShareName` | none | File-backed volumes: the share that holds the backing files. Auto-created if missing; never deleted by the driver. |
+| `mountBackingShareName` | none | For file-backed volumes, the share that holds the backing files. Also honored for share-backed (`nfs`) volumes: each PVC then becomes a subdirectory inside this one base share instead of its own top-level share — which lets snapshots restore into a differently-named share and removes the one-share-per-volume scaling limit. Auto-created if missing; never deleted by the driver. |
 | `blockBackingShareName` | none | Block volumes: as above, for raw block backing files. |
 | `exportOptions` | none | NFS export rules as `;`-separated `<subnet>,<accessPermissions>,<rootSquash>` triples. Ex: `"*,RW,false; 172.16.0.0/20,RO,true"` |
 | `volumeNameFormat` | `csi-%s` | Naming pattern for provisioned shares. Must contain `%s` exactly once and no `/`. |
