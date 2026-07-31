@@ -285,16 +285,22 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 		// log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
 		return err
 	}
+	// Order matters (issue #71): grow the backing file FIRST, then refresh the loop
+	// device. losetup -c (LOOP_SET_CAPACITY) makes the kernel re-read the backing
+	// file's CURRENT size at the moment it runs. If we refresh before the resize, the
+	// loop device is left reporting the old size, so the caller's resize2fs/xfs_growfs
+	// is a no-op — the first NodeExpandVolume fails for ext4/xfs (and silently under-
+	// sizes a block device, which has no filesystem check to catch it) until a retry.
+	output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
+	if err != nil {
+		log.Errorf("%s, %v", output, err.Error())
+		return err
+	}
 	// Refresh the loop device size with losetup -c
 	// Requires UBI image
 	loresize, err := ExecCommand("losetup", "-c", loopdev)
 	if err != nil {
 		log.Errorf("Resizing loop device '%s' failed with output '%s': '%v'", loopdev, loresize, err.Error())
-		return err
-	}
-	output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
-	if err != nil {
-		log.Errorf("%s, %v", output, err.Error())
 		return err
 	}
 	return nil

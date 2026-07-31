@@ -168,3 +168,59 @@ func TestBeginMountDeduplicatesByTarget(t *testing.T) {
 		t.Fatalf("post-completion mount fn didn't run fresh; starts=%d want 2", got)
 	}
 }
+
+// TestExpandDeviceFileSizeOrdering is a regression test for issue #71: the backing
+// file must be grown (qemu-img resize) BEFORE the loop device size is refreshed
+// (losetup -c). losetup -c (LOOP_SET_CAPACITY) snapshots the backing file's size at
+// the moment it runs, so refreshing before the resize leaves the loop device at the
+// old size — making the first NodeExpandVolume's resize2fs/xfs_growfs a no-op (ext4/
+// xfs fail; block has no filesystem check to catch it).
+func TestExpandDeviceFileSizeOrdering(t *testing.T) {
+	orig := ExecCommand
+	defer func() { ExecCommand = orig }()
+
+	const backing = "/mnt/backing/csi-file-pvc-abc.img"
+	const loopdev = "/dev/loop7"
+
+	var calls [][]string
+	ExecCommand = func(command string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{command}, args...))
+		// determineLoopDeviceFromBackingFile parses `losetup -a` lines of the form
+		// "<loop>: [maj:min]:inode (<backing>)" and matches field[2] to the backing file.
+		if command == "losetup" && len(args) == 1 && args[0] == "-a" {
+			return []byte(loopdev + ": [2049]:999 (" + backing + ")\n"), nil
+		}
+		return []byte(""), nil
+	}
+
+	if err := ExpandDeviceFileSize(backing, 2147483648); err != nil {
+		t.Fatalf("ExpandDeviceFileSize returned error: %v", err)
+	}
+
+	idxResize, idxRefresh := -1, -1
+	for i, c := range calls {
+		switch {
+		case c[0] == "qemu-img" && len(c) >= 2 && c[1] == "resize":
+			idxResize = i
+		case c[0] == "losetup" && len(c) >= 2 && c[1] == "-c":
+			idxRefresh = i
+		}
+	}
+	if idxResize == -1 {
+		t.Fatalf("qemu-img resize was never called; calls=%v", calls)
+	}
+	if idxRefresh == -1 {
+		t.Fatalf("losetup -c was never called; calls=%v", calls)
+	}
+	if idxResize > idxRefresh {
+		t.Fatalf("issue #71 ordering bug: backing file grown (qemu-img resize @%d) AFTER loop refresh (losetup -c @%d); calls=%v",
+			idxResize, idxRefresh, calls)
+	}
+	// the resize must target the requested size, and the refresh the discovered loop dev
+	if got := calls[idxResize][len(calls[idxResize])-1]; got != "2147483648" {
+		t.Errorf("qemu-img resize size = %q, want 2147483648", got)
+	}
+	if got := calls[idxRefresh][len(calls[idxRefresh])-1]; got != loopdev {
+		t.Errorf("losetup -c target = %q, want %s", got, loopdev)
+	}
+}
