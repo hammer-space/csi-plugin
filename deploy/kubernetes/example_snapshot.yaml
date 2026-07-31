@@ -1,0 +1,53 @@
+# Example: take a snapshot of a volume, then restore it into a new volume.
+#
+# Requires the external-snapshotter CRDs and controller in the cluster, and the
+# VolumeSnapshotClass from example_snapshot_class.yaml.
+#
+# Apply in order: the VolumeSnapshot first, wait for it to become ready, then
+# the restore PVC.
+#
+#   kubectl apply -f example_snapshot.yaml
+#   kubectl get volumesnapshot data-snapshot -w     # wait for READYTOUSE=true
+#
+# How the driver handles this:
+#   - share-backed volumes (fsType: nfs) get a Hammerspace share snapshot
+#   - file-backed volumes (fsType: ext4/xfs) get a file snapshot, and the source
+#     filesystem is frozen briefly for a crash-consistent image
+# The driver picks the right one from the source volume; there is nothing to
+# configure.
+---
+# 1. Snapshot an existing PVC.
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: data-snapshot
+  namespace: default
+spec:
+  volumeSnapshotClassName: hs-snapshots
+  source:
+    # The PVC to snapshot. Must already exist and be Bound.
+    persistentVolumeClaimName: myfilesystem
+---
+# 2. Restore the snapshot into a NEW volume.
+#
+# The restored volume is independent of the source: it is a new Hammerspace
+# share, and writing to it does not affect the original PVC.
+#
+# `storage` must be at least the size of the source volume, and the storage
+# class should match the one the source volume used.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: myfilesystem-restored
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: hs-storage
+  dataSource:
+    name: data-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io

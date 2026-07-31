@@ -1,35 +1,66 @@
-# Kubernetes v1.13+ Installation/Configurations
+# Kubernetes Installation/Configuration
 
 This directory contains example manifests for deploying the plugin to Kubernetes.
 
-Documentation on how to write these manifests can be found [here](https://github.com/kubernetes/community/blob/master/contributors/design-proposals/storage/container-storage-interface.md#recommended-mechanism-for-deploying-csi-drivers-on-kubernetes)
+**New here? Start with [`QUICKSTART.md`](./QUICKSTART.md)** — credentials, driver
+deployment, and a first working volume, with a check after every step.
 
-To deploy all necessary components, customize these files and apply them:
-Apply all from within this directory:
+The examples are meant to be customized and applied individually, not all at
+once (`example_secret.yaml` is a placeholder template, and `example_snapshot.yaml`
+expects an existing PVC).
+
+| File | What it is |
+| --- | --- |
+| [`example_secret.yaml`](./example_secret.yaml) | Anvil credentials template — see [`SECRETS.md`](./SECRETS.md) |
+| [`example_storage_class.yaml`](./example_storage_class.yaml) | Shared filesystem (NFS) volumes — the usual starting point |
+| [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | File-backed ext4/xfs volumes |
+| [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) | Raw block volumes |
+| [`example_fqdn_storage_class.yaml`](./example_fqdn_storage_class.yaml) | FQDN-addressed storage, with a runnable PVC + Pod |
+| [`example_snapshot_class.yaml`](./example_snapshot_class.yaml) | VolumeSnapshotClass |
+| [`example_snapshot.yaml`](./example_snapshot.yaml) | Snapshot a volume and restore it into a new one |
+| `kubernetes-<major>.<minor>/plugin.yaml` | The driver itself |
+
+## Anvil credentials
+
+The driver authenticates to Anvil with an administrative user stored in a Secret
+named `com.hammerspace.csi.credentials`. **`example_secret.yaml` is a template
+full of `<PLACEHOLDER>` values — do not `kubectl apply` it as-is, and do not
+commit a filled-in copy.** The recommended path is to create the Secret
+imperatively:
+
 ```bash
-kubectl apply -f *.yaml
+kubectl create secret generic com.hammerspace.csi.credentials \
+  --namespace kube-system \
+  --from-literal=username='<PLACEHOLDER>' \
+  --from-literal=password='<PLACEHOLDER>' \
+  --from-literal=endpoint='https://<PLACEHOLDER>'
 ```
+
+For a least-privilege Anvil service account, least-privilege Kubernetes RBAC,
+GitOps-safe storage (Sealed Secrets), and external secret managers (External
+Secrets Operator / Secrets Store CSI Driver), see [`SECRETS.md`](./SECRETS.md).
 
 
 ## Plugin Updates
 
 To deploy updates to the plugin, simply change the image tag ```hammerspaceinc/csi-plugin``` of the StatefulSet and DaemonSet to the new plugin image, make any other update to environment variables, and reapply the yaml files.
 
-If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the existing plugin pods so the new image is pulled and the pods are recreated automatically. Otherwise, changing the image tag will trigger an update to occur. Ex. ```hammerspaceinc/csi-plugin:v0.1.0``` -> ```hammerspaceinc/csi-plugin:v0.1.1```
-## Kubernetes  Cluster Prerequisites
+If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the existing plugin pods so the new image is pulled and the pods are recreated automatically. Otherwise, changing the image tag will trigger an update to occur. Ex. ```hammerspaceinc/csi-plugin:v1.2.9``` -> ```hammerspaceinc/csi-plugin:v1.3.0```
+## Kubernetes Cluster Prerequisites
 Kubernetes documentation for CSI support can be found [here](https://kubernetes-csi.github.io/)
 
-* Kubernetes version 1.13 or higher
-* Per-minor manifests live under `deploy/kubernetes/kubernetes-<major>.<minor>/plugin.yaml`.
-  Pick the one matching your `kubectl`/cluster minor version. Bundled: **1.25–1.29**
-  (historical) and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently supported +
-  validated set** — the driver in this release was tested end-to-end on live k8s
-  **1.34** and **1.35** clusters (and 1.36). Those three manifests are the 1.29
-  manifest plus the observability wiring (a host-networked metrics port and OTel
-  env vars); see [`docs/observability.md`](../../docs/observability.md) and
-  [`deploy/monitoring/README.md`](../monitoring/README.md). The 1.25–1.29 manifests
-  are kept for older clusters and pin their contemporary driver image. For a minor
-  with no bundled manifest, copy the nearest lower version and bump sidecar tags.
+* There is no single blanket minimum Kubernetes version — the required version is
+  specific to the manifest you deploy. Per-minor manifests live under
+  `deploy/kubernetes/kubernetes-<major>.<minor>/plugin.yaml`, and each targets that
+  Kubernetes minor, so apply the one matching your `kubectl`/cluster version.
+  Bundled: **1.29** and **1.34 / 1.35 / 1.36**. **1.34–1.36 are the currently
+  supported + validated set**; those three manifests include the observability
+  wiring (a host-networked metrics port and OTel env vars) — see
+  [`docs/observability.md`](../../docs/observability.md) and
+  [`deploy/monitoring/README.md`](../monitoring/README.md). Manifests for
+  Kubernetes minors older than 1.29 have been moved to [`archive/`](./archive/);
+  they are unsupported and pin their contemporary driver image. For a minor with
+  no bundled manifest, copy the nearest lower version and bump sidecar tags.
 * BlockVolume support requires kubelet has the [feature gates](https://kubernetes.io/docs/reference/command-line-tools-reference/feature-gates/) BlockVolume and CSIBlockVolume set to true.
     Example in /var/lib/kubelet/config.yaml
     ```yaml
@@ -49,7 +80,7 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
       Topology: true
     ...
     ```
-* Voluem expansion support requires v1.14+ ``ExpandCSIVolumes`` and ``ExpandInUsePersistentVolumes``
+* Volume expansion support requires v1.14+ ``ExpandCSIVolumes`` and ``ExpandInUsePersistentVolumes``
     Example in /var/lib/kubelet/config.yaml
     ```yaml
     ...
@@ -69,12 +100,64 @@ Kubernetes documentation for CSI support can be found [here](https://kubernetes-
 
 ### NOTE on Google Kubernetes Engine
 GKE does not allow the creation of ClusterRoles
-that are more powerful than the given user. An insecure work around to this is
+that are more powerful than the given user. An insecure workaround to this is
 to give the user creating the role cluster-admin privileges.
 
 ```bash
 kubectl create clusterrolebinding i-am-root --clusterrole=cluster-admin --user=<current user>
 ```
+
+## Choosing a volume type
+
+The `fsType` parameter decides how a volume is provisioned. Everything else
+follows from that choice.
+
+| | **Share-backed** (`fsType: nfs`, the default) | **File-backed** (`fsType: ext4` or `xfs`) | **Block** (`volumeMode: Block`) |
+| --- | --- | --- | --- |
+| What it is | A Hammerspace share, mounted over NFS | A file on a backing share, formatted and loop-mounted | A file on a backing share, exposed as a raw device |
+| Shared between pods | Yes — `ReadWriteMany` | No — one pod at a time | No — one pod at a time |
+| Typical use | Shared data, the common case | A pod that needs POSIX/local filesystem semantics | Databases and apps that manage their own format |
+| Needs a backing share | No by default (optionally `mountBackingShareName` — see below) | Yes — `mountBackingShareName` | Yes — `blockBackingShareName` |
+| Expansion | Online | Online — grown on the node | Online — grown on the node |
+| Minimum size | — | xfs 300 MiB, ext4 20 MiB | — |
+| At high volume counts | One share per volume by default (the Anvil management API is the limit); set `mountBackingShareName` to nest PVCs under a single share instead | **Scales to thousands** | **Scales to thousands** |
+| Example | [`example_storage_class.yaml`](./example_storage_class.yaml) | [`example_storage_class_file_backed.yaml`](./example_storage_class_file_backed.yaml) | [`example_storage_class_block_device.yaml`](./example_storage_class_block_device.yaml) |
+
+Volume expansion is **online for all three types** — grow the PVC while the pod
+keeps running, no restart required. For file-backed and block volumes the resize
+runs on the node; the first `NodeExpandVolume` may log a transient error and
+succeed on kubelet's automatic retry (see
+[#71](https://github.com/hammer-space/csi-plugin/issues/71)).
+
+If you are not sure, use share-backed (`fsType: nfs`) — unless you are
+provisioning very large numbers of volumes, where file-backed scales better
+because the volumes are files inside a single share rather than a share each.
+See [`docs/file-backed-performance.md`](../../docs/file-backed-performance.md).
+`ext3` is not supported.
+
+## StorageClass parameters
+
+All parameters are optional and are set under `parameters:` in a StorageClass.
+Values are always strings (quote numbers and booleans).
+
+| Parameter | Default | Description |
+| --- | --- | --- |
+| `fsType` | `nfs` | `nfs` for share-backed volumes; `ext4` or `xfs` for file-backed. Selects the volume type — see above. |
+| `objectives` | none | Comma-separated Hammerspace objectives to apply in addition to the cluster defaults. Ex: `"keep-online,archive"` |
+| `objectiveTarget` | `share` | File-backed volumes only. `share` applies objectives to the backing share only and provisions fastest; `file` or `both` also applies them per file, for per-volume placement policy. |
+| `mountBackingShareName` | none | For file-backed volumes, the share that holds the backing files. Also honored for share-backed (`nfs`) volumes: each PVC then becomes a subdirectory inside this one base share instead of its own top-level share — which lets snapshots restore into a differently-named share and removes the one-share-per-volume scaling limit. Auto-created if missing; never deleted by the driver. |
+| `blockBackingShareName` | none | Block volumes: as above, for raw block backing files. |
+| `exportOptions` | none | NFS export rules as `;`-separated `<subnet>,<accessPermissions>,<rootSquash>` triples. Ex: `"*,RW,false; 172.16.0.0/20,RO,true"` |
+| `volumeNameFormat` | `csi-%s` | Naming pattern for provisioned shares. Must contain `%s` exactly once and no `/`. |
+| `additionalMetadataTags` | none | Comma-separated `key=value` metadata applied to created shares and files. |
+| `comment` | `Created by CSI driver` | Share description on the Anvil. Max 255 characters. |
+| `deleteDelay` | `-1` | Milliseconds Hammerspace waits before actually deleting a share after the volume is deleted. `-1` uses the cluster default (86400000 = 24h); `0` purges immediately. |
+| `cacheEnabled` | `false` | Enable Hammerspace caching for the share. |
+| `fqdn` | none | Address storage via this FQDN instead of a data-portal IP. Must resolve from the controller and node pods, or it is ignored with a warning. See [the FQDN example](./example_fqdn_storage_class.yaml). |
+
+Storage-class fields outside `parameters:` behave as they do for any CSI driver
+— `reclaimPolicy`, `volumeBindingMode`, `allowVolumeExpansion`, and
+`mountOptions` (used for the NFS mount).
 
 ## Example Usage
 
@@ -152,23 +235,58 @@ spec:
         name: data-dir
       command: [ "stat", "/dev/xvda" ]
   volumes:
-    - name: data-dev
+    - name: data-dir
       persistentVolumeClaim:
         claimName: mydevice
 ```
 
 ### Create a Snapshot
+
+Requires the [external-snapshotter](https://github.com/kubernetes-csi/external-snapshotter)
+CRDs and controller, plus a VolumeSnapshotClass
+([`example_snapshot_class.yaml`](./example_snapshot_class.yaml)).
+
 ```yaml
-apiVersion: snapshot.storage.k8s.io/v1alpha1
+apiVersion: snapshot.storage.k8s.io/v1
 kind: VolumeSnapshot
 metadata:
   name: data-snapshot
 spec:
-  snapshotClassName: hs-snapshots
+  volumeSnapshotClassName: hs-snapshots
   source:
-    name: mydevice
-    kind: PersistentVolumeClaim
+    persistentVolumeClaimName: mydevice
 ```
+
+The driver snapshots share-backed volumes with a share snapshot and file-backed
+volumes with a file snapshot (freezing the source filesystem briefly for a
+crash-consistent image); there is nothing to configure.
+
+### Restore a Snapshot
+
+Reference the snapshot as a PVC `dataSource`. This provisions a **new**,
+independent volume — see [`example_snapshot.yaml`](./example_snapshot.yaml) for
+the snapshot and restore together.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mydevice-restored
+spec:
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 100Gi
+  storageClassName: hs-storage
+  dataSource:
+    name: data-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+```
+
+Cloning a PVC directly (PVC-to-PVC `dataSource`) is not supported.
+
 ## Example Topology Usage
 
 ### Create an Application Using the Filesystem Volume, only schedule to nodes that are data-portals
@@ -250,7 +368,6 @@ kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
   name: hs-file-backed
-  namespace: kube-system
 provisioner: com.hammerspace.csi
 parameters:
   fsType: "ext4"

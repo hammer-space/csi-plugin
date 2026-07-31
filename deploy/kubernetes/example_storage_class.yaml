@@ -3,7 +3,6 @@ kind: StorageClass
 apiVersion: storage.k8s.io/v1
 metadata:
   name: hs-storage
-  namespace: kube-system
   annotations:
     storageclass.kubernetes.io/is-default-class: "true"
 provisioner: com.hammerspace.csi
@@ -15,12 +14,15 @@ parameters:
   fsType: "nfs"
   # Objectives to set on shares in addition to HS cluster defaults
   objectives: "keep-online"
-  # ';' seperated list of <subnet>,access,rootSquash
+  # ';' separated list of <subnet>,access,rootSquash
   exportOptions: "*,RW,false; 172.168.0.0/20,RO,true"
-  # One should be careful to set this if shares are used outside of the cluster. 
-  # -1 means Hammerspace defalt which is to delete the share in 24 hours
-  # 0 means now (5 minute delay)
-  # Specified in nanoseconds
+  # How long Hammerspace defers the actual share deletion after the volume is
+  # deleted. One should be careful to set this if shares are used outside of the
+  # cluster.
+  # Specified in milliseconds.
+  # -1 means the Hammerspace default, which is to delete the share in 24 hours
+  #    (86400000 ms)
+  # 0 means purge immediately
   deleteDelay: "0"
   # The name format of provisioned volumes, %s is replaced with pvc-<uuid>
   volumeNameFormat: "csi-%s"

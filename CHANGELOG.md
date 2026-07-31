@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `objectiveTarget` StorageClass parameter (`share` (default) | `file` | `both`) for file-backed volumes. With the default `share`, CreateVolume skips the per-file objective-set and the Anvil file-visibility poll that only exists to gate it — the backing share already carries the objectives — so provisioning returns as soon as the local `mkfs` completes and the `GET /files` poll storm under concurrency is eliminated. Use `file`/`both` to also apply per-file objectives.
 - OpenTelemetry tracing and Prometheus metrics for the driver (`OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER`, etc.); `hs_csi_operation_*` and `hs_csi_anvil_requests_total` instruments across the controller/node RPCs, the file- and share-backed provisioning steps, and every Anvil REST call. See `docs/observability.md`.
 - Minimum size gates for file-backed volumes (xfs < 300 MiB, ext4 < 20 MiB rejected) and an `fsfreeze` of the source volume before snapshot for crash-consistent file-backed snapshots.
-- `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, validated end-to-end on live 1.34 and 1.35 clusters (1.29 base + host-networked metrics port + OTel env vars).
+- `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, including a host-networked metrics port and OTel env vars.
 - `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
 - Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
 
@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AnvilRoute` collapses `share-snapshots` share/snapshot identifiers to `{id}`, preventing unbounded `hs_csi_anvil_requests_total` metric cardinality.
 - Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
 - Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
+
+### Security
+- Hardened the example credential handling in `deploy/kubernetes`: `example_secret.yaml` is now a clearly-marked `<PLACEHOLDER>` template (no committed base64 admin/admin), `kubectl create secret` is documented as the primary path, and a new [`deploy/kubernetes/SECRETS.md`](deploy/kubernetes/SECRETS.md) covers a least-privilege Anvil service account (scoped Hammerspace role instead of a full admin), least-privilege Kubernetes RBAC, Sealed Secrets, and External Secrets Operator / Secrets Store CSI.
+- Scoped the `secrets` RBAC grant on the `csi-provisioner` and `csi-node` ClusterRoles (k8s 1.34–1.36 manifests) from cluster-wide `get, list` down to `get` on the single named credential Secret via `resourceNames`. Driver credentials are injected by the kubelet via `secretKeyRef` and need no ServiceAccount access to other Secrets.
 
 ## [1.2.9]
 ### Fixed
