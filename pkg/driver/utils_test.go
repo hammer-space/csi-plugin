@@ -67,6 +67,36 @@ func TestGetSnapshotIDFromSnapshotName(t *testing.T) {
 	}
 }
 
+func TestGetFileSnapshotSourcePath(t *testing.T) {
+	got, err := getFileSnapshotSourcePath("/backing/pvc/data.txt/.fsnapshot/2026-08-04T01-02-03/data.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "/backing/pvc/data.txt" {
+		t.Fatalf("source path = %q, want /backing/pvc/data.txt", got)
+	}
+
+	if _, err := getFileSnapshotSourcePath("/backing/pvc/data.txt"); err == nil {
+		t.Fatal("expected malformed snapshot path error")
+	}
+}
+
+func TestBackingShareSnapshotID(t *testing.T) {
+	snapshotID := GetSnapshotIDFromBackingShareSnapshot(
+		"2026-08-04T01-02-03", "/nfs-root-share/pvc-123", "nfs-root-share")
+	want := "2026-08-04T01-02-03|/nfs-root-share/pvc-123|share:nfs-root-share"
+	if snapshotID != want {
+		t.Fatalf("snapshot ID = %q, want %q", snapshotID, want)
+	}
+	shareName, ok, err := GetSnapshotBackingShareFromSnapshotId(snapshotID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || shareName != "nfs-root-share" {
+		t.Fatalf("backing share = %q, present = %t", shareName, ok)
+	}
+}
+
 func TestGetVolumeNameFromPath(t *testing.T) {
 	expected := "test-volume"
 	actual := GetVolumeNameFromPath("/test-backing-share/test-volume")

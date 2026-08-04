@@ -238,6 +238,23 @@ func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
 	return path.Base(tokens[1]), nil
 }
 
+func GetSnapshotBackingShareFromSnapshotId(snapshotId string) (string, bool, error) {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
+		return "", false, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
+	}
+	for _, token := range tokens[2:] {
+		if strings.HasPrefix(token, "share:") {
+			shareName := strings.TrimPrefix(token, "share:")
+			if shareName == "" {
+				return "", false, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
+			}
+			return shareName, true, nil
+		}
+	}
+	return "", false, nil
+}
+
 func GetFileSnapshotPathsFromSnapshotId(snapshotId string) ([]string, error) {
 	tokens := strings.Split(snapshotId, "|")
 	if len(tokens) < 2 {
@@ -258,21 +275,14 @@ func GetFileSnapshotPathsFromSnapshotId(snapshotId string) ([]string, error) {
 	return nil, nil
 }
 
-// GetFileSnapshotsIDFromSnapshotNames is the inverse of
-// GetFileSnapshotPathsFromSnapshotId: it encodes the per-file snapshot paths
-// returned by SnapshotFiles into a single snapshot ID, using the first
-// snapshot path as the ID's representative name (mirroring SnapshotFile's
-// single-file convention) and carrying the full list in a "files:" token.
-func GetFileSnapshotsIDFromSnapshotNames(hsSnapNames []string, sourceVolumeID string) (string, error) {
-	if len(hsSnapNames) == 0 {
-		return "", fmt.Errorf("no file snapshots to encode into a snapshot ID")
+func getFileSnapshotSourcePath(fileSnapshotPath string) (string, error) {
+	const fileSnapshotMarker = "/.fsnapshot/"
+
+	tokens := strings.SplitN(fileSnapshotPath, fileSnapshotMarker, 2)
+	if len(tokens) != 2 || tokens[0] == "" || tokens[1] == "" {
+		return "", fmt.Errorf("invalid file snapshot path %q", fileSnapshotPath)
 	}
-	payload, err := json.Marshal(hsSnapNames)
-	if err != nil {
-		return "", err
-	}
-	encoded := base64.RawURLEncoding.EncodeToString(payload)
-	return fmt.Sprintf("%s|%s|files:%s", hsSnapNames[0], sourceVolumeID, encoded), nil
+	return path.Clean(tokens[0]), nil
 }
 
 func GetBackingShareNameFromPath(volumePath string) string {
@@ -287,6 +297,10 @@ func GetBackingShareNameFromPath(volumePath string) string {
 // <created snapshot name>|<sharepath or filepath>
 func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
+}
+
+func GetSnapshotIDFromBackingShareSnapshot(hsSnapName, sourceVolumeID, backingShareName string) string {
+	return fmt.Sprintf("%s|%s|share:%s", hsSnapName, sourceVolumeID, backingShareName)
 }
 
 // formatCreateVolumeName applies volumeNameFormat (validated upstream to

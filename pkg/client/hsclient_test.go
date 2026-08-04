@@ -480,3 +480,17 @@ func TestCloneShareSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
 		t.Fatalf("expected one clone request, got %d", cloneRequests)
 	}
 }
+
+func TestCloneShareSnapshotRequiresTaskLocation(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	Mux.HandleFunc(BasePath+"/share-snapshots/clone-create/source-share", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusAccepted)
+	})
+
+	err := hsclient.CloneShareSnapshot(context.Background(), "source-share", "snap-1", "/restore", true)
+	if err == nil || !strings.Contains(err.Error(), "no share snapshot clone task") {
+		t.Fatalf("expected missing task location error, got %v", err)
+	}
+}

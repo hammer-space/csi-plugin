@@ -1604,6 +1604,9 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		var frozen []FrozenTarget
 		if d.freezer != nil && fileBackedSource {
 			frozen = d.freezer.FreezeForVolumeHandle(ctx, req.GetSourceVolumeId())
+			// Always unfreeze, even if snapshot creation or a fallback lookup fails.
+			// Detach from the gRPC request so cancellation cannot leave the workload frozen.
+			defer d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
 		// Create the snapshot
 		var hsSnapName string
@@ -1627,11 +1630,10 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 							"sourceVolumeID":   sourceVolumeID,
 							"backingShareName": backingShareName,
 							"fileSnapshotErr":  fileSnapshotErr,
-						}).Info("falling back to directory-scoped file snapshots for directory-backed NFS volume")
-						hsSnapNames, snapshotFilesErr := d.hsclient.SnapshotFiles(ctx, path.Join(sourceVolumeID, "*"))
-						err = snapshotFilesErr
+						}).Info("snapshotting the NFS root share for a directory-backed NFS volume")
+						hsSnapName, err = d.hsclient.SnapshotShare(ctx, backingShareName)
 						if err == nil {
-							snapID, err = GetFileSnapshotsIDFromSnapshotNames(hsSnapNames, sourceVolumeID)
+							snapID = GetSnapshotIDFromBackingShareSnapshot(hsSnapName, sourceVolumeID, backingShareName)
 						}
 					}
 				}
@@ -1639,15 +1641,6 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 					err = fileSnapshotErr
 				}
 			}
-		}
-		// Always unfreeze, even if snapshot failed — otherwise the app pod
-		// stays blocked on writes indefinitely. Use a context detached from the
-		// gRPC request cancellation (context.WithoutCancel): if the snapshotter
-		// sidecar's deadline expires while SnapshotFile/SnapshotShare above is
-		// still running, a cancelled ctx would make the unfreeze exec fail fast
-		// without ever reaching the pod, leaving the workload's filesystem frozen.
-		if d.freezer != nil && fileBackedSource {
-			d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
@@ -1713,8 +1706,30 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 	shareName := GetVolumeNameFromPath(sourceVolumeID)
 
 	var err error
-	if isFileBackedVolumeID(sourceVolumeID) {
-		err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
+	backingShareName, isBackingShareSnapshot, shareParseErr := GetSnapshotBackingShareFromSnapshotId(snapshotId)
+	if shareParseErr != nil {
+		return nil, status.Error(codes.InvalidArgument, shareParseErr.Error())
+	}
+	if isBackingShareSnapshot {
+		err = d.hsclient.DeleteShareSnapshot(ctx, backingShareName, snapshotName)
+	} else if isFileBackedVolumeID(sourceVolumeID) {
+		fileSnapshotPaths, parseErr := GetFileSnapshotPathsFromSnapshotId(snapshotId)
+		if parseErr != nil {
+			return nil, status.Error(codes.InvalidArgument, parseErr.Error())
+		}
+		if len(fileSnapshotPaths) == 0 {
+			err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
+		} else {
+			for _, fileSnapshotPath := range fileSnapshotPaths {
+				sourceFilePath, parseErr := getFileSnapshotSourcePath(fileSnapshotPath)
+				if parseErr != nil {
+					return nil, status.Error(codes.InvalidArgument, parseErr.Error())
+				}
+				if err = d.hsclient.DeleteFileSnapshot(ctx, sourceFilePath, fileSnapshotPath); err != nil {
+					break
+				}
+			}
+		}
 	} else {
 		share, gerr := d.hsclient.GetShare(ctx, shareName)
 		if gerr != nil {

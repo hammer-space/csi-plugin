@@ -885,7 +885,7 @@ func (client *HammerspaceClient) CloneShareSnapshot(ctx context.Context, sourceS
 			return errors.New("failed to clone share snapshot")
 		}
 	} else {
-		log.Errorf("No task returned to monitor")
+		return errors.New("no share snapshot clone task returned to monitor")
 	}
 
 	return nil
@@ -1149,10 +1149,15 @@ func (client *HammerspaceClient) GetFileSnapshots(ctx context.Context, filePath 
 }
 
 func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePath, snapshotName string) error {
-	// Get only the timestamp from the snapshot path
-	snapshotTime := strings.Join(strings.SplitN(url.PathEscape(path.Base(snapshotName)),
-		"-", 6)[0:5],
-		"-")
+	// Snapshot paths have the form
+	// <source>/.fsnapshot/<timestamp>/<source-base-name>. Use the directory
+	// component, not path.Base(snapshotName), which is the source file name.
+	snapshotDir := path.Base(path.Dir(snapshotName))
+	parts := strings.SplitN(snapshotDir, "-", 6)
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid file snapshot name %q", snapshotName)
+	}
+	snapshotTime := strings.Join(parts[0:5], "-")
 
 	req, _ := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
