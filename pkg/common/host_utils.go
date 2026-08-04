@@ -496,7 +496,7 @@ func determineBackingFileFromLoopDevice(lodevice string) (string, error) {
 // Note that this function does not work in Alpine image due to
 // losetup cutting the output off at 79 characters
 func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
-	log.Infof("determine loop device from backing file: '%s'", backingfile)
+	log.Debugf("determine loop device from backing file: '%s'", backingfile)
 	output, err := ExecCommand("losetup", "-a")
 	if err != nil {
 		return "", status.Errorf(codes.Internal,
@@ -507,7 +507,7 @@ func determineLoopDeviceFromBackingFile(backingfile string) (string, error) {
 		if d != "" {
 			device := strings.Split(d, " ")
 			if backingfile == strings.Trim(device[2], ":()") {
-				log.Infof("matched loop dev: '%s'", strings.Trim(device[0], ":()"))
+				log.Debugf("matched loop dev: '%s'", strings.Trim(device[0], ":()"))
 				return strings.Trim(device[0], ":()"), nil
 			}
 		}
@@ -616,7 +616,7 @@ func CheckNFSExports(address string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Second)
 	defer cancel()
 
-	log.Infof("Checking floating ip %s", address)
+	log.Debugf("Checking floating ip %s", address)
 
 	uaddr, protocol, err := computeUaddr(address, 2049)
 	if err != nil {
@@ -632,7 +632,7 @@ func CheckNFSExports(address string) (bool, error) {
 			errChan <- err
 			return
 		}
-		log.Infof("Check was success on uaddr %s, with protocol %s.", uaddr, protocol)
+		log.Debugf("Check was success on uaddr %s, with protocol %s.", uaddr, protocol)
 		outputChan <- output
 	}()
 
@@ -643,7 +643,7 @@ func CheckNFSExports(address string) (bool, error) {
 	case err := <-errChan:
 		return false, status.Errorf(codes.Internal, "could not determine nfs exports: %v", err)
 	case output := <-outputChan:
-		log.Infof("%s", string(output))
+		log.Debugf("%s", string(output))
 		return true, nil
 	}
 }
