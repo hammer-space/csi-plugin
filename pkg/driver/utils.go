@@ -18,9 +18,7 @@ package driver
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path"
@@ -227,70 +225,7 @@ func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
 	if len(tokens) < 2 {
 		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
 	}
-	for _, token := range tokens[2:] {
-		if strings.HasPrefix(token, "share:") {
-			return strings.TrimPrefix(token, "share:"), nil
-		}
-		if strings.HasPrefix(token, "files:") {
-			return "", nil
-		}
-	}
 	return path.Base(tokens[1]), nil
-}
-
-func GetSnapshotBackingShareFromSnapshotId(snapshotId string) (string, bool, error) {
-	tokens := strings.Split(snapshotId, "|")
-	if len(tokens) < 2 {
-		return "", false, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
-	}
-	for _, token := range tokens[2:] {
-		if strings.HasPrefix(token, "share:") {
-			shareName := strings.TrimPrefix(token, "share:")
-			if shareName == "" {
-				return "", false, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
-			}
-			return shareName, true, nil
-		}
-	}
-	return "", false, nil
-}
-
-func GetFileSnapshotPathsFromSnapshotId(snapshotId string) ([]string, error) {
-	tokens := strings.Split(snapshotId, "|")
-	if len(tokens) < 2 {
-		return nil, fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
-	}
-	for _, token := range tokens[2:] {
-		if strings.HasPrefix(token, "files:") {
-			encoded := strings.TrimPrefix(token, "files:")
-			payload, err := base64.RawURLEncoding.DecodeString(encoded)
-			if err != nil {
-				return nil, err
-			}
-			var fileSnapshotPaths []string
-			err = json.Unmarshal(payload, &fileSnapshotPaths)
-			return fileSnapshotPaths, err
-		}
-	}
-	return nil, nil
-}
-
-func getFileSnapshotSourcePath(fileSnapshotPath string) (string, error) {
-	const fileSnapshotMarker = "/.fsnapshot/"
-
-	tokens := strings.SplitN(fileSnapshotPath, fileSnapshotMarker, 2)
-	if len(tokens) != 2 || tokens[0] == "" || tokens[1] == "" {
-		return "", fmt.Errorf("invalid file snapshot path %q", fileSnapshotPath)
-	}
-	return path.Clean(tokens[0]), nil
-}
-
-func GetBackingShareNameFromPath(volumePath string) string {
-	trimmed := strings.Trim(path.Clean(volumePath), "/")
-	if trimmed == "" || trimmed == "." {
-		return ""
-	}
-	return strings.Split(trimmed, "/")[0]
 }
 
 // generate snapshot ID to be stored by the CO
@@ -299,8 +234,22 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func GetSnapshotIDFromBackingShareSnapshot(hsSnapName, sourceVolumeID, backingShareName string) string {
-	return fmt.Sprintf("%s|%s|share:%s", hsSnapName, sourceVolumeID, backingShareName)
+func isDirectoryFile(file *common.File) (bool, error) {
+	if file == nil {
+		return false, fmt.Errorf("snapshot source file metadata is missing")
+	}
+
+	fileType := strings.ToUpper(strings.TrimSpace(file.Type))
+	switch fileType {
+	case "DIRECTORY":
+		return true, nil
+	case "FILE":
+		return false, nil
+	case "SYM_LINK", "OTHER":
+		return false, fmt.Errorf("snapshot source %q has unsupported type %s", file.Path, fileType)
+	default:
+		return false, fmt.Errorf("snapshot source %q returned unknown file type %q", file.Path, file.Type)
+	}
 }
 
 // formatCreateVolumeName applies volumeNameFormat (validated upstream to

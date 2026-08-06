@@ -63,10 +63,11 @@ from a reader pod.
 - `snapshot_restore/nfs_share_snapshot_restore.yaml`: NFS share-backed filesystem volume.
   Restore clones into a directory inside the original source share and points
   the restored PVC at that cloned path.
-- `snapshot_restore/nfs_mount_backing_snapshot_restore.yaml`: NFS directory-backed volume under a
-  shared `mountBackingShareName`. This is the regression test for
-  directory-scoped NFS snapshot/restore.
 - `snapshot_restore/block_snapshot_restore.yaml`: raw block volume using `blockBackingShareName`.
+
+NFS volumes provisioned as directories with `mountBackingShareName` are not a
+snapshot/restore scenario. The backend does not currently provide the required
+recursive directory snapshot/clone operation.
 
 ### Run
 
@@ -78,7 +79,7 @@ minikube kubectl -- logs -n hs-file-snapshot-e2e job/hs-file-snapshot-restore-e2
 
 For a live CSI snapshot/restore demo, use the self-contained helper script.
 It embeds the manifest for the selected scenario and can run the supported
-cases: `file-backed`, `nfs-share`, `nfs-mount-backing`, `block`, or
+cases: `file-backed`, `nfs-share`, `block`, or
 `all`.
 
 ```sh

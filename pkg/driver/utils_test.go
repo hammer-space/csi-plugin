@@ -7,6 +7,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 func TestGetSnapshotNameFromSnapshotId(t *testing.T) {
@@ -67,33 +69,32 @@ func TestGetSnapshotIDFromSnapshotName(t *testing.T) {
 	}
 }
 
-func TestGetFileSnapshotSourcePath(t *testing.T) {
-	got, err := getFileSnapshotSourcePath("/backing/pvc/data.txt/.fsnapshot/2026-08-04T01-02-03/data.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "/backing/pvc/data.txt" {
-		t.Fatalf("source path = %q, want /backing/pvc/data.txt", got)
+func TestIsDirectoryFile(t *testing.T) {
+	tests := []struct {
+		name    string
+		file    *common.File
+		want    bool
+		wantErr bool
+	}{
+		{name: "directory", file: &common.File{Type: "DIRECTORY"}, want: true},
+		{name: "file", file: &common.File{Type: "FILE"}},
+		{name: "case insensitive", file: &common.File{Type: "directory"}, want: true},
+		{name: "symbolic link", file: &common.File{Type: "SYM_LINK"}, wantErr: true},
+		{name: "other", file: &common.File{Type: "OTHER"}, wantErr: true},
+		{name: "unknown", file: &common.File{}, wantErr: true},
+		{name: "nil", file: nil, wantErr: true},
 	}
 
-	if _, err := getFileSnapshotSourcePath("/backing/pvc/data.txt"); err == nil {
-		t.Fatal("expected malformed snapshot path error")
-	}
-}
-
-func TestBackingShareSnapshotID(t *testing.T) {
-	snapshotID := GetSnapshotIDFromBackingShareSnapshot(
-		"2026-08-04T01-02-03", "/nfs-root-share/pvc-123", "nfs-root-share")
-	want := "2026-08-04T01-02-03|/nfs-root-share/pvc-123|share:nfs-root-share"
-	if snapshotID != want {
-		t.Fatalf("snapshot ID = %q, want %q", snapshotID, want)
-	}
-	shareName, ok, err := GetSnapshotBackingShareFromSnapshotId(snapshotID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || shareName != "nfs-root-share" {
-		t.Fatalf("backing share = %q, present = %t", shareName, ok)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := isDirectoryFile(tt.file)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("isDirectoryFile() error = %v, wantErr %t", err, tt.wantErr)
+			}
+			if got != tt.want {
+				t.Fatalf("isDirectoryFile() = %t, want %t", got, tt.want)
+			}
+		})
 	}
 }
 

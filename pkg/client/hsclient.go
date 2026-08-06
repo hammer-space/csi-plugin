@@ -1182,8 +1182,25 @@ func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePat
 }
 
 func (client *HammerspaceClient) SnapshotFile(ctx context.Context, filepath string) (string, error) {
-	snapshotNames, err := client.SnapshotFiles(ctx, filepath)
+	req, err := client.generateRequest(ctx, "POST", fmt.Sprintf("/file-snapshots/create?filename-expression=%s", url.PathEscape(filepath)), "")
 	if err != nil {
+		log.Error(err)
+		return "", err
+	}
+
+	statusCode, respBody, _, err := client.doRequest(ctx, *req)
+
+	if err != nil {
+		log.Error(err)
+		return "", err
+	}
+	if statusCode != 200 {
+		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
+	}
+	var snapshotNames []string
+	err = json.Unmarshal([]byte(respBody), &snapshotNames)
+	if err != nil {
+		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
 	}
 	if len(snapshotNames) == 0 {
@@ -1191,32 +1208,6 @@ func (client *HammerspaceClient) SnapshotFile(ctx context.Context, filepath stri
 	}
 
 	return snapshotNames[0], nil
-}
-
-func (client *HammerspaceClient) SnapshotFiles(ctx context.Context, filepath string) ([]string, error) {
-	req, err := client.generateRequest(ctx, "POST", fmt.Sprintf("/file-snapshots/create?filename-expression=%s", url.PathEscape(filepath)), "")
-	if err != nil {
-		log.Error(err)
-		return nil, err
-	}
-
-	statusCode, respBody, _, err := client.doRequest(ctx, *req)
-
-	if err != nil {
-		log.Error(err)
-		return nil, err
-	}
-	if statusCode != 200 {
-		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
-	}
-	var snapshotNames []string
-	err = json.Unmarshal([]byte(respBody), &snapshotNames)
-	if err != nil {
-		log.Error("Error parsing JSON response: " + err.Error())
-		return nil, err
-	}
-
-	return snapshotNames, nil
 }
 
 func (client *HammerspaceClient) RestoreFileSnapToDestination(ctx context.Context, snapshotPath, filePath string) error {

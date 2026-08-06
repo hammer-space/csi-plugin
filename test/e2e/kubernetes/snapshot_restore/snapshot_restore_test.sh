@@ -41,7 +41,6 @@ Usage: $0 [options]
 Self-contained Hammerspace CSI snapshot/restore demo for supported scenarios:
   - file-backed
   - nfs-share
-  - nfs-mount-backing
   - block
   - all (runs every scenario sequentially)
 
@@ -55,7 +54,7 @@ The script creates:
 
 Options:
   --kubectl CMD            kubectl command to use. Example: "minikube kubectl --"
-  --scenario NAME          Scenario to run: file-backed, nfs-share, nfs-mount-backing, block, or all. Default: ${scenario}
+  --scenario NAME          Scenario to run: file-backed, nfs-share, block, or all. Default: ${scenario}
   --namespace NAME         Namespace for demo resources. Default depends on the scenario
   --storage-class NAME     StorageClass name. Default depends on the scenario
   --snapshot-class NAME    VolumeSnapshotClass name. Default depends on the scenario
@@ -76,7 +75,6 @@ Options:
 
 Examples:
   $0 --kubectl "kubectl" --scenario file-backed --backing-share k8s-file-storage --objectives keep-online
-  $0 --kubectl "kubectl" --scenario nfs-mount-backing --backing-share k8s-nfs-storage --objectives keep-online
   $0 --kubectl "kubectl" --scenario all
 
 Tier 0 prerequisites:
@@ -128,13 +126,6 @@ set_defaults_for_scenario() {
       snapshot_class="${snapshot_class:-hs-nfs-share-snapshot-e2e}"
       service_account="${service_account:-hs-nfs-share-snapshot-restore-e2e}"
       job="${job:-hs-nfs-share-snapshot-restore-e2e}"
-      ;;
-    nfs-mount-backing)
-      namespace="${namespace:-hs-nfs-mount-backing-snapshot-e2e}"
-      storage_class="${storage_class:-hs-nfs-mount-backing-snapshot-e2e}"
-      snapshot_class="${snapshot_class:-hs-nfs-mount-backing-snapshot-e2e}"
-      service_account="${service_account:-hs-nfs-mount-backing-snapshot-restore-e2e}"
-      job="${job:-hs-nfs-mount-backing-snapshot-restore-e2e}"
       ;;
     block)
       namespace="${namespace:-hs-block-snapshot-e2e}"
@@ -456,87 +447,6 @@ YAML
 kubectl -n \"\${ns}\" logs pod/writer --tail=20"
       writer_after_snapshot_command="kubectl -n \"\${ns}\" delete pod writer --ignore-not-found --wait=true --timeout=120s || true"
       ;;
-    nfs-mount-backing)
-      storage_class_comment="NFS mountBackingShareName snapshot restore demo volume"
-      storage_class_parameters=$(cat <<EOF
-  fsType: "nfs"
-  mountBackingShareName: ${backing_share}
-  objectives: "${objectives}"
-  exportOptions: "${export_options}"
-  deleteDelay: "0"
-  volumeNameFormat: "csi-nfs-dir-%s"
-  additionalMetadataTags: "storageClassName=${scenario_storage_class},fsType=nfs"
-  comment: "NFS mountBackingShareName snapshot restore demo volume"
-EOF
-)
-      access_modes="ReadWriteMany"
-      marker_prefix="nfs-mount-backing"
-      scenario_label="nfs-mount-backing"
-      scenario_description="NFS mountBackingShareName"
-      writer_pod_manifest=$(cat <<'YAML'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: writer
-  namespace: __NS__
-spec:
-  restartPolicy: Never
-  containers:
-    - name: writer
-      image: busybox:1.36
-      env:
-        - name: MARKER
-          value: "__MARKER__"
-      command:
-        - sh
-        - -c
-        - |
-          set -eu
-          echo "${MARKER}" > /data/marker.txt
-          sync
-          cat /data/marker.txt
-      volumeMounts:
-        - name: data
-          mountPath: /data
-  volumes:
-    - name: data
-      persistentVolumeClaim:
-        claimName: src
-YAML
-)
-      reader_pod_manifest=$(cat <<'YAML'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: reader
-  namespace: __NS__
-spec:
-  restartPolicy: Never
-  containers:
-    - name: reader
-      image: busybox:1.36
-      env:
-        - name: EXPECTED_MARKER
-          value: "__MARKER__"
-      command:
-        - sh
-        - -c
-        - |
-          set -eu
-          ls -la /data
-          actual="$(cat /data/marker.txt)"
-          echo "$actual"
-          test "$actual" = "${EXPECTED_MARKER}"
-      volumeMounts:
-        - name: data
-          mountPath: /data
-  volumes:
-    - name: data
-      persistentVolumeClaim:
-        claimName: restore
-YAML
-)
-      ;;
     block)
       storage_class_comment="Raw block snapshot restore demo volume"
       storage_class_parameters=$(cat <<EOF
@@ -840,7 +750,7 @@ run_scenario_once() {
 }
 
 if [ "$scenario" = "all" ]; then
-  for case_name in file-backed nfs-share nfs-mount-backing block; do
+  for case_name in file-backed nfs-share block; do
     namespace=""
     storage_class=""
     snapshot_class=""
