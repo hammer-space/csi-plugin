@@ -394,6 +394,7 @@ run_scenario() {
     say "Cleaning up previous ${scenario_name} resources"
     run_kubectl -n "${namespace}" delete pod "${pod}" --ignore-not-found --wait=true --timeout=120s || true
     run_kubectl -n "${namespace}" delete pvc "${pvc}" --ignore-not-found --wait=true --timeout=120s || true
+    run_kubectl delete storageclass "${storage_class}" --ignore-not-found --wait=true --timeout=120s || true
   fi
 
   say "Applying ${scenario_name} volume provisioning manifest"

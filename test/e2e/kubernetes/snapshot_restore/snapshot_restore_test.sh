@@ -768,6 +768,8 @@ if [ "$scenario" = "all" ]; then
     if [ "$cleanup_first" = "true" ]; then
       say "Cleaning up previous ${case_name} demo Job"
       run_kubectl -n "$namespace" delete job "$job" --ignore-not-found --wait=true --timeout=120s || true
+      run_kubectl delete storageclass "$storage_class" --ignore-not-found --wait=true --timeout=120s || true
+      run_kubectl delete volumesnapshotclass "$snapshot_class" --ignore-not-found --wait=true --timeout=120s || true
     fi
     say "Applying embedded ${case_name} snapshot/restore demo"
     render_manifest "$case_name" "$namespace" "$storage_class" "$snapshot_class" "$service_account" "$job" | run_kubectl apply -f -
@@ -867,6 +869,8 @@ fi
 if [ "${cleanup_first}" = "true" ]; then
   say "Cleaning up previous demo Job"
   run_kubectl -n "${namespace}" delete job "${job}" --ignore-not-found --wait=true --timeout=120s || true
+  run_kubectl delete storageclass "${storage_class}" --ignore-not-found --wait=true --timeout=120s || true
+  run_kubectl delete volumesnapshotclass "${snapshot_class}" --ignore-not-found --wait=true --timeout=120s || true
 fi
 
 say "Applying embedded ${scenario} snapshot/restore demo"

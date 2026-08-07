@@ -375,8 +375,8 @@ func (client *HammerspaceClient) WaitForTaskCompletionResult(ctx context.Context
 	// creation - the share-backed analog of the file-visibility poll. Give it a
 	// dedicated metric + span with an attempt count so the dashboard and traces
 	// can localize it instead of it hiding inside Controller/CreateVolume.
-	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletionResult")(nil)
-	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletionResult")
+	defer common.MeasureOp(ctx, "HammerspaceClient.WaitForTaskCompletion")(nil)
+	ctx, span := tracer.Start(ctx, "HammerspaceClient.WaitForTaskCompletion")
 	attempts := 0
 	defer func() {
 		span.SetAttributes(attribute.Int("attempts", attempts))
