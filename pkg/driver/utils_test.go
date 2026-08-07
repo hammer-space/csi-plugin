@@ -7,8 +7,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/hammer-space/csi-plugin/pkg/common"
 )
 
 func TestGetSnapshotNameFromSnapshotId(t *testing.T) {
@@ -66,35 +64,6 @@ func TestGetSnapshotIDFromSnapshotName(t *testing.T) {
 		t.Logf("Expected: %v", expected)
 		t.Logf("Actual: %v", actual)
 		t.FailNow()
-	}
-}
-
-func TestIsDirectoryFile(t *testing.T) {
-	tests := []struct {
-		name    string
-		file    *common.File
-		want    bool
-		wantErr bool
-	}{
-		{name: "directory", file: &common.File{Type: "DIRECTORY"}, want: true},
-		{name: "file", file: &common.File{Type: "FILE"}},
-		{name: "case insensitive", file: &common.File{Type: "directory"}, want: true},
-		{name: "symbolic link", file: &common.File{Type: "SYM_LINK"}, wantErr: true},
-		{name: "other", file: &common.File{Type: "OTHER"}, wantErr: true},
-		{name: "unknown", file: &common.File{}, wantErr: true},
-		{name: "nil", file: nil, wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got, err := isDirectoryFile(tt.file)
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("isDirectoryFile() error = %v, wantErr %t", err, tt.wantErr)
-			}
-			if got != tt.want {
-				t.Fatalf("isDirectoryFile() = %t, want %t", got, tt.want)
-			}
-		})
 	}
 }
 

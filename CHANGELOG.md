@@ -43,7 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.
 - Treated all known terminal task states consistently so failed, halted, cancelled, validation-failed, and resumed tasks stop polling and report failure.
-- Restored volumes created from snapshot data sources now include a `restore` marker in the generated Hammerspace volume name while keeping the final name within the 80-character share-name limit.
 - Fixed Kubernetes 1.29 snapshotter RBAC so the CSI provisioner can update `volumesnapshotcontents/status`.
 - Avoided passing StorageClass NFS mount options to local filesystem mounts for file-backed volumes; those options are now only used for the backing NFS share mount.
 - Prevented duplicate or conflicting NFS version mount flags by treating both `nfsvers=` and `vers=` as version options, removing them before fallback retries, and passing NFSv3 fallback options as separate mount arguments.

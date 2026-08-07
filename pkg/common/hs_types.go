@@ -170,7 +170,6 @@ type File struct {
 	Name     string         `json:"name"`
 	Path     string         `json:"path"`
 	Size     int64          `json:"size"`
-	Type     string         `json:"type"`
 	Children []FileChildren `json:"children"`
 }
 
@@ -178,7 +177,6 @@ type FileChildren struct {
 	Name       string `json:"name"`
 	Path       string `json:"path"`
 	Size       int64  `json:"size"`
-	Type       string `json:"type"`
 	Parent     string `json:"parent"`
 	SharePath  string `json:"sharePath"`
 	ShareName  string `json:"shareName"`

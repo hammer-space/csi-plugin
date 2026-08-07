@@ -234,62 +234,6 @@ func GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID string) string {
 	return fmt.Sprintf("%s|%s", hsSnapName, sourceVolumeID)
 }
 
-func isDirectoryFile(file *common.File) (bool, error) {
-	if file == nil {
-		return false, fmt.Errorf("snapshot source file metadata is missing")
-	}
-
-	fileType := strings.ToUpper(strings.TrimSpace(file.Type))
-	switch fileType {
-	case "DIRECTORY":
-		return true, nil
-	case "FILE":
-		return false, nil
-	case "SYM_LINK", "OTHER":
-		return false, fmt.Errorf("snapshot source %q has unsupported type %s", file.Path, fileType)
-	default:
-		return false, fmt.Errorf("snapshot source %q returned unknown file type %q", file.Path, file.Type)
-	}
-}
-
-// formatCreateVolumeName applies volumeNameFormat (validated upstream to
-// contain exactly one "%s") to requestName. For snapshot-restore requests it
-// marks the name with restoreVolumeNameSuffix (unless requestName is already
-// marked, e.g. a retried restore), and truncates as needed to stay within
-// Hammerspace's volume name length limit while preserving that marker.
-func formatCreateVolumeName(requestName, volumeNameFormat string, fromSnapshot bool) (string, error) {
-	name := requestName
-	if fromSnapshot && !strings.Contains(name, "restore") {
-		name += restoreVolumeNameSuffix
-	}
-
-	if formatted := fmt.Sprintf(volumeNameFormat, name); len(formatted) <= MaxHammerspaceVolumeNameLength {
-		return formatted, nil
-	}
-
-	overhead := len(fmt.Sprintf(volumeNameFormat, ""))
-	maxNameLen := MaxHammerspaceVolumeNameLength - overhead
-	if maxNameLen <= 0 {
-		return "", fmt.Errorf("volumeNameFormat leaves no room for a volume name within the %d character Hammerspace name limit", MaxHammerspaceVolumeNameLength)
-	}
-
-	if fromSnapshot {
-		if maxNameLen <= len(restoreVolumeNameSuffix) {
-			return "", fmt.Errorf("volumeNameFormat leaves no room for the %q suffix within the %d character Hammerspace name limit", restoreVolumeNameSuffix, MaxHammerspaceVolumeNameLength)
-		}
-		base := strings.TrimSuffix(name, restoreVolumeNameSuffix)
-		maxBaseLen := maxNameLen - len(restoreVolumeNameSuffix)
-		if len(base) > maxBaseLen {
-			base = base[:maxBaseLen]
-		}
-		name = base + restoreVolumeNameSuffix
-	} else if len(name) > maxNameLen {
-		name = name[:maxNameLen]
-	}
-
-	return fmt.Sprintf(volumeNameFormat, name), nil
-}
-
 // mountState classifies an existing backing-share staging mount.
 type mountState int
 

@@ -42,9 +42,7 @@ import (
 )
 
 const (
-	MaxNameLength                  int = 128
-	MaxHammerspaceVolumeNameLength int = 80
-	restoreVolumeNameSuffix            = "-restore"
+	MaxNameLength int = 128
 )
 
 var (
@@ -313,16 +311,10 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 
 		restoredPath, err := d.hsclient.CreateShareFromSnapshot(
 			ctx,
-			hsVolume.Name,
-			hsVolume.Path,
-			hsVolume.Size,
-			hsVolume.Objectives,
-			hsVolume.ExportOptions,
-			hsVolume.DeleteDelay,
-			hsVolume.Comment,
 			hsVolume.SourceSnapShareName,
 			sourceShare.ExportPath,
 			hsVolume.SourceSnapPath,
+			hsVolume.Path,
 		)
 
 		if err != nil {
@@ -682,23 +674,10 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		return nil, status.Errorf(codes.InvalidArgument, common.ConflictingCapabilities)
 	} else if blockRequested {
 		volumeMode = "Block"
-		volumeName, err = formatCreateVolumeName(req.Name, vParams.VolumeNameFormat, snap != nil)
-		if err != nil {
-			return nil, err
-		}
+		volumeName = fmt.Sprintf(vParams.VolumeNameFormat, req.Name)
 	} else if filesystemRequested {
 		volumeMode = "Filesystem"
-		if snap != nil && fsType == "nfs" && vParams.MountBackingShareName == "" && req.Parameters["csi.storage.k8s.io/pvc/name"] != "" {
-			volumeName, err = formatCreateVolumeName(req.Parameters["csi.storage.k8s.io/pvc/name"], common.DefaultVolumeNameFormat, true)
-			if err != nil {
-				return nil, err
-			}
-		} else {
-			volumeName, err = formatCreateVolumeName(req.Name, vParams.VolumeNameFormat, snap != nil)
-			if err != nil {
-				return nil, err
-			}
-		}
+		volumeName = fmt.Sprintf(vParams.VolumeNameFormat, req.Name)
 	} else {
 		return nil, status.Errorf(codes.InvalidArgument, common.NoCapabilitiesSupplied, req.Name)
 	}
@@ -1479,26 +1458,6 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 			}
 			if share == nil {
 				fileBackedSource = true
-			}
-		}
-		// A multi-segment volume handle can identify either a directory-backed
-		// NFS volume or an ext4/xfs/block backing file. Reject the unsupported
-		// directory case before attempting to freeze a workload or call a
-		// snapshot API.
-		if fileBackedSource {
-			sourceFile, fileErr := d.hsclient.GetFile(ctx, sourceVolumeID)
-			if fileErr != nil {
-				return nil, status.Errorf(codes.Internal, "failed to inspect snapshot source %q: %v", sourceVolumeID, fileErr)
-			}
-			if sourceFile == nil {
-				return nil, status.Errorf(codes.NotFound, "snapshot source %q was not found", sourceVolumeID)
-			}
-			isDirectory, typeErr := isDirectoryFile(sourceFile)
-			if typeErr != nil {
-				return nil, status.Error(codes.FailedPrecondition, typeErr.Error())
-			}
-			if isDirectory {
-				return nil, status.Error(codes.Unimplemented, "snapshots are not supported for NFS volumes provisioned with mountBackingShareName")
 			}
 		}
 		// Consistency-freeze: for FILE-BACKED source volumes only, locate
