@@ -796,16 +796,18 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	return nil
 }
 
-func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, sourceShareName, sourceSharePath, snapshotPath, destinationPath string) (string, error) {
-	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShareFromSnapshot")(nil)
+func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, sourceShareName string, sourceSharePath string, snapshotPath string) (string, error) {
 	log.WithFields(log.Fields{
+		"name":            name,
+		"deleteDelay":     deleteDelay,
+		"exportOptions":   exportOptions,
+		"exportPath":      exportPath,
 		"sourceShareName": sourceShareName,
 		"sourceSharePath": sourceSharePath,
 		"snapshotPath":    snapshotPath,
-		"destinationPath": destinationPath,
-	}).Info("restoring share snapshot inside source share")
+	}).Infof("restoring share snapshot inside source share")
 
-	if len(path.Base(destinationPath)) > 80 {
+	if len(name) > 80 {
 		return "", status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
 	}
 	snapshotName := path.Base(snapshotPath)
@@ -819,17 +821,32 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, so
 		return "", fmt.Errorf("source share path cannot be empty when cloning snapshot %s", snapshotName)
 	}
 
-	cloneDestinationPath := path.Clean("/" + strings.TrimPrefix(destinationPath, "/"))
+	cloneDestinationPath := path.Clean("/" + strings.TrimPrefix(exportPath, "/"))
 	restoredSharePath := path.Join(path.Clean("/"+strings.TrimPrefix(sourceSharePath, "/")), strings.TrimPrefix(cloneDestinationPath, "/"))
 	log.WithFields(log.Fields{
 		"cloneDestinationPath": cloneDestinationPath,
 		"restoredSharePath":    restoredSharePath,
 	}).Info("resolved share snapshot clone destination")
 
+	if err := client.CloneShareSnapshot(ctx, sourceShareName, snapshotName, cloneDestinationPath, true); err != nil {
+		return "", err
+	}
+
+	return restoredSharePath, nil
+}
+
+func (client *HammerspaceClient) CloneShareSnapshot(ctx context.Context, sourceShareName, snapshotName, destinationPath string, overwriteDestination bool) error {
+	log.WithFields(log.Fields{
+		"sourceShareName":      sourceShareName,
+		"snapshotName":         snapshotName,
+		"destinationPath":      destinationPath,
+		"overwriteDestination": overwriteDestination,
+	}).Info("cloning share snapshot")
+
 	query := url.Values{}
 	query.Set("snapshot-name", snapshotName)
-	query.Set("destination-path", cloneDestinationPath)
-	query.Set("overwrite-destination", strconv.FormatBool(true))
+	query.Set("destination-path", destinationPath)
+	query.Set("overwrite-destination", strconv.FormatBool(overwriteDestination))
 
 	req, err := client.generateRequest(
 		ctx,
@@ -839,23 +856,23 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, so
 	)
 	if err != nil {
 		log.Errorf("unable to generate share snapshot clone request with POST. Error %v", err)
-		return "", err
+		return err
 	}
 	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
-		return "", err
+		return err
 	}
 	if statusCode != 202 {
-		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
+		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
 	if locs, exists := respHeaders["Location"]; exists && len(locs) > 0 {
 		task, success, err := client.WaitForTaskCompletionResult(ctx, locs[0])
 		if err != nil {
 			log.Error(err)
-			return "", err
+			return err
 		}
 		if !success {
 			if task != nil {
@@ -865,13 +882,13 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, so
 					"statusMessage": task.StatusMessage,
 				}).Error("share snapshot clone task failed")
 			}
-			return "", errors.New("failed to clone share snapshot")
+			return errors.New("failed to clone share snapshot")
 		}
 	} else {
-		return "", errors.New("no share snapshot clone task returned to monitor")
+		return errors.New("no share snapshot clone task returned to monitor")
 	}
 
-	return restoredSharePath, nil
+	return nil
 }
 
 func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Context, shareName string) (bool, error) {

@@ -411,10 +411,20 @@ func TestCreateShareFromSnapshotClonesInsideSourceShare(t *testing.T) {
 
 	restoredPath, err := hsclient.CreateShareFromSnapshot(
 		context.Background(),
+		"restore",
+		"/restore",
+		-1,
+		[]string{},
+		[]common.ShareExportOptions{{
+			Subnet:            "*",
+			AccessPermissions: "RW",
+			RootSquash:        false,
+		}},
+		0,
+		"restored share",
 		"source-share",
 		"/source-share",
 		"snap-1",
-		"/restore",
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -424,7 +434,7 @@ func TestCreateShareFromSnapshotClonesInsideSourceShare(t *testing.T) {
 	}
 }
 
-func TestCreateShareFromSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
+func TestCloneShareSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
 	setupHTTP()
 	defer tearDownHTTP()
 
@@ -459,7 +469,7 @@ func TestCreateShareFromSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
 		}`)
 	})
 
-	_, err := hsclient.CreateShareFromSnapshot(context.Background(), "source-share", "/source-share", "snap-1", "/restore")
+	err := hsclient.CloneShareSnapshot(context.Background(), "source-share", "snap-1", "/restore", true)
 	if err == nil {
 		t.Fatal("expected clone failure")
 	}
@@ -471,7 +481,7 @@ func TestCreateShareFromSnapshotFailsOffloadedRsyncFailure(t *testing.T) {
 	}
 }
 
-func TestCreateShareFromSnapshotRequiresTaskLocation(t *testing.T) {
+func TestCloneShareSnapshotRequiresTaskLocation(t *testing.T) {
 	setupHTTP()
 	defer tearDownHTTP()
 
@@ -479,7 +489,7 @@ func TestCreateShareFromSnapshotRequiresTaskLocation(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 	})
 
-	_, err := hsclient.CreateShareFromSnapshot(context.Background(), "source-share", "/source-share", "snap-1", "/restore")
+	err := hsclient.CloneShareSnapshot(context.Background(), "source-share", "snap-1", "/restore", true)
 	if err == nil || !strings.Contains(err.Error(), "no share snapshot clone task") {
 		t.Fatalf("expected missing task location error, got %v", err)
 	}

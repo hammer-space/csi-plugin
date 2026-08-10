@@ -311,10 +311,16 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 
 		restoredPath, err := d.hsclient.CreateShareFromSnapshot(
 			ctx,
+			hsVolume.Name,
+			hsVolume.Path,
+			hsVolume.Size,
+			hsVolume.Objectives,
+			hsVolume.ExportOptions,
+			hsVolume.DeleteDelay,
+			hsVolume.Comment,
 			hsVolume.SourceSnapShareName,
 			sourceShare.ExportPath,
 			hsVolume.SourceSnapPath,
-			hsVolume.Path,
 		)
 
 		if err != nil {
