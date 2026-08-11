@@ -758,7 +758,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		log.Errorf("unable to genrate share create request with POST. Error %v", err)
 		return err
 	}
-	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
+	statusCode, respBody, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -766,12 +766,15 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	}
 	if statusCode != 202 {
 		if statusCode == 400 {
-			shareTaskRunning, err := client.CheckIfShareCreateTaskIsRunning(ctx, name)
+			shareTaskRunning, taskErr := client.CheckIfShareCreateTaskIsRunning(ctx, name)
+			if taskErr != nil {
+				return taskErr
+			}
 			log.Debug(fmt.Sprintf("Found share creating task running as: %v ", shareTaskRunning))
 			if shareTaskRunning {
 				return fmt.Errorf("share create task is already running for %s; retry snapshot clone after it completes", name)
 			}
-			return err
+			return fmt.Errorf("share create failed with status code %d: %s", statusCode, respBody)
 		}
 		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}

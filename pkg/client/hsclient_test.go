@@ -378,6 +378,66 @@ func TestCreateShare(t *testing.T) {
 	}
 }
 
+func TestCreateShareReturnsErrorForBadRequestWithoutRunningTask(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	Mux.HandleFunc(BasePath+"/shares", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"message":"invalid share request"}`)
+	})
+	Mux.HandleFunc(BasePath+"/tasks", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `[]`)
+	})
+
+	err := hsclient.CreateShare(context.Background(), "test", "/test", -1, nil, nil, 1, "")
+	if err == nil {
+		t.Fatal("expected HTTP 400 to return an error")
+	}
+	if !strings.Contains(err.Error(), "invalid share request") {
+		t.Fatalf("expected backend error response, got %v", err)
+	}
+}
+
+func TestCreateShareSucceedsWhenRetriedAfterRunningTask(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	shareRequests := 0
+	Mux.HandleFunc(BasePath+"/shares", func(w http.ResponseWriter, r *http.Request) {
+		shareRequests++
+		if shareRequests == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"message":"share create task already running"}`)
+			return
+		}
+		w.Header().Set("Location", Server.URL+BasePath+"/tasks/create-share")
+		w.WriteHeader(http.StatusAccepted)
+	})
+	Mux.HandleFunc(BasePath+"/tasks", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, `[{"uuid":"running-task","name":"CREATE_SHARE","status":"EXECUTING","paramsMap":{"name":"test"}}]`)
+	})
+	Mux.HandleFunc(BasePath+"/tasks/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, FakeTaskCompleted)
+	})
+
+	err := hsclient.CreateShare(context.Background(), "test", "/test", -1, nil, nil, 1, "")
+	if err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("expected the in-progress request to return a retryable error, got %v", err)
+	}
+
+	err = hsclient.CreateShare(context.Background(), "test", "/test", -1, nil, nil, 1, "")
+	if err != nil {
+		t.Fatalf("expected retry after the running task to succeed, got %v", err)
+	}
+	if shareRequests != 2 {
+		t.Fatalf("expected two share create attempts, got %d", shareRequests)
+	}
+}
+
 func TestCreateShareFromSnapshotClonesInsideSourceShare(t *testing.T) {
 	setupHTTP()
 	defer tearDownHTTP()

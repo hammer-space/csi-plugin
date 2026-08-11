@@ -463,8 +463,7 @@ roleRef:
 kind: ClusterRole
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: csi-provisioner-volumeattachment-status
-  namespace: kube-system
+  name: csi-provisioner-snapshot-content-status
 rules:
   - apiGroups: ["snapshot.storage.k8s.io"]
     resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"]
@@ -473,7 +472,7 @@ rules:
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
 metadata:
-  name: csi-provisioner-volumeattachment-status-binding
+  name: csi-provisioner-snapshot-content-status-binding
   namespace: kube-system
 subjects:
   - kind: ServiceAccount
@@ -481,7 +480,7 @@ subjects:
     namespace: kube-system
 roleRef:
   kind: ClusterRole
-  name: csi-provisioner-volumeattachment-status
+  name: csi-provisioner-snapshot-content-status
   apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
