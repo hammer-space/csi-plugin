@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, including a host-networked metrics port and OTel env vars.
 - `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
 - Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
+- `LOG_LEVEL` environment variable to set log verbosity (`panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`). Unset or unrecognized values fall back to `info`.
 
 ### Changed
+- **The driver now logs at `info` by default instead of `debug`.** Debug logging was hardcoded, so every deployment logged every Anvil REST call regardless of configuration. Set `LOG_LEVEL=debug` to restore the previous verbosity when troubleshooting.
+- Log entries are now emitted as one JSON object per line instead of pretty-printed across multiple indented lines, so log collectors that parse container output line by line (Loki, ELK, CloudWatch) can ingest them.
+- Re-leveled 32 log statements so `info` is a usable default. Share create/delete/resize, objective-set, volume publish, and filesystem format are now logged at `info` — previously they were `debug`, so the record of what the driver changed on the Anvil was invisible at any other level. Conversely, per-request tracing, data-portal export probing, and function-entry traces moved to `debug`; the per-request trace line in particular was logged at `info` (and `warn` when no span context was present), so it defeated the purpose of running below `debug`.
 - Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
 - Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
 - Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.

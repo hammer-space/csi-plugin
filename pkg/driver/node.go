@@ -249,6 +249,10 @@ func (d *CSIDriver) NodeUnstageVolume(ctx context.Context, req *csi.NodeUnstageV
 		_ = os.RemoveAll(common.BaseVolumeMarkerSourcePath)
 		_ = common.UnmountFilesystem(ctx, common.BaseBackingShareMountPath)
 	}
+	log.WithFields(log.Fields{
+		"volume_id":      volumeID,
+		"staging_target": stagingTarget,
+	}).Info("Unstaged volume")
 
 	return &csi.NodeUnstageVolumeResponse{}, nil
 }
@@ -347,6 +351,10 @@ func (d *CSIDriver) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 			return nil, err
 		}
 	}
+	log.WithFields(log.Fields{
+		"volume_id":   volume_id,
+		"target_path": targetPath,
+	}).Info("Published volume")
 
 	return &csi.NodePublishVolumeResponse{}, nil
 }
@@ -424,6 +432,10 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 			return nil, status.Errorf(codes.Internal, "failed to remove unexpected target path: %v", err)
 		}
 	}
+	log.WithFields(log.Fields{
+		"volume_id":   req.GetVolumeId(),
+		"target_path": req.GetTargetPath(),
+	}).Info("Unpublished volume")
 
 	return &csi.NodeUnpublishVolumeResponse{}, nil
 }
@@ -523,6 +535,10 @@ func (d *CSIDriver) NodeExpandVolume(ctx context.Context, req *csi.NodeExpandVol
 				return nil, err
 			}
 		}
+		log.WithFields(log.Fields{
+			"volume_id":      req.GetVolumeId(),
+			"capacity_bytes": requestedSize,
+		}).Info("Expanded volume on node")
 		return &csi.NodeExpandVolumeResponse{
 			CapacityBytes: requestedSize,
 		}, nil

@@ -192,12 +192,13 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 	}
 	defer unlock()
 
-	log.Debugf("Recived publish file backed volume request.")
+	log.Debug("Received publish file-backed volume request")
 	mounted, err := common.SafeIsMountPoint(targetPath)
 	if err != nil {
-		log.Errorf("Some error while checking valid mount point")
 		if os.IsNotExist(err) {
-			// Path does not exist
+			// A missing kubelet target is expected on the first publish. Create it
+			// with the shape required by the requested volume type.
+			log.Debugf("Publish target %s does not exist; creating it", targetPath)
 			if fsType != "" {
 				// fsType specified => assume directory mount
 				if err := os.MkdirAll(targetPath, 0755); err != nil {
@@ -217,8 +218,9 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 			}
 			mounted = false
 		} else {
-			// Any other error (e.g. permission denied)
-			return status.Error(codes.Internal, err.Error())
+			// Any other error (for example permission denied) is actionable.
+			log.Errorf("Failed to check whether publish target %s is a mount point: %v", targetPath, err)
+			return status.Errorf(codes.Internal, "failed to inspect publish target %s: %v", targetPath, err)
 		}
 	}
 

@@ -348,9 +348,9 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 
 	spanCtx := trace.SpanContextFromContext(ctx)
 	if !spanCtx.IsValid() {
-		log.Warn("No active span context found in ctx")
+		log.Debug("No active span context found in ctx")
 	} else {
-		log.Infof("trace: method=%s url=%s trace_id=%s span_id=%s",
+		log.Debugf("trace: method=%s url=%s trace_id=%s span_id=%s",
 			req.Method,
 			req.URL.String(),
 			spanCtx.TraceID().String(),
@@ -630,7 +630,7 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 			shareSnapshots = append(shareSnapshots, snapshot)
 		}
 	}
-	log.Infof("%v, %s, %s", shareSnapshots, snapshot_id, volume_id)
+	log.Debugf("ListSnapshots: shareSnapshots=%v snapshot_id=%s volume_id=%s", shareSnapshots, snapshot_id, volume_id)
 	return shareSnapshots, nil
 }
 
@@ -722,7 +722,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	comment string) error {
 	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShare")(nil)
 
-	log.Debug("Creating share: " + name)
+	log.Info("Creating share: " + name)
 	extendedInfo := common.GetCommonExtendedInfo()
 	if exportOptions == nil { // send empty list to api req
 		exportOptions = make([]common.ShareExportOptions, 0)
@@ -925,7 +925,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Con
 // Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
 // The path must start with a slash
 func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName string, path string, objectives []string) error {
-	log.Debugf("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
+	log.Infof("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
 	// Set objectives on share at path
 
 	for _, objectiveName := range objectives {
@@ -960,7 +960,7 @@ func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName st
 // size in bytes
 func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name string, size int64) error {
 
-	log.Debugf("Update share size : %s to %v", name, size)
+	log.Infof("Update share size : %s to %v", name, size)
 
 	share, err := client.GetShareRawFields(ctx, name)
 	if err != nil {
@@ -1009,7 +1009,7 @@ func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name strin
 
 func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, deleteDelay int64) error {
 	queryParams := "?delete-path=true"
-	log.Debugf("Deleting share: %s with delete delay %d", name, deleteDelay)
+	log.Infof("Deleting share: %s with delete delay %d", name, deleteDelay)
 	trace.SpanFromContext(ctx).SetAttributes(
 		attribute.String("share.name", name),
 		attribute.Int64("share.delete_delay", deleteDelay),

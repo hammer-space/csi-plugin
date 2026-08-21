@@ -156,6 +156,11 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # Log verbosity: panic, fatal, error, warn, info, debug, trace.
+            # debug logs every Anvil REST call — use it for troubleshooting,
+            # not steady-state operation.
+            - name: LOG_LEVEL
+              value: "info"
             # OTel toggles — Prometheus /metrics on :9090 (on by default). Set
             # OTEL_TRACES_EXPORTER=console/otlp to also emit spans (off by default).
             - name: OTEL_TRACES_EXPORTER
@@ -362,6 +367,11 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # Log verbosity: panic, fatal, error, warn, info, debug, trace.
+            # debug logs every Anvil REST call — use it for troubleshooting,
+            # not steady-state operation.
+            - name: LOG_LEVEL
+              value: "info"
             # OTel toggles. hostNetwork=true means we bind directly to the
             # node's :9091 (must differ from controller's :9090 in case the
             # controller lands on the same node).
