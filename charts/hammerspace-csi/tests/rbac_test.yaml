@@ -1,0 +1,23 @@
+suite: rbac
+templates:
+  - templates/rbac-controller.yaml
+tests:
+  - it: scopes the secret grant to the named credential and includes pods/exec by default
+    set: {hammerspace.endpoint: https://x}
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: rules
+          content: {apiGroups: [""], resources: ["secrets"], resourceNames: ["com.hammerspace.csi.credentials"], verbs: ["get"]}
+          any: true
+      - contains:
+          path: rules
+          content: {apiGroups: [""], resources: ["pods/exec"], verbs: ["create"]}
+          any: true
+  - it: drops pods/exec when freezer disabled
+    set: {hammerspace.endpoint: https://x, freezer.enabled: false}
+    documentIndex: 0
+    asserts:
+      - notContains:
+          path: rules
+          content: {apiGroups: [""], resources: ["pods/exec"], verbs: ["create"]}
