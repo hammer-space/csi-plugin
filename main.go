@@ -43,20 +43,29 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
+// DefaultLogLevel is the level used when LOG_LEVEL is unset or invalid.
+const DefaultLogLevel = common.DefaultLogLevel
+
 func init() {
-	// Setup logging
-	log.SetFormatter(&log.JSONFormatter{
-		PrettyPrint:      true,
-		DisableTimestamp: false,
-		TimestampFormat:  "2006-01-02 15:04:05",
-	})
-	log.SetOutput(os.Stdout)
-	log.SetLevel(log.DebugLevel)
+	// Setup logging. Emit one JSON object per line: log collectors (Loki, ELK,
+	// CloudWatch) parse container output line by line, so indented multi-line
+	// JSON is read as several unparseable fragments per entry.
+	common.ConfigureJSONLogging()
 	log.SetReportCaller(false)
 	// Initialize OpenTelemetry (traces + metrics), configured via env vars.
 	if err := initTelemetry(); err != nil {
 		log.Fatalf("failed to init telemetry: %v", err)
 	}
+}
+
+// parseLogLevel resolves the LOG_LEVEL environment variable to a log level,
+// accepting the usual names (panic, fatal, error, warn, info, debug, trace).
+// An unset or unparseable value falls back to info.
+//
+// Note that debug logs every Anvil REST call, so it is verbose under load and
+// is intended for troubleshooting rather than steady-state operation.
+func parseLogLevel(level string) log.Level {
+	return common.ParseLogLevel(level)
 }
 
 // initTelemetry wires OTel providers according to standard env vars:

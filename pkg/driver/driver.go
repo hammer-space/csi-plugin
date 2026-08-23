@@ -18,8 +18,6 @@ package driver
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"net"
 	"os"
 	"strconv"
@@ -241,20 +239,13 @@ func (c *CSIDriver) callInterceptor(
 }
 
 func logGRPC(method string, request, reply interface{}, err error) {
-	// Log JSON with the request and response for easier parsing
-	logMessage := struct {
-		Method   string
-		Request  interface{}
-		Response interface{}
-		Error    string
-	}{
-		Method:   method,
-		Request:  request,
-		Response: reply,
+	fields := log.Fields{
+		"grpc_method": method,
+		"request":     request,
+		"response":    reply,
 	}
 	if err != nil {
-		logMessage.Error = err.Error()
+		fields["error"] = err.Error()
 	}
-	msg, _ := json.Marshal(logMessage)
-	fmt.Printf("gRPCCall: %s\n", msg)
+	log.WithFields(fields).Debug("gRPC call")
 }

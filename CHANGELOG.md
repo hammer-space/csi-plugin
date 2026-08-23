@@ -13,8 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `deploy/kubernetes/kubernetes-1.3{4,5,6}/plugin.yaml` — manifests for the currently supported k8s minors, including a host-networked metrics port and OTel env vars.
 - `deploy/monitoring/` — importable Grafana dashboard (`hs-csi-driver`), an example VictoriaMetrics/Prometheus scrape config, and a wiring README.
 - Unit tests for `objectiveTarget` parsing, the file-backed size gates, the file/share volume-ID discriminator, the Anvil route-template normalization, `MeasureOp`, and the lock-timeout→`codes.Aborted` behavior.
+- `LOG_LEVEL` environment variable to set log verbosity (`panic`, `fatal`, `error`, `warn`, `info`, `debug`, `trace`). Unset or unrecognized values fall back to `info`.
 
 ### Changed
+- **The driver now logs at `info` by default instead of `debug`.** Debug logging was hardcoded, so every deployment logged every Anvil REST call regardless of configuration. Set `LOG_LEVEL=debug` to restore the previous verbosity when troubleshooting.
+- Log entries are now emitted as one JSON object per line instead of pretty-printed across multiple indented lines, so log collectors that parse container output line by line (Loki, ELK, CloudWatch) can ingest them.
+- Re-leveled 32 log statements so `info` is a usable default. Share create/delete/resize, objective-set, volume publish, and filesystem format are now logged at `info` — previously they were `debug`, so the record of what the driver changed on the Anvil was invisible at any other level. Conversely, per-request tracing, data-portal export probing, and function-entry traces moved to `debug`; the per-request trace line in particular was logged at `info` (and `warn` when no span context was present), so it defeated the purpose of running below `debug`.
 - Parallelized file-backed CreateVolume by narrowing the per-backing-share lock, plus `mkfs` tuning (ext4 lazy-init, `mkfs.xfs -K` over NFS). See `docs/file-backed-performance.md`.
 - Decide file- vs share-backed structurally from the volume ID instead of a `GetShare` probe that 404s for file-backed sources.
 - Task-completion polling uses a fixed 2s/30s-then-4s cadence instead of exponential backoff. See `docs/tunable-retry-parameters.md`.
@@ -32,6 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `AnvilRoute` collapses `share-snapshots` share/snapshot identifiers to `{id}`, preventing unbounded `hs_csi_anvil_requests_total` metric cardinality.
 - Survive a stale/dead backing-share NFS mount (timeout-bounded mount + force-unmount before remount) instead of leaking the lock and wedging serialized provisioning. See `docs/node-unmount-recovery.md`.
 - Route file-backed snapshot deletes to the file-snapshot API instead of always calling the share-snapshot delete.
+- `NodeExpandVolume` now grows file-backed filesystems using the request's actual mount point (`req.GetVolumePath()`) instead of reconstructing the backing-file path. `xfs_growfs` requires a mount point argument and has no fallback for a backing file, so xfs file-backed expansion previously failed on every attempt. (#72)
+- Guarded the `CreateSnapshot` dedup cache (`recentlyCreatedSnapshots`) with its own mutex, independent of the per-snapshot-name lock. The per-name lock only serializes calls for the same snapshot name; concurrent `CreateSnapshot` calls for different names could read/write the shared map at the same instant, which is a fatal, crash-the-process condition in Go. (#73)
 
 ### Security
 - Hardened the example credential handling in `deploy/kubernetes`: `example_secret.yaml` is now a clearly-marked `<PLACEHOLDER>` template (no committed base64 admin/admin), `kubectl create secret` is documented as the primary path, and a new [`deploy/kubernetes/SECRETS.md`](deploy/kubernetes/SECRETS.md) covers a least-privilege Anvil service account (scoped Hammerspace role instead of a full admin), least-privilege Kubernetes RBAC, Sealed Secrets, and External Secrets Operator / Secrets Store CSI.
@@ -41,17 +47,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Included share objectives in share create requests instead of applying them with follow-up objective-set calls after provisioning.
 - Treated all known terminal task states consistently so failed, halted, cancelled, validation-failed, and resumed tasks stop polling and report failure.
+- Fixed Kubernetes 1.29 snapshotter RBAC so the CSI provisioner can update `volumesnapshotcontents/status`.
 - Avoided passing StorageClass NFS mount options to local filesystem mounts for file-backed volumes; those options are now only used for the backing NFS share mount.
 - Prevented duplicate or conflicting NFS version mount flags by treating both `nfsvers=` and `vers=` as version options, removing them before fallback retries, and passing NFSv3 fallback options as separate mount arguments.
 - Honored the StorageClass `fqdn` parameter in deployments without data-portals (e.g. Anvil-only/no-DSX). Previously the resolved FQDN/floating IP was discarded because the mount loops only ran per data-portal, so an empty `data-portals` list caused provisioning to fail with `could not mount to any data-portals`.
 
 ### Changed
 - Removed the driver-specific `clientMountOptions` StorageClass parameter; CSI node mounts now rely on Kubernetes `mountOptions` / CSI `mountFlags`.
+- Snapshot clone tasks now fail immediately when the Hammerspace task fails instead of attempting to resume failed `share-clone` tasks.
 - Added `dnsPolicy: ClusterFirstWithHostNet` to the Kubernetes 1.29 plugin manifest for host-networked CSI pods.
 
 ### Documentation
 - Clarified supported CSI compatibility modes (`CSI_MAJOR_VERSION=1` and `CSI_MAJOR_VERSION=0`).
 - Documented Kubernetes compatibility ranges and the legacy CSI v0.3 deployment path.
+- Added Kubernetes snapshot/restore examples and self-contained E2E scripts for file-backed, NFS share-backed, and block volume scenarios.
 
 ## [1.2.8]
 ### Added

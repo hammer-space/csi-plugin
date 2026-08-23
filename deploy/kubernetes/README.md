@@ -145,7 +145,7 @@ Values are always strings (quote numbers and booleans).
 | `fsType` | `nfs` | `nfs` for share-backed volumes; `ext4` or `xfs` for file-backed. Selects the volume type — see above. |
 | `objectives` | none | Comma-separated Hammerspace objectives to apply in addition to the cluster defaults. Ex: `"keep-online,archive"` |
 | `objectiveTarget` | `share` | File-backed volumes only. `share` applies objectives to the backing share only and provisions fastest; `file` or `both` also applies them per file, for per-volume placement policy. |
-| `mountBackingShareName` | none | For file-backed volumes, the share that holds the backing files. Also honored for share-backed (`nfs`) volumes: each PVC then becomes a subdirectory inside this one base share instead of its own top-level share — which lets snapshots restore into a differently-named share and removes the one-share-per-volume scaling limit. Auto-created if missing; never deleted by the driver. |
+| `mountBackingShareName` | none | For file-backed volumes, the share that holds the backing files. Also honored for share-backed (`nfs`) volumes: each PVC then becomes a subdirectory inside this one base share instead of its own top-level share. Snapshot and restore are not supported for directory-backed NFS volumes. Auto-created if missing; never deleted by the driver. |
 | `blockBackingShareName` | none | Block volumes: as above, for raw block backing files. |
 | `exportOptions` | none | NFS export rules as `;`-separated `<subnet>,<accessPermissions>,<rootSquash>` triples. Ex: `"*,RW,false; 172.16.0.0/20,RO,true"` |
 | `volumeNameFormat` | `csi-%s` | Naming pattern for provisioned shares. Must contain `%s` exactly once and no `/`. |
@@ -257,9 +257,15 @@ spec:
     persistentVolumeClaimName: mydevice
 ```
 
-The driver snapshots share-backed volumes with a share snapshot and file-backed
-volumes with a file snapshot (freezing the source filesystem briefly for a
-crash-consistent image); there is nothing to configure.
+The driver snapshots native share-backed volumes with a share snapshot and
+file-backed volumes with a file snapshot (freezing the source filesystem
+briefly for a crash-consistent image); there is nothing to configure.
+
+> **Known limitation:** Snapshot and restore are not supported for NFS volumes
+> provisioned as directories with `mountBackingShareName`. The backend does not
+> currently provide a recursive directory snapshot/clone operation. Snapshotting
+> the complete backing share or copying the directory is not used because those
+> approaches do not provide a safe, scalable per-PVC snapshot.
 
 ### Restore a Snapshot
 

@@ -21,6 +21,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jpillora/backoff"
@@ -45,8 +46,9 @@ const (
 )
 
 var (
-	recentlyCreatedSnapshots = map[string]*csi.Snapshot{}
-	tracer                   = otel.Tracer("hammerspace-csi/controller")
+	recentlyCreatedSnapshots   = map[string]*csi.Snapshot{}
+	recentlyCreatedSnapshotsMu sync.Mutex
+	tracer                     = otel.Tracer("hammerspace-csi/controller")
 )
 
 func parseVolParams(params map[string]string) (common.HSVolumeParameters, error) {
@@ -307,7 +309,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 			return status.Error(codes.NotFound, common.SourceSnapshotNotFound)
 		}
 
-		err = d.hsclient.CreateShareFromSnapshot(
+		restoredPath, err := d.hsclient.CreateShareFromSnapshot(
 			ctx,
 			hsVolume.Name,
 			hsVolume.Path,
@@ -316,12 +318,15 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 			hsVolume.ExportOptions,
 			hsVolume.DeleteDelay,
 			hsVolume.Comment,
+			hsVolume.SourceSnapShareName,
+			sourceShare.ExportPath,
 			hsVolume.SourceSnapPath,
 		)
 
 		if err != nil {
 			return status.Errorf(codes.Internal, "%s", err.Error())
 		}
+		hsVolume.Path = restoredPath
 	} else {
 		// Share is not there, try creating a new share
 		err = d.hsclient.CreateShare(
@@ -350,8 +355,12 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
+	} else {
+		log.WithFields(log.Fields{
+			"volume_path": hsVolume.Path,
+			"target_path": targetPath,
+		}).Info("Published share backed volume")
 	}
-	log.Debugf("Published share backed volume %s on targetpath %s", hsVolume.Path, targetPath)
 
 	// The hs client expects a trailing slash for directories
 	err = common.SetMetadataTags(ctx, targetPath+"/", hsVolume.AdditionalMetadataTags)
@@ -392,7 +401,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
-		log.Infof("Checking if get share response back non nil share.")
+		log.Debugf("Checking if get share response back non nil share.")
 		if share == nil {
 			log.Errorf("Error while creating share from ensure backing share exist method.")
 			return nil, fmt.Errorf("requested share [%s] not found", backingShareName)
@@ -488,7 +497,7 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 				return err
 			}
 		}
-		log.Debugf("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
+		log.Infof("ensureDeviceFileExists formatted file %s, with fstype %s", deviceFile, hsVolume.FSType)
 	}
 
 	// Step 4: Apply objectives + metadata on a fresh deadline, but inherit
@@ -755,7 +764,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 				return nil, status.Error(codes.Internal, "unexpected type for free capacity")
 			}
 		} else {
-			log.Infof("getting free capacity from (/cntl/state) api response")
+			log.Debugf("getting free capacity from (/cntl/state) api response")
 			// Call your function to get the free capacity from the API response here
 			available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
 			if err != nil {
@@ -827,8 +836,11 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 
 	if !fileBacked && fsType == "nfs" && vParams.MountBackingShareName != "" {
 		// This function is called when user want new nfs share inside one base share
-		log.Debugf("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
-		err := d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
+		log.Infof("Creating share for NFS volume inside base NFS share dir %s with path %s", vParams.MountBackingShareName, hsVolume.Path)
+		if hsVolume.SourceSnapPath != "" {
+			return nil, status.Error(codes.Unimplemented, "snapshot restore is not supported for NFS volumes provisioned with mountBackingShareName")
+		}
+		err = d.ensureNFSDirectoryExists(ctx, backingShareName, hsVolume)
 		if err != nil {
 			log.Errorf("failed to ensure base NFS share (%s): %v", backingShareName, err)
 			return nil, status.Errorf(codes.Internal, "failed to ensure base NFS share (%s): %v", backingShareName, err)
@@ -838,7 +850,7 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		volID = fmt.Sprintf("%s/%s", volumePath, volumeName)
 	} else if fileBacked {
 		// This function will be called in case of Block and File backed share
-		log.Debugf("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
+		log.Infof("Creating share for File system volume (block or files) inside base backingshare name dir %s with path %s", backingShareName, hsVolume.Path)
 		err = d.ensureFileBackedVolumeExists(ctx, hsVolume, backingShareName)
 		if err != nil {
 			return nil, err
@@ -851,11 +863,12 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 		// In that case all new created share will have path like /k8s-nfs-share/pvc-csi-uuid
 		// Then we create snapshot of that share /pvc-csi-uuid which will be inside /k8s-nfs-share/.snapshot
 		// Then restore the snapshot to the new created share from snapshot content source.
-		log.Debugf("Creating share for NFS volume with path %s", hsVolume.Path)
+		log.Infof("Creating share for NFS volume with path %s", hsVolume.Path)
 		err = d.ensureShareBackedVolumeExists(ctx, hsVolume)
 		if err != nil {
 			return nil, err
 		}
+		volID = hsVolume.Path
 	}
 
 	// Create Response
@@ -904,7 +917,7 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 	defer span.End()
 	var exists bool
 	if exists, _ = d.hsclient.DoesFileExist(ctx, filepath); exists {
-		log.Debugf("found file-backed volume to delete, %s", filepath)
+		log.Infof("found file-backed volume to delete, %s", filepath)
 	}
 
 	// Check if file has snapshots and fail
@@ -1094,7 +1107,7 @@ func (d *CSIDriver) ControllerExpandVolume(ctx context.Context, req *csi.Control
 		if file == nil || err != nil {
 			return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 		} else {
-			log.Debugf("found file-backed volume to resize, %s", req.GetVolumeId())
+			log.Infof("found file-backed volume to resize, %s", req.GetVolumeId())
 			// Check backing share size to determine if we can handle new size (look at create volume for how we do this)
 			// && check the size of the file only resize if requested is larger than what we have
 			// if we are good, then return saying we need a resize on next mount
@@ -1210,9 +1223,9 @@ func (d *CSIDriver) ValidateVolumeCapabilities(ctx context.Context, req *csi.Val
 	}
 
 	if fileBacked {
-		log.Infof("Validating volume capabilities for file-backed volume %s", volumeName)
+		log.Debugf("Validating volume capabilities for file-backed volume %s", volumeName)
 	} else if share != nil {
-		log.Infof("Validating volume capabilities for share-backed volume %s", volumeName)
+		log.Debugf("Validating volume capabilities for share-backed volume %s", volumeName)
 	}
 
 	// Calculate Capabilties
@@ -1433,7 +1446,15 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 	// FIXME: Check to see if snapshot already exists?
 	//  (using their id somehow?, update the share extended info maybe?) what about for file-backed volumes?
 	// do we update extended info on backing share?
-	if _, exists := recentlyCreatedSnapshots[req.GetName()]; !exists {
+	// recentlyCreatedSnapshots is shared across all snapshot names, unlike
+	// acquireSnapshotLock above which only serializes calls for this one name,
+	// so every access to the map itself must go through its own mutex.
+	recentlyCreatedSnapshotsMu.Lock()
+	cachedSnapshot, exists := recentlyCreatedSnapshots[req.GetName()]
+	recentlyCreatedSnapshotsMu.Unlock()
+	if !exists {
+		sourceVolumeID := req.GetSourceVolumeId()
+		var snapID string
 		// find source volume (is it file or share?
 		volumeName := GetVolumeNameFromPath(req.GetSourceVolumeId())
 		// Decide file- vs share-backed structurally from the source volume ID,
@@ -1464,28 +1485,27 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		var frozen []FrozenTarget
 		if d.freezer != nil && fileBackedSource {
 			frozen = d.freezer.FreezeForVolumeHandle(ctx, req.GetSourceVolumeId())
+			// Always unfreeze, even if snapshot creation or a fallback lookup fails.
+			// Detach from the gRPC request so cancellation cannot leave the workload frozen.
+			defer d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
-		// Create the snapshot
+		// Create the snapshot.
 		var hsSnapName string
 		if !fileBackedSource {
 			hsSnapName, err = d.hsclient.SnapshotShare(ctx, volumeName)
+			if err == nil {
+				snapID = GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID)
+			}
 		} else {
-			hsSnapName, err = d.hsclient.SnapshotFile(ctx, req.GetSourceVolumeId())
-		}
-		// Always unfreeze, even if snapshot failed — otherwise the app pod
-		// stays blocked on writes indefinitely. Use a context detached from the
-		// gRPC request cancellation (context.WithoutCancel): if the snapshotter
-		// sidecar's deadline expires while SnapshotFile/SnapshotShare above is
-		// still running, a cancelled ctx would make the unfreeze exec fail fast
-		// without ever reaching the pod, leaving the workload's filesystem frozen.
-		if d.freezer != nil && fileBackedSource {
-			d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
+			hsSnapName, err = d.hsclient.SnapshotFile(ctx, sourceVolumeID)
+			if err == nil {
+				snapID = GetSnapshotIDFromSnapshotName(hsSnapName, sourceVolumeID)
+			}
 		}
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "%s", err.Error())
 		}
 
-		snapID := GetSnapshotIDFromSnapshotName(hsSnapName, req.GetSourceVolumeId())
 		now := time.Now()
 		timeTaken := &timestamp.Timestamp{
 			Seconds: now.Unix(),
@@ -1493,19 +1513,26 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 		}
 		snapshotResponse := &csi.Snapshot{
 			SnapshotId:     snapID,
-			SourceVolumeId: req.GetSourceVolumeId(),
+			SourceVolumeId: sourceVolumeID,
 			CreationTime:   timeTaken,
 			ReadyToUse:     true,
 		}
 		// FIXME: this is a hack to reduce the chance we create a snapshot twice
+		recentlyCreatedSnapshotsMu.Lock()
 		recentlyCreatedSnapshots[req.GetName()] = snapshotResponse
+		recentlyCreatedSnapshotsMu.Unlock()
+		cachedSnapshot = snapshotResponse
 	} else {
-		if recentlyCreatedSnapshots[req.GetName()].SourceVolumeId != req.GetSourceVolumeId() {
+		if cachedSnapshot.SourceVolumeId != req.GetSourceVolumeId() {
 			return nil, status.Errorf(codes.AlreadyExists, "snapshot already exists for a different volume")
 		}
 	}
+	log.WithFields(log.Fields{
+		"snapshot_id":      cachedSnapshot.SnapshotId,
+		"source_volume_id": cachedSnapshot.SourceVolumeId,
+	}).Info("Snapshot is ready")
 	return &csi.CreateSnapshotResponse{
-		Snapshot: recentlyCreatedSnapshots[req.GetName()],
+		Snapshot: cachedSnapshot,
 	}, nil
 }
 
@@ -1521,12 +1548,12 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		return nil, status.Error(codes.InvalidArgument, common.EmptySnapshotId)
 	}
 
-	splitSnapId := strings.SplitN(snapshotId, "|", 2)
-	if len(splitSnapId) != 2 {
+	snapshotName, nameErr := GetSnapshotNameFromSnapshotId(snapshotId)
+	sourceVolumeID, volErr := GetSnapshotSourceVolumeId(snapshotId)
+	if nameErr != nil || volErr != nil {
 		log.Warnf("DeleteSnapshot: malformed snapshot ID %s; treating as success (idempotent)", snapshotId)
 		return &csi.DeleteSnapshotResponse{}, nil
 	}
-	snapshotName, path := splitSnapId[0], splitSnapId[1]
 
 	// If the snapshot does not exist then return an idempotent response.
 
@@ -1540,11 +1567,11 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 	// ALWAYS true, so every delete was routed to DeleteShareSnapshot and
 	// file-backed snapshots were orphaned on the Anvil, blocking source-volume
 	// deletion.)
-	shareName := GetVolumeNameFromPath(path)
+	shareName := GetVolumeNameFromPath(sourceVolumeID)
 
 	var err error
-	if isFileBackedVolumeID(path) {
-		err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+	if isFileBackedVolumeID(sourceVolumeID) {
+		err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
 	} else {
 		share, gerr := d.hsclient.GetShare(ctx, shareName)
 		if gerr != nil {
@@ -1553,7 +1580,7 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		if share != nil {
 			err = d.hsclient.DeleteShareSnapshot(ctx, shareName, snapshotName)
 		} else {
-			err = d.hsclient.DeleteFileSnapshot(ctx, path, snapshotName)
+			err = d.hsclient.DeleteFileSnapshot(ctx, sourceVolumeID, snapshotName)
 		}
 	}
 
@@ -1566,7 +1593,10 @@ func (d *CSIDriver) DeleteSnapshot(ctx context.Context, req *csi.DeleteSnapshotR
 		return nil, status.Error(codes.Internal, err.Error())
 	}
 
-	// Delete snapshot
+	log.WithFields(log.Fields{
+		"snapshot_id":      snapshotId,
+		"source_volume_id": sourceVolumeID,
+	}).Info("Deleted snapshot")
 	return &csi.DeleteSnapshotResponse{}, nil
 }
 

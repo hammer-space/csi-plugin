@@ -348,9 +348,9 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 
 	spanCtx := trace.SpanContextFromContext(ctx)
 	if !spanCtx.IsValid() {
-		log.Warn("No active span context found in ctx")
+		log.Debug("No active span context found in ctx")
 	} else {
-		log.Infof("trace: method=%s url=%s trace_id=%s span_id=%s",
+		log.Debugf("trace: method=%s url=%s trace_id=%s span_id=%s",
 			req.Method,
 			req.URL.String(),
 			spanCtx.TraceID().String(),
@@ -361,7 +361,15 @@ func (client *HammerspaceClient) generateRequest(ctx context.Context, verb, urlP
 	return req, nil
 }
 
+// WaitForTaskCompletion polls a task to completion, discarding the final
+// task details. Kept for callers that only care whether the task succeeded;
+// see WaitForTaskCompletionResult for callers that need the task itself.
 func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, taskLocation string) (bool, error) {
+	_, success, err := client.WaitForTaskCompletionResult(ctx, taskLocation)
+	return success, err
+}
+
+func (client *HammerspaceClient) WaitForTaskCompletionResult(ctx context.Context, taskLocation string) (*common.Task, bool, error) {
 	// The task-completion poll (CreateShare returns 202 + a task, then we poll
 	// GET /tasks/{id} until terminal) is typically the dominant cost of share
 	// creation - the share-backed analog of the file-visibility poll. Give it a
@@ -398,26 +406,26 @@ func (client *HammerspaceClient) WaitForTaskCompletion(ctx context.Context, task
 		}
 		statusCode, respBody, _, err := client.doRequest(ctx, *req)
 		if err != nil {
-			return false, err
+			return &task, false, err
 		}
 		if statusCode != 200 {
-			return false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
+			return &task, false, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 		}
 
 		err = json.Unmarshal([]byte(respBody), &task)
 		if err != nil {
 			log.Error(err)
-			return false, nil
+			return &task, false, nil
 		}
 		if _, isTerminal := terminalTaskStatuses[task.Status]; isTerminal {
 			if task.Status == taskStatusCompleted {
-				return true, nil
+				return &task, true, nil
 			}
 			log.Error(fmt.Sprintf("Task %s, of type %s, failed. Exit value is %s", task.Uuid, task.Action, task.StatusMessage))
-			return false, nil
+			return &task, false, nil
 		}
 	}
-	return false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
+	return &task, false, fmt.Errorf("task %s, of type %s, failed to complete within time limit. Current status is %s", task.Uuid, task.Action, task.Status)
 }
 
 func (client *HammerspaceClient) ListShares(ctx context.Context) ([]common.ShareResponse, error) {
@@ -622,7 +630,7 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 			shareSnapshots = append(shareSnapshots, snapshot)
 		}
 	}
-	log.Infof("%v, %s, %s", shareSnapshots, snapshot_id, volume_id)
+	log.Debugf("ListSnapshots: shareSnapshots=%v snapshot_id=%s volume_id=%s", shareSnapshots, snapshot_id, volume_id)
 	return shareSnapshots, nil
 }
 
@@ -714,7 +722,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	comment string) error {
 	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShare")(nil)
 
-	log.Debug("Creating share: " + name)
+	log.Info("Creating share: " + name)
 	extendedInfo := common.GetCommonExtendedInfo()
 	if exportOptions == nil { // send empty list to api req
 		exportOptions = make([]common.ShareExportOptions, 0)
@@ -750,7 +758,7 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		log.Errorf("unable to genrate share create request with POST. Error %v", err)
 		return err
 	}
-	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
+	statusCode, respBody, respHeaders, err := client.doRequest(ctx, *req)
 
 	if err != nil {
 		log.Error(err)
@@ -758,12 +766,15 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	}
 	if statusCode != 202 {
 		if statusCode == 400 {
-			shareTaskRunning, err := client.CheckIfShareCreateTaskIsRunning(ctx, name)
+			shareTaskRunning, taskErr := client.CheckIfShareCreateTaskIsRunning(ctx, name)
+			if taskErr != nil {
+				return taskErr
+			}
 			log.Debug(fmt.Sprintf("Found share creating task running as: %v ", shareTaskRunning))
 			if shareTaskRunning {
-				return nil
+				return fmt.Errorf("share create task is already running for %s; retry snapshot clone after it completes", name)
 			}
-			return err
+			return fmt.Errorf("share create failed with status code %d: %s", statusCode, respBody)
 		}
 		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
@@ -781,56 +792,73 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 		}
 
 	} else {
-		log.Errorf("No task returned to monitor")
+		defer client.DeleteShare(ctx, share.Name, 0)
+		return errors.New("no share create task returned to monitor")
 	}
 
 	return nil
 }
 
-func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, snapshotPath string) error {
-	defer common.MeasureOp(ctx, "HammerspaceClient.CreateShareFromSnapshot")(nil)
+func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, name string, exportPath string, size int64, objectives []string, exportOptions []common.ShareExportOptions, deleteDelay int64, comment string, sourceShareName string, sourceSharePath string, snapshotPath string) (string, error) {
 	log.WithFields(log.Fields{
-		"name":          name,
-		"deleteDelay":   deleteDelay,
-		"exportOptions": exportOptions,
-		"exportPath":    exportPath,
-		"snapshotPath":  snapshotPath,
-	}).Infof("creating new share from snapshot")
+		"name":            name,
+		"deleteDelay":     deleteDelay,
+		"exportOptions":   exportOptions,
+		"exportPath":      exportPath,
+		"sourceShareName": sourceShareName,
+		"sourceSharePath": sourceSharePath,
+		"snapshotPath":    snapshotPath,
+	}).Infof("restoring share snapshot inside source share")
 
-	extendedInfo := common.GetCommonExtendedInfo()
-
-	if exportOptions == nil { // send empty list to api req
-		exportOptions = make([]common.ShareExportOptions, 0)
-	}
-	if deleteDelay >= 0 {
-		extendedInfo["csi_delete_delay"] = strconv.FormatInt(deleteDelay, 10)
-	}
 	if len(name) > 80 {
-		return status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
+		return "", status.Error(codes.InvalidArgument, common.InvalidShareNameSize)
 	}
-	shareObjectives, err := client.getShareObjectives(ctx, objectives)
-	if err != nil {
-		return err
+	snapshotName := path.Base(snapshotPath)
+	if snapshotName == "." || snapshotName == "/" || snapshotName == "" {
+		return "", fmt.Errorf("invalid source snapshot path %q", snapshotPath)
 	}
-	////// FIXME: Replace with new api to clone a snapshot to a new share
-	share := common.ShareRequest{
-		Name:            name,
-		ExportPath:      exportPath,
-		ExportOptions:   exportOptions,
-		ExtendedInfo:    extendedInfo,
-		Comment:         comment,
-		ShareObjectives: shareObjectives,
+	if sourceShareName == "" {
+		return "", fmt.Errorf("source share name cannot be empty when cloning snapshot %s", snapshotName)
 	}
-	if size > 0 {
-		share.Size = size
+	if sourceSharePath == "" {
+		return "", fmt.Errorf("source share path cannot be empty when cloning snapshot %s", snapshotName)
 	}
 
-	shareString := new(bytes.Buffer)
-	json.NewEncoder(shareString).Encode(share)
+	cloneDestinationPath := path.Clean("/" + strings.TrimPrefix(exportPath, "/"))
+	restoredSharePath := path.Join(path.Clean("/"+strings.TrimPrefix(sourceSharePath, "/")), strings.TrimPrefix(cloneDestinationPath, "/"))
+	log.WithFields(log.Fields{
+		"cloneDestinationPath": cloneDestinationPath,
+		"restoredSharePath":    restoredSharePath,
+	}).Info("resolved share snapshot clone destination")
 
-	req, err := client.generateRequest(ctx, "POST", "/shares", shareString.String())
+	if err := client.CloneShareSnapshot(ctx, sourceShareName, snapshotName, cloneDestinationPath, true); err != nil {
+		return "", err
+	}
+
+	return restoredSharePath, nil
+}
+
+func (client *HammerspaceClient) CloneShareSnapshot(ctx context.Context, sourceShareName, snapshotName, destinationPath string, overwriteDestination bool) error {
+	log.WithFields(log.Fields{
+		"sourceShareName":      sourceShareName,
+		"snapshotName":         snapshotName,
+		"destinationPath":      destinationPath,
+		"overwriteDestination": overwriteDestination,
+	}).Info("cloning share snapshot")
+
+	query := url.Values{}
+	query.Set("snapshot-name", snapshotName)
+	query.Set("destination-path", destinationPath)
+	query.Set("overwrite-destination", strconv.FormatBool(overwriteDestination))
+
+	req, err := client.generateRequest(
+		ctx,
+		"POST",
+		fmt.Sprintf("/share-snapshots/clone-create/%s?%s", url.PathEscape(sourceShareName), query.Encode()),
+		"",
+	)
 	if err != nil {
-		log.Errorf("unable to genrate share create request with POST. Error %v", err)
+		log.Errorf("unable to generate share snapshot clone request with POST. Error %v", err)
 		return err
 	}
 	statusCode, _, respHeaders, err := client.doRequest(ctx, *req)
@@ -840,31 +868,27 @@ func (client *HammerspaceClient) CreateShareFromSnapshot(ctx context.Context, na
 		return err
 	}
 	if statusCode != 202 {
-		if statusCode == 400 {
-			shareTaskRunning, err := client.CheckIfShareCreateTaskIsRunning(ctx, name)
-			log.Debug(fmt.Sprintf("Found share creating task running as: %v ", shareTaskRunning))
-			if shareTaskRunning {
-				return nil
-			}
-			return err
-		}
 		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
-	// ensure the location header is set and also make sure length >= 1
-	if locs, exists := respHeaders["Location"]; exists {
-		success, err := client.WaitForTaskCompletion(ctx, locs[0])
+	if locs, exists := respHeaders["Location"]; exists && len(locs) > 0 {
+		task, success, err := client.WaitForTaskCompletionResult(ctx, locs[0])
 		if err != nil {
 			log.Error(err)
 			return err
 		}
 		if !success {
-			defer client.DeleteShare(ctx, share.Name, 0)
-			return errors.New("failed to create a share, delete share command issued")
+			if task != nil {
+				log.WithFields(log.Fields{
+					"taskId":        task.Uuid,
+					"status":        task.Status,
+					"statusMessage": task.StatusMessage,
+				}).Error("share snapshot clone task failed")
+			}
+			return errors.New("failed to clone share snapshot")
 		}
-
 	} else {
-		log.Errorf("No task returned to monitor")
+		return errors.New("no share snapshot clone task returned to monitor")
 	}
 
 	return nil
@@ -901,7 +925,7 @@ func (client *HammerspaceClient) CheckIfShareCreateTaskIsRunning(ctx context.Con
 // Set objectives on a share, at the specified path, optionally clearing previously-set objectives at the path
 // The path must start with a slash
 func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName string, path string, objectives []string) error {
-	log.Debugf("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
+	log.Infof("Setting objectives. Share=%s, Path=%s, Objectives=%v: ", shareName, path, objectives)
 	// Set objectives on share at path
 
 	for _, objectiveName := range objectives {
@@ -936,7 +960,7 @@ func (client *HammerspaceClient) SetObjectives(ctx context.Context, shareName st
 // size in bytes
 func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name string, size int64) error {
 
-	log.Debugf("Update share size : %s to %v", name, size)
+	log.Infof("Update share size : %s to %v", name, size)
 
 	share, err := client.GetShareRawFields(ctx, name)
 	if err != nil {
@@ -985,7 +1009,7 @@ func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name strin
 
 func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, deleteDelay int64) error {
 	queryParams := "?delete-path=true"
-	log.Debugf("Deleting share: %s with delete delay %d", name, deleteDelay)
+	log.Infof("Deleting share: %s with delete delay %d", name, deleteDelay)
 	trace.SpanFromContext(ctx).SetAttributes(
 		attribute.String("share.name", name),
 		attribute.Int64("share.delete_delay", deleteDelay),
@@ -1052,7 +1076,7 @@ func (client *HammerspaceClient) SnapshotShare(ctx context.Context, shareName st
 	//}
 	// FIXME: currently the API just returns the raw string for the snapshot name
 
-	return respBody, nil
+	return strings.Trim(strings.TrimSpace(respBody), "\""), nil
 }
 
 func (client *HammerspaceClient) GetShareSnapshots(ctx context.Context, shareName string) ([]string, error) {
@@ -1128,10 +1152,15 @@ func (client *HammerspaceClient) GetFileSnapshots(ctx context.Context, filePath 
 }
 
 func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePath, snapshotName string) error {
-	// Get only the timestamp from the snapshot path
-	snapshotTime := strings.Join(strings.SplitN(url.PathEscape(path.Base(snapshotName)),
-		"-", 6)[0:5],
-		"-")
+	// Snapshot paths have the form
+	// <source>/.fsnapshot/<timestamp>/<source-base-name>. Use the directory
+	// component, not path.Base(snapshotName), which is the source file name.
+	snapshotDir := path.Base(path.Dir(snapshotName))
+	parts := strings.SplitN(snapshotDir, "-", 6)
+	if len(parts) < 5 {
+		return fmt.Errorf("invalid file snapshot name %q", snapshotName)
+	}
+	snapshotTime := strings.Join(parts[0:5], "-")
 
 	req, _ := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
@@ -1176,6 +1205,9 @@ func (client *HammerspaceClient) SnapshotFile(ctx context.Context, filepath stri
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
 		return "", err
+	}
+	if len(snapshotNames) == 0 {
+		return "", fmt.Errorf("no file snapshots returned for path %s", filepath)
 	}
 
 	return snapshotNames[0], nil

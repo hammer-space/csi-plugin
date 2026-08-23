@@ -205,16 +205,24 @@ func isFileBackedVolumeID(volumeID string) bool {
 }
 
 func GetSnapshotNameFromSnapshotId(snapshotId string) (string, error) {
-	tokens := strings.SplitN(snapshotId, "|", 2)
-	if len(tokens) != 2 {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
 		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
 	}
 	return tokens[0], nil
 }
 
+func GetSnapshotSourceVolumeId(snapshotId string) (string, error) {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
+		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
+	}
+	return tokens[1], nil
+}
+
 func GetShareNameFromSnapshotId(snapshotId string) (string, error) {
-	tokens := strings.SplitN(snapshotId, "|", 2)
-	if len(tokens) != 2 {
+	tokens := strings.Split(snapshotId, "|")
+	if len(tokens) < 2 {
 		return "", fmt.Errorf(common.ImproperlyFormattedSnapshotId, snapshotId)
 	}
 	return path.Base(tokens[1]), nil
@@ -281,7 +289,7 @@ func (d *CSIDriver) EnsureBackingShareMounted(ctx context.Context, backingShareN
 		// under other in-flight file-backed pods (the same outage this path is
 		// meant to prevent, via a false positive).
 		state := classifyMount(backingDir, mountStaleProbes, common.SafeIsMountPoint)
-		log.Infof("Checked mount for %s: state=%d", backingDir, state)
+		log.Debugf("Checked mount for %s: state=%d", backingDir, state)
 		switch state {
 		case mountHealthy:
 			log.Infof("backing share already mounted, %s", backingDir)
@@ -440,7 +448,7 @@ func (d *CSIDriver) UnmountBackingShareIfUnused(ctx context.Context, backingShar
 	))
 	defer span.End()
 	defer common.MeasureOp(ctx, "UnmountBackingShareIfUnused")(nil)
-	log.Infof("UnmountBackingShareIfUnused is called with backing share name %s", backingShareName)
+	log.Debugf("UnmountBackingShareIfUnused is called with backing share name %s", backingShareName)
 	backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
 	if err != nil || backingShare == nil {
 		log.Errorf("unable to get share while checking UnmountBackingShareIfUnused. Err %v", err)
@@ -498,7 +506,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 	var err error
 	var fipaddr string = ""
 
-	log.Infof("Finding best host exporting %s", shareExportPath)
+	log.Debugf("Finding best host exporting %s", shareExportPath)
 
 	portals, err := d.hsclient.GetDataPortals(ctx, d.NodeID)
 	if err != nil {
@@ -549,7 +557,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		addr := ""
 		if len(fipaddr) > 0 {
 			addr = fipaddr
-			log.Infof("Floating IP address detected: %s", fipaddr)
+			log.Debugf("Floating IP address detected: %s", fipaddr)
 		} else {
 			addr = portal.Node.MgmtIpAddress.Address
 		}
@@ -562,10 +570,10 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 			exports, err := common.GetNFSExports(addr)
 			common.SetCacheData("NFS_EXPORTS", exports, 60*60) // keep the exports for an our before auto expire
 			if err != nil {
-				log.Infof("Could not get exports for data-portal at %s, %s. Error: %v", addr, portal.Uoid["uuid"], err)
+				log.Debugf("Could not get exports for data-portal at %s, %s. Error: %v", addr, portal.Uoid["uuid"], err)
 				return false
 			}
-			log.Infof("Found exports for data-portal %s, %v", addr, exports)
+			log.Debugf("Found exports for data-portal %s, %v", addr, exports)
 
 			// Check configured prefix
 			// Check the default prefixes
@@ -573,7 +581,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 				for _, e := range exports {
 					if e == fmt.Sprintf("%s%s", mountPrefix, shareExportPath) {
 						export = fmt.Sprintf("%s:%s%s", addr, mountPrefix, shareExportPath)
-						log.Infof("Found export %s", export)
+						log.Debugf("Found export %s", export)
 						break
 					}
 				}
@@ -582,7 +590,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 				}
 			}
 			if export == "" {
-				log.Infof("Could not find any matching export on data-portal address - %s uuid - %s.", portal.Node.MgmtIpAddress.Address, portal.Uoid["uuid"])
+				log.Debugf("Could not find any matching export on data-portal address - %s uuid - %s.", portal.Node.MgmtIpAddress.Address, portal.Uoid["uuid"])
 				return false
 			}
 		}
@@ -611,7 +619,7 @@ func (d *CSIDriver) MountShareAtBestDataportal(ctx context.Context, shareExportP
 		return false
 	}
 
-	log.Infof("Attempting to mount with provided mount flags.")
+	log.Debugf("Attempting to mount with provided mount flags.")
 	// Attempt to mount with provided mount flags if they contain nfsvers
 	containsNfsvers := false
 	for _, flag := range mountFlags {
