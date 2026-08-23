@@ -1,10 +1,12 @@
 package driver
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"context"
@@ -215,6 +217,32 @@ func (d *CSIDriver) publishFileBackedVolume(ctx context.Context, backingShareNam
 					return status.Error(codes.Internal, err.Error())
 				}
 				f.Close()
+			}
+			mounted = false
+		} else if errors.Is(err, syscall.EIO) {
+			// A file-backed filesystem can remain mounted after XFS shuts itself
+			// down. Do not report it as healthy or inherit it on a retry.
+			log.Warnf("publish target %s returned EIO; force-detaching shut-down filesystem", targetPath)
+			if unmountErr := forceUnmountTarget(targetPath); unmountErr != nil {
+				return status.Errorf(codes.Internal,
+					"failed to clean up publish target after I/O error: %v", unmountErr)
+			}
+			if fsType != "" {
+				if mkdirErr := os.MkdirAll(targetPath, 0755); mkdirErr != nil {
+					return status.Errorf(codes.Internal, "failed to recreate publish target after I/O error: %v", mkdirErr)
+				}
+			} else {
+				parentDir := filepath.Dir(targetPath)
+				if mkdirErr := os.MkdirAll(parentDir, 0755); mkdirErr != nil {
+					return status.Error(codes.Internal, mkdirErr.Error())
+				}
+				f, createErr := os.OpenFile(targetPath, os.O_CREATE|os.O_EXCL, 0644)
+				if createErr != nil {
+					return status.Errorf(codes.Internal, "failed to recreate block publish target after I/O error: %v", createErr)
+				}
+				if closeErr := f.Close(); closeErr != nil {
+					return status.Error(codes.Internal, closeErr.Error())
+				}
 			}
 			mounted = false
 		} else {

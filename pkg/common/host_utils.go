@@ -682,6 +682,24 @@ func ForceUnmountStale(targetPath string) {
 	log.Infof("ForceUnmountStale: cleared stale mount at %s", targetPath)
 }
 
+// ForceUnmountFilesystem detaches a mount without accessing the filesystem and
+// removes its mount-point path. This is used for mounts whose filesystem is no
+// longer stat-able (for example, a shut-down XFS filesystem returning EIO).
+// A successful path removal is authoritative even if umount reported that the
+// mount had already disappeared, which keeps repeated CSI cleanup idempotent.
+func ForceUnmountFilesystem(targetPath string) error {
+	out, unmountErr := ExecCommand("umount", "-f", "-l", targetPath)
+	removeErr := os.Remove(targetPath)
+	if removeErr == nil || os.IsNotExist(removeErr) {
+		return nil
+	}
+	if unmountErr != nil {
+		return fmt.Errorf("umount -f -l %s failed: %v (output: %s); removing mount point failed: %w",
+			targetPath, unmountErr, strings.TrimSpace(string(out)), removeErr)
+	}
+	return fmt.Errorf("removing force-unmounted path %s failed: %w", targetPath, removeErr)
+}
+
 func UnmountFilesystem(ctx context.Context, targetPath string) error {
 	_, span := commonTracer.Start(ctx, "UnmountFilesystem", trace.WithAttributes(
 		attribute.String("target", targetPath),
