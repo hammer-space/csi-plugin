@@ -1,0 +1,18 @@
+suite: node
+templates:
+  - templates/node-daemonset.yaml
+tests:
+  - it: renders registrar, node driver, and bidirectional kubelet mount
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - contains: {path: spec.template.spec.containers, content: {name: driver-registrar}, any: true}
+      - contains: {path: spec.template.spec.containers, content: {name: hs-csi-plugin-node}, any: true}
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-node")].volumeMounts
+          content: {name: mountpoint-dir, mountPath: /var/lib/kubelet/, mountPropagation: Bidirectional}
+  - it: honors a custom kubeletDir
+    set: {hammerspace.endpoint: https://x, node.kubeletDir: /data/kubelet}
+    asserts:
+      - contains:
+          path: spec.template.spec.volumes
+          content: {name: mountpoint-dir, hostPath: {path: /data/kubelet/}}

@@ -1,0 +1,165 @@
+kind: DaemonSet
+apiVersion: apps/v1
+metadata:
+  name: csi-node
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: csi-node
+  template:
+    metadata:
+      labels:
+        app: csi-node
+    spec:
+      serviceAccount: csi-node
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: csi-resizer
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.controller.sidecars.resizer.image .Values.controller.sidecars.resizer.tag }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+        - name: driver-registrar
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.node.registrar.image .Values.node.registrar.tag }}
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", '[ -n "$REG_SOCKET" ] && rm -rf "$REG_SOCKET" || echo "REG_SOCKET not set, skipping delete"']
+          args:
+            - "--v=5"
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--kubelet-registration-path=$(REG_SOCKET)"
+          securityContext:
+            privileged: true
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: REG_SOCKET
+              value: {{ .Values.node.kubeletDir }}/plugins_registry/com.hammerspace.csi/csi.sock
+            - name: KUBE_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  apiVersion: v1
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+        - name: hs-csi-plugin-node
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: {{ include "hammerspace-csi.image" . }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - containerPort: {{ .Values.metrics.nodePort }}
+              name: metrics
+              hostPort: {{ .Values.metrics.nodePort }}
+              protocol: TCP
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: csi-env-config
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: CSI_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HS_TLS_VERIFY
+              value: {{ .Values.hammerspace.tlsVerify | quote }}
+            - name: CSI_MAJOR_VERSION
+              value: "1"
+            # OTel toggles. hostNetwork=true means we bind directly to the
+            # node's :9091 (must differ from controller's :9090 in case the
+            # controller lands on the same node).
+            - name: OTEL_TRACES_EXPORTER
+              value: {{ .Values.metrics.tracesExporter | quote }}
+            {{- if .Values.metrics.enabled }}
+            - name: OTEL_METRICS_EXPORTER
+              value: "prometheus"
+            - name: OTEL_METRICS_PROMETHEUS_LISTEN
+              value: {{ printf ":%v" .Values.metrics.nodePort | quote }}
+            {{- end }}
+          {{- with .Values.node.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
+            - name: registration-dir
+              mountPath: /registration
+              mountPropagation: Bidirectional
+            - name: mountpoint-dir
+              mountPath: {{ .Values.node.kubeletDir }}/
+              mountPropagation: Bidirectional
+            - name: rootshare-dir
+              mountPath: /var/lib/hammerspace/
+              mountPropagation: Bidirectional
+            - name: dev-dir
+              mountPath: /dev
+            - name: staging-dir
+              mountPath: /tmp
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          hostPath:
+            path: {{ .Values.node.kubeletDir }}/plugins_registry/com.hammerspace.csi
+            type: DirectoryOrCreate
+        - name: mountpoint-dir
+          hostPath:
+            path: {{ .Values.node.kubeletDir }}/
+        - name: rootshare-dir
+          hostPath:
+            path: /var/lib/hammerspace/
+        - name: registration-dir
+          hostPath:
+            path: {{ .Values.node.kubeletDir }}/plugins_registry/
+        - name: dev-dir
+          hostPath:
+            path: /dev
+        - name: staging-dir
+          hostPath:
+            path: /tmp
+      {{- with .Values.node.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.seccompProfile.enabled }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
