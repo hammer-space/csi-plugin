@@ -43,3 +43,4 @@ chart-test:
 	helm unittest $(CHART)
 	@for v in $(CI_VALUES); do echo "== render $$v =="; \
 	  helm template hs $(CHART) -f $$v > /dev/null || exit 1; done
+	bash $(CHART)/tests/golden/run.sh

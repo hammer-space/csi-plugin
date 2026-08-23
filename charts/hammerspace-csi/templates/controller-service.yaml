@@ -5,6 +5,7 @@ metadata:
   name: csi-provisioner
   namespace: {{ include "hammerspace-csi.namespace" . }}
   labels:
+    app: csi-provisioner
     {{- include "hammerspace-csi.labels" . | nindent 4 }}
 spec:
   type: ClusterIP
