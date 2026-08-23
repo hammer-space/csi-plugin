@@ -1,0 +1,163 @@
+kind: StatefulSet
+apiVersion: apps/v1
+metadata:
+  name: csi-provisioner
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app: csi-provisioner
+  serviceName: "csi-provisioner"
+  replicas: {{ .Values.controller.replicaCount }}
+  template:
+    metadata:
+      labels:
+        app: csi-provisioner
+    spec:
+      serviceAccountName: csi-provisioner
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      containers:
+        - name: csi-provisioner
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.controller.sidecars.provisioner.image .Values.controller.sidecars.provisioner.tag }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--timeout=60s"  # Recommended as shares may take some time to create
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        {{- if .Values.controller.attacher.enabled }}
+        - name: csi-attacher
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.controller.sidecars.attacher.image .Values.controller.sidecars.attacher.tag }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        {{- end }}
+        - name: csi-snapshotter
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.controller.sidecars.snapshotter.image .Values.controller.sidecars.snapshotter.tag }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: csi-resizer
+          imagePullPolicy: Always
+          image: {{ printf "%s:%s" .Values.controller.sidecars.resizer.image .Values.controller.sidecars.resizer.tag }}
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: hs-csi-plugin-controller
+          securityContext:
+            privileged: true
+            capabilities:
+              add: ["SYS_ADMIN"]
+            allowPrivilegeEscalation: true
+          imagePullPolicy: Always
+          image: {{ include "hammerspace-csi.image" . }}
+          {{- if .Values.metrics.enabled }}
+          ports:
+            - containerPort: {{ .Values.metrics.controllerPort }}
+              name: metrics
+              hostPort: {{ .Values.metrics.controllerPort }}
+              protocol: TCP
+          {{- end }}
+          envFrom:
+            - configMapRef:
+                name: csi-env-config
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+            - name: HS_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: username
+            - name: HS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: password
+            - name: HS_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: com.hammerspace.csi.credentials
+                  key: endpoint
+            - name: HS_TLS_VERIFY
+              value: {{ .Values.hammerspace.tlsVerify | quote }}
+            - name: CSI_MAJOR_VERSION
+              value: "1"
+            # OTel toggles — Prometheus /metrics on :9090 (on by default). Set
+            # OTEL_TRACES_EXPORTER=console/otlp to also emit spans (off by default).
+            - name: OTEL_TRACES_EXPORTER
+              value: {{ .Values.metrics.tracesExporter | quote }}
+            {{- if .Values.metrics.enabled }}
+            - name: OTEL_METRICS_EXPORTER
+              value: "prometheus"
+            - name: OTEL_METRICS_PROMETHEUS_LISTEN
+              value: {{ printf ":%v" .Values.metrics.controllerPort | quote }}
+            {{- end }}
+          {{- with .Values.controller.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+            - name: staging-dir
+              mountPath: /tmp
+              mountPropagation: Bidirectional
+      volumes:
+        - name: socket-dir
+          emptyDir: {}
+        - name: staging-dir
+          hostPath:
+            path: /tmp
+      {{- with .Values.controller.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.controller.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.securityContext.seccompProfile.enabled }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}

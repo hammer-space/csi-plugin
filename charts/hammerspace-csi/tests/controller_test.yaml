@@ -1,0 +1,22 @@
+suite: controller
+templates:
+  - templates/controller-statefulset.yaml
+tests:
+  - it: includes the attacher by default and wires HS env
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - contains: {path: spec.template.spec.containers, content: {name: csi-attacher}, any: true}
+      - contains: {path: spec.template.spec.containers, content: {name: hs-csi-plugin-controller}, any: true}
+      - equal:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].securityContext.privileged
+          value: true
+  - it: drops the attacher when disabled
+    set: {hammerspace.endpoint: https://x, controller.attacher.enabled: false}
+    asserts:
+      - notContains: {path: spec.template.spec.containers, content: {name: csi-attacher}, any: true}
+  - it: sets HS_TLS_VERIFY from values (default false)
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
+          content: {name: HS_TLS_VERIFY, value: "false"}
