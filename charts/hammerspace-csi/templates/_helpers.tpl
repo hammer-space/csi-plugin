@@ -23,3 +23,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" }}
 {{- define "hammerspace-csi.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
 {{- end -}}
+
+{{- define "hammerspace-csi.secretName" -}}
+{{- if .Values.hammerspace.secret.create -}}
+{{- default "com.hammerspace.csi.credentials" .Values.hammerspace.existingSecret -}}
+{{- else -}}
+{{ .Values.hammerspace.existingSecret }}
+{{- end -}}
+{{- end -}}
