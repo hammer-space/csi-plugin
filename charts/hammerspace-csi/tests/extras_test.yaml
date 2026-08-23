@@ -1,0 +1,82 @@
+suite: extras
+templates:
+  - templates/storageclass.yaml
+  - templates/volumesnapshotclass.yaml
+  - templates/servicemonitor.yaml
+tests:
+  - it: renders nothing by default
+    template: templates/storageclass.yaml
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders a StorageClass from the list
+    template: templates/storageclass.yaml
+    set:
+      hammerspace.endpoint: https://x
+      storageClasses:
+        - name: hs-nfs
+          isDefault: true
+          reclaimPolicy: Delete
+          allowVolumeExpansion: true
+          parameters: {fsType: nfs}
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: metadata.name, value: hs-nfs}
+      - equal: {path: provisioner, value: com.hammerspace.csi}
+      - equal:
+          path: metadata.annotations
+          value: {storageclass.kubernetes.io/is-default-class: "true"}
+      - equal: {path: reclaimPolicy, value: Delete}
+      - equal: {path: allowVolumeExpansion, value: true}
+  - it: renders one document per entry and omits the default annotation when isDefault is unset
+    template: templates/storageclass.yaml
+    set:
+      hammerspace.endpoint: https://x
+      storageClasses:
+        - name: hs-a
+          parameters: {fsType: nfs}
+        - name: hs-b
+          volumeBindingMode: WaitForFirstConsumer
+          parameters: {fsType: nfs}
+    asserts:
+      - hasDocuments: {count: 2}
+      - notExists: {path: metadata.annotations}
+  - it: renders nothing by default (volumesnapshotclass)
+    template: templates/volumesnapshotclass.yaml
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders a VolumeSnapshotClass when enabled
+    template: templates/volumesnapshotclass.yaml
+    set:
+      hammerspace.endpoint: https://x
+      snapshotClass.enabled: true
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: kind, value: VolumeSnapshotClass}
+      - equal: {path: driver, value: com.hammerspace.csi}
+      - equal: {path: deletionPolicy, value: Delete}
+  - it: renders nothing by default (servicemonitor)
+    template: templates/servicemonitor.yaml
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders nothing when enabled but the monitoring.coreos.com CRD API is absent
+    template: templates/servicemonitor.yaml
+    set:
+      hammerspace.endpoint: https://x
+      metrics.serviceMonitor.enabled: true
+    asserts:
+      - hasDocuments: {count: 0}
+  - it: renders a ServiceMonitor when enabled and the CRD API is present
+    template: templates/servicemonitor.yaml
+    set:
+      hammerspace.endpoint: https://x
+      metrics.serviceMonitor.enabled: true
+    capabilities:
+      apiVersions:
+        - monitoring.coreos.com/v1
+    asserts:
+      - hasDocuments: {count: 1}
+      - equal: {path: kind, value: ServiceMonitor}
+      - equal: {path: "spec.endpoints[0].port", value: metrics}

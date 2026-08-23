@@ -148,7 +148,22 @@
       }
     },
 
-    "storageClasses": {"type": "array"},
+    "storageClasses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "isDefault": {"type": "boolean"},
+          "reclaimPolicy": {"type": "string", "enum": ["Delete", "Retain"]},
+          "volumeBindingMode": {"type": "string", "enum": ["Immediate", "WaitForFirstConsumer"]},
+          "allowVolumeExpansion": {"type": "boolean"},
+          "mountOptions": {"type": "array", "items": {"type": "string"}},
+          "parameters": {"type": "object"}
+        }
+      }
+    },
 
     "snapshotClass": {
       "type": "object",

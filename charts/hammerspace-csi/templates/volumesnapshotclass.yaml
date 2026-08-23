@@ -1,0 +1,14 @@
+{{- if .Values.snapshotClass.enabled }}
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshotClass
+metadata:
+  name: {{ include "hammerspace-csi.fullname" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+driver: com.hammerspace.csi
+deletionPolicy: {{ .Values.snapshotClass.deletionPolicy }}
+{{- with .Values.snapshotClass.parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}

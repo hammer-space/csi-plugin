@@ -84,3 +84,5 @@ securityContext:
 storageClasses: []
 snapshotClass:
   enabled: false
+  deletionPolicy: Delete   # Options: Delete | Retain
+  parameters: {}

@@ -1,0 +1,21 @@
+{{- if and .Values.metrics.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hammerspace-csi.fullname" . }}
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+spec:
+  namespaceSelector:
+    matchNames:
+      - {{ include "hammerspace-csi.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "hammerspace-csi.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  endpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+{{- end }}
