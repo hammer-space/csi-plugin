@@ -1,0 +1,17 @@
+# CI preset exercising the storageClasses list with a block-device flavored
+# entry (mirrors deploy/kubernetes/example_storage_class_block_device.yaml).
+hammerspace:
+  endpoint: https://anvil.example.com
+
+storageClasses:
+  - name: hs-storage-block
+    isDefault: false
+    reclaimPolicy: Retain
+    volumeBindingMode: WaitForFirstConsumer
+    allowVolumeExpansion: true
+    parameters:
+      blockBackingShareName: k8s-block-storage
+      objectives: "keep-online"
+      volumeNameFormat: "csi-%s"
+      additionalMetadataTags: "storageClassName=hs-storage-block,fsType=block"
+      comment: "My share description"

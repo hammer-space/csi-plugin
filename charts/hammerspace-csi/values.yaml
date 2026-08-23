@@ -1,2 +1,86 @@
 # Default values for hammerspace-csi.
-# Expanded in Task 2.
+# Defaults preserve today's (pre-chart) driver behavior. See ci/hardened-values.yaml
+# for a preset that turns on every available hardening toggle.
+
+nameOverride: ""
+fullnameOverride: ""
+namespaceOverride: "kube-system"
+commonLabels: {}
+commonAnnotations: {}
+priorityClassName: ""
+
+image:
+  repository: hammerspaceinc/csi-plugin
+  tag: ""            # defaults to .Chart.AppVersion
+  pullPolicy: Always
+  pullSecrets: []
+
+hammerspace:
+  endpoint: ""       # required; also injectable via existing secret's "endpoint" key
+  tlsVerify: false   # PRESERVE TODAY. Set true (and provide CA) to harden.
+  logLevel: ""       # empty = driver default
+  dataPortalMountPrefix: ""
+  existingSecret: "com.hammerspace.csi.credentials"
+  secret:
+    create: false    # dev only; when true, renders a Secret from username/password/endpoint
+    username: ""
+    password: ""
+
+controller:
+  replicaCount: 1
+  resources: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  attacher:
+    enabled: true    # PRESERVE TODAY. Set false to drop the no-op attacher.
+  sidecars:
+    provisioner: {image: registry.k8s.io/sig-storage/csi-provisioner, tag: v3.6.0}
+    attacher:    {image: registry.k8s.io/sig-storage/csi-attacher, tag: v4.4.0}
+    snapshotter: {image: registry.k8s.io/sig-storage/csi-snapshotter, tag: v6.2.1}
+    resizer:     {image: registry.k8s.io/sig-storage/csi-resizer, tag: v1.10.1}
+
+node:
+  resources: {}
+  tolerations: []
+  kubeletDir: /var/lib/kubelet
+  registrar: {image: registry.k8s.io/sig-storage/csi-node-driver-registrar, tag: v2.9.0}
+
+csiDriver:
+  attachRequired: null   # null renders the field ABSENT (today's behavior -> defaults true)
+  fsGroupPolicy: ""      # empty renders field ABSENT (today's behavior)
+  podInfoOnMount: true
+  storageCapacity: true
+  requiresRepublish: true
+
+rbac:
+  create: true
+serviceAccount:
+  create: true
+  controllerName: csi-provisioner
+  nodeName: csi-node
+
+freezer:
+  enabled: true    # PRESERVE TODAY (grants pods/exec). Set false to drop it.
+
+metrics:
+  enabled: true
+  controllerPort: 9090
+  nodePort: 9091
+  tracesExporter: none
+  otlpEndpoint: ""
+  serviceMonitor:
+    enabled: false
+
+envConfig:
+  mountCheckTimeout: "30s"
+  unmountRetryCount: "5"
+  unmountRetryInterval: "1s"
+
+securityContext:
+  seccompProfile:
+    enabled: false
+
+storageClasses: []
+snapshotClass:
+  enabled: false

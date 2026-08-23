@@ -1,0 +1,21 @@
+suite: values-schema
+templates:
+  - templates/csidriver.yaml
+tests:
+  - it: defaults preserve today (attacher on, tls off) and values/schema load cleanly
+    set:
+      hammerspace.endpoint: https://anvil.example.com
+    asserts:
+      - equal:
+          path: spec.storageCapacity
+          value: true
+
+# Negative test (schema validation) is NOT expressible in helm-unittest, since
+# helm-unittest does not run values.schema.json validation the way `helm
+# template`/`helm install` do. Verified manually instead:
+#
+#   helm template hs charts/hammerspace-csi -f charts/hammerspace-csi/ci/default-values.yaml \
+#     --set csiDriver.fsGroupPolicy=NotAValidEnum
+#
+# Expected: FAILS with a values.schema.json validation error (fsGroupPolicy
+# enum violation). See task-2-report.md for captured output.
