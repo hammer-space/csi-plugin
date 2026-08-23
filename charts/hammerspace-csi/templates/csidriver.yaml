@@ -2,5 +2,17 @@ apiVersion: storage.k8s.io/v1
 kind: CSIDriver
 metadata:
   name: com.hammerspace.csi
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
 spec:
-  storageCapacity: true
+  podInfoOnMount: {{ .Values.csiDriver.podInfoOnMount }}
+  requiresRepublish: {{ .Values.csiDriver.requiresRepublish }}
+  storageCapacity: {{ .Values.csiDriver.storageCapacity }}
+  volumeLifecycleModes:
+    - Persistent
+  {{- if ne .Values.csiDriver.attachRequired nil }}
+  attachRequired: {{ .Values.csiDriver.attachRequired }}
+  {{- end }}
+  {{- if .Values.csiDriver.fsGroupPolicy }}
+  fsGroupPolicy: {{ .Values.csiDriver.fsGroupPolicy }}
+  {{- end }}

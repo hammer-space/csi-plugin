@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: csi-env-config
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+# Example: "300ms". Valid time units are "ns", "us" (or "µs"), "ms", "s", "m", "h".
+data:
+  MOUNT_CHECK_TIMEOUT: {{ .Values.envConfig.mountCheckTimeout | quote }}
+  UNMOUNT_RETRY_COUNT: {{ .Values.envConfig.unmountRetryCount | quote }}
+  UNMOUNT_RETRY_INTERVAL: {{ .Values.envConfig.unmountRetryInterval | quote }}
