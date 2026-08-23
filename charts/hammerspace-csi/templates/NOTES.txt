@@ -1,0 +1,55 @@
+Hammerspace CSI driver "{{ .Release.Name }}" installed into namespace "{{ include "hammerspace-csi.namespace" . }}".
+
+Configuration summary:
+  - Anvil endpoint:       {{ .Values.hammerspace.endpoint | default "(unset here — must come from the 'endpoint' key of the credentials Secret)" }}
+  - TLS verification:     {{ if .Values.hammerspace.tlsVerify }}ON{{ else }}OFF (today's default; see README.md "Defaults preserve today's behavior"){{ end }}
+  - csi-attacher sidecar: {{ if .Values.controller.attacher.enabled }}ON (controller.attacher.enabled=true){{ else }}OFF{{ end }}
+  - CSIDriver attachRequired: {{ if eq .Values.csiDriver.attachRequired nil }}<unset> (Kubernetes then defaults it to true){{ else }}{{ .Values.csiDriver.attachRequired }}{{ end }}
+
+{{- if .Values.hammerspace.secret.create }}
+
+hammerspace.secret.create=true rendered a Secret named
+"{{ include "hammerspace-csi.secretName" . }}" from hammerspace.secret.username /
+hammerspace.secret.password / hammerspace.endpoint. This is a dev/test
+convenience — for production, prefer an externally-managed Secret (set
+hammerspace.secret.create=false and hammerspace.existingSecret=<name>).
+{{- else }}
+
+This release expects a Secret named "{{ include "hammerspace-csi.secretName" . }}" to
+already exist in namespace "{{ include "hammerspace-csi.namespace" . }}" with the keys:
+  - username
+  - password
+  - endpoint
+
+If it doesn't exist yet, create it now:
+
+  kubectl create secret generic {{ include "hammerspace-csi.secretName" . }} \
+    --namespace {{ include "hammerspace-csi.namespace" . }} \
+    --from-literal=username='<PLACEHOLDER>' \
+    --from-literal=password='<PLACEHOLDER>' \
+    --from-literal=endpoint='https://<anvil>'
+
+Until it exists, the controller and node pods will fail to start
+(CreateContainerConfigError — the driver's env references this Secret's keys).
+{{- end }}
+
+IMMUTABILITY WARNING
+  CSIDriver.spec.attachRequired and CSIDriver.spec.fsGroupPolicy are IMMUTABLE
+  once the CSIDriver/com.hammerspace.csi object exists. Changing
+  csiDriver.attachRequired or csiDriver.fsGroupPolicy and running
+  `helm upgrade` will FAIL (the API server rejects the patch) — delete the
+  object first, then re-apply:
+
+    kubectl delete csidriver com.hammerspace.csi
+    helm upgrade {{ .Release.Name }} <chart> --namespace {{ include "hammerspace-csi.namespace" . }} --reuse-values
+
+  Deleting the CSIDriver object briefly stops kubelet from routing new mount
+  requests to the driver; already-mounted volumes are unaffected.
+
+  The controller StatefulSet's and node DaemonSet's spec.selector.matchLabels
+  are immutable too, but this chart does not expose them as values.
+
+Docs:
+  README.md    — full values reference, metrics/ServiceMonitor caveat
+  MIGRATION.md — migrating from the raw deploy/kubernetes/kubernetes-1.* manifests
+                 (do not run both against the same cluster)
