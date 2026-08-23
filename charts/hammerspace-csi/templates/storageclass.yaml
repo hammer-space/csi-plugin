@@ -27,7 +27,7 @@ reclaimPolicy: {{ . }}
 {{- with $sc.volumeBindingMode }}
 volumeBindingMode: {{ . }}
 {{- end }}
-{{- with $sc.allowVolumeExpansion }}
-allowVolumeExpansion: {{ . }}
+{{- if hasKey $sc "allowVolumeExpansion" }}
+allowVolumeExpansion: {{ $sc.allowVolumeExpansion }}
 {{- end }}
 {{- end }}

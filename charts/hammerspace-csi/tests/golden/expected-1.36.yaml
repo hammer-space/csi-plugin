@@ -9,7 +9,7 @@
 #   pushes both this file and the render through tests/golden/normalize.sh, and
 #   fails on ANY surviving difference.
 #
-# THE ONLY TOLERATED DIFFERENCE (reconciled, not a bug):
+# TOLERATED DIFFERENCE #1 — cosmetic labels (reconciled, not a bug):
 #   The chart adds four standard Helm/Kubernetes recommended labels to EVERY
 #   resource's top-level .metadata.labels:
 #       app.kubernetes.io/name         (= chart name)
@@ -17,7 +17,7 @@
 #       app.kubernetes.io/managed-by   (= "Helm")
 #       helm.sh/chart                  (= "<chart>-<version>")
 #   Rather than pollute this pristine manifest with those cosmetic labels on all
-#   12 resources, normalize.sh STRIPS exactly those four keys from .metadata.labels
+#   11 resources, normalize.sh STRIPS exactly those four keys from .metadata.labels
 #   before diffing (and drops the labels map if that empties it). Every resource
 #   in the shipped manifest therefore reconciles against the render:
 #       CSIDriver/com.hammerspace.csi                         (+4 cosmetic labels)
@@ -26,12 +26,22 @@
 #       ServiceAccount/csi-provisioner                        (+4 cosmetic labels)
 #       ClusterRole/csi-provisioner                           (+4 cosmetic labels)
 #       ClusterRoleBinding/csi-provisioner                    (+4 cosmetic labels)
-#       ClusterRoleBinding/csi-provisioner-volumeattachment-status-binding (+4 cosmetic labels)
 #       DaemonSet/csi-node                                    (+4 cosmetic labels)
 #       ServiceAccount/csi-node                               (+4 cosmetic labels)
 #       ClusterRole/csi-node                                  (+4 cosmetic labels)
 #       ClusterRoleBinding/csi-node                           (+4 cosmetic labels)
 #       ConfigMap/csi-env-config                              (+4 cosmetic labels)
+#
+# TOLERATED DIFFERENCE #2 — dropped dead RBAC binding (Task 12 adversarial review):
+#   The chart drops the broken no-op csi-provisioner-volumeattachment-status-binding;
+#   its intended volumeattachments/status permissions are already granted by the
+#   csi-provisioner ClusterRole; behavior unchanged. Because the chart no longer
+#   renders it, this reference manifest was edited to remove it too (it was the
+#   ONLY resource removed vs. the pristine plugin.yaml). The dead binding's
+#   roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status",
+#   which is defined nowhere — a RoleBinding to a non-existent role grants
+#   nothing. See tests/ADVERSARIAL-REVIEW.md and templates/rbac-controller.yaml.
+#
 #   NOTHING else differs. Functional labels/selectors (app: csi-provisioner on
 #   the Service metadata + selector, app: csi-node, all matchLabels and pod
 #   template labels) are preserved verbatim and are NOT stripped, so a genuine
@@ -501,20 +511,6 @@ roleRef:
   name: csi-node
   apiGroup: rbac.authorization.k8s.io
 
----
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: csi-provisioner-volumeattachment-status-binding
-  namespace: kube-system
-subjects:
-  - kind: ServiceAccount
-    name: csi-provisioner
-    namespace: kube-system
-roleRef:
-  kind: ClusterRole
-  name: csi-provisioner-volumeattachment-status
-  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap

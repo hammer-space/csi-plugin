@@ -28,7 +28,7 @@
         "tlsVerify": {"type": "boolean"},
         "logLevel": {"type": "string"},
         "dataPortalMountPrefix": {"type": "string"},
-        "existingSecret": {"type": "string"},
+        "existingSecret": {"type": "string", "minLength": 1},
         "secret": {
           "type": "object",
           "properties": {

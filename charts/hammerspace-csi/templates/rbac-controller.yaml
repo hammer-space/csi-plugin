@@ -82,21 +82,16 @@ roleRef:
   kind: ClusterRole
   name: csi-provisioner
   apiGroup: rbac.authorization.k8s.io
----
-# FIXME(adversarial-review): dangling roleRef — no such ClusterRole in chart or manifest
-kind: ClusterRoleBinding
-apiVersion: rbac.authorization.k8s.io/v1
-metadata:
-  name: csi-provisioner-volumeattachment-status-binding
-  namespace: {{ include "hammerspace-csi.namespace" . }}
-  labels:
-    {{- include "hammerspace-csi.labels" . | nindent 4 }}
-subjects:
-  - kind: ServiceAccount
-    name: {{ .Values.serviceAccount.controllerName }}
-    namespace: {{ include "hammerspace-csi.namespace" . }}
-roleRef:
-  kind: ClusterRole
-  name: csi-provisioner-volumeattachment-status
-  apiGroup: rbac.authorization.k8s.io
 {{- end }}
+{{/*
+  Adversarial review (Task 12): the shipped manifest also carried a
+  ClusterRoleBinding/csi-provisioner-volumeattachment-status-binding whose
+  roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status" —
+  a ClusterRole that is defined nowhere in the manifest or this chart. A
+  RoleBinding to a non-existent role grants nothing, so the binding was a
+  functional no-op. The permissions it intended (volumeattachments +
+  volumeattachments/status) are ALREADY granted by the csi-provisioner
+  ClusterRole above, which the csi-provisioner ServiceAccount is bound to via
+  the csi-provisioner binding. The chart therefore drops the dead binding;
+  behavior is unchanged. See tests/ADVERSARIAL-REVIEW.md.
+*/}}

@@ -14,7 +14,7 @@ spec:
       labels:
         app: csi-node
     spec:
-      serviceAccount: csi-node
+      serviceAccount: {{ .Values.serviceAccount.nodeName }}
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
@@ -102,11 +102,19 @@ spec:
               value: {{ .Values.hammerspace.tlsVerify | quote }}
             - name: CSI_MAJOR_VERSION
               value: "1"
+            {{- with .Values.hammerspace.dataPortalMountPrefix }}
+            - name: HS_DATA_PORTAL_MOUNT_PREFIX
+              value: {{ . | quote }}
+            {{- end }}
             # OTel toggles. hostNetwork=true means we bind directly to the
             # node's :9091 (must differ from controller's :9090 in case the
             # controller lands on the same node).
             - name: OTEL_TRACES_EXPORTER
               value: {{ .Values.metrics.tracesExporter | quote }}
+            {{- with .Values.metrics.otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: OTEL_METRICS_EXPORTER
               value: "prometheus"
@@ -156,6 +164,13 @@ spec:
             path: /tmp
       {{- with .Values.node.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      {{- with .Values.image.pullSecrets }}
+      imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if .Values.securityContext.seccompProfile.enabled }}

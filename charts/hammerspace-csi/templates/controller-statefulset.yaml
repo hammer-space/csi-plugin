@@ -16,7 +16,7 @@ spec:
       labels:
         app: csi-provisioner
     spec:
-      serviceAccountName: csi-provisioner
+      serviceAccountName: {{ .Values.serviceAccount.controllerName }}
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
@@ -111,10 +111,18 @@ spec:
               value: {{ .Values.hammerspace.tlsVerify | quote }}
             - name: CSI_MAJOR_VERSION
               value: "1"
+            {{- with .Values.hammerspace.dataPortalMountPrefix }}
+            - name: HS_DATA_PORTAL_MOUNT_PREFIX
+              value: {{ . | quote }}
+            {{- end }}
             # OTel toggles — Prometheus /metrics on :9090 (on by default). Set
             # OTEL_TRACES_EXPORTER=console/otlp to also emit spans (off by default).
             - name: OTEL_TRACES_EXPORTER
               value: {{ .Values.metrics.tracesExporter | quote }}
+            {{- with .Values.metrics.otlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
             {{- if .Values.metrics.enabled }}
             - name: OTEL_METRICS_EXPORTER
               value: "prometheus"
