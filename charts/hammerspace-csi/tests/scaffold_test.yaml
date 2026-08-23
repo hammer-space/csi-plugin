@@ -1,0 +1,13 @@
+suite: scaffold
+templates:
+  - templates/_helpers.tpl
+  - templates/csidriver.yaml
+tests:
+  - it: chart renders with default values and sets standard labels
+    templates:
+      - templates/csidriver.yaml
+    set:
+      hammerspace.endpoint: https://anvil.example.com
+    asserts:
+      - hasDocuments:
+          count: 1

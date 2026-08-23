@@ -33,3 +33,13 @@ build:
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
 	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
+
+CHART := charts/hammerspace-csi
+CI_VALUES := $(wildcard $(CHART)/ci/*-values.yaml)
+
+.PHONY: chart-test
+chart-test:
+	helm lint $(CHART)
+	helm unittest $(CHART)
+	@for v in $(CI_VALUES); do echo "== render $$v =="; \
+	  helm template hs $(CHART) -f $$v > /dev/null; done
