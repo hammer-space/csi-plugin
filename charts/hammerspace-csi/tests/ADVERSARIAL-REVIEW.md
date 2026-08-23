@@ -127,6 +127,9 @@ hardening toggles reduce the attack surface (see §3).
   commit, and it warrants its own reviewed task. Default is `{}` (no behavioral
   impact) and no test/consumer depends on it. **Recommendation:** either wire the
   symmetric helper or remove the knob from `values.yaml`/schema/README.
+  **Update (final-review fix wave):** the `values.yaml` comment now says
+  NOT YET IMPLEMENTED so the README stops overclaiming; wiring is still
+  deferred per above.
 
 ### F9 — `hammerspace.logLevel` is a dead knob — MEDIUM — DEFERRED
 - **Where:** `values.yaml:35`; consumed by no template.
@@ -140,8 +143,11 @@ hardening toggles reduce the attack surface (see §3).
   now would be speculative. Default is empty → no behavioral impact.
   **Recommendation:** wire `logLevel → LOG_LEVEL` in the same change that adds
   driver-side support, after the pending cluster validation.
+  **Update (final-review fix wave):** the `values.yaml` comment now says
+  NOT YET IMPLEMENTED so the README stops overclaiming; wiring is still
+  deferred per above.
 
-### F10 — Doc wording: freezer `pods/exec` is a controller grant, not "node ServiceAccount" — LOW — DEFERRED
+### F10 — Doc wording: freezer `pods/exec` is a controller grant, not "node ServiceAccount" — LOW — FIXED
 - **Where:** `values.yaml:113` (freezer comment), README rows generated from it
   (README `freezer.enabled`, "Common tweaks").
 - **Scenario:** The docs say `freezer.enabled` grants **the node ServiceAccount**
@@ -152,11 +158,10 @@ hardening toggles reduce the attack surface (see §3).
   controller SA's credentials — RBAC is about the caller, not the exec target).
   The grant location is correct; only the doc wording is wrong, so it could
   misdirect a least-privilege audit.
-- **Disposition — deferred (cosmetic):** Fixing the wording means editing the
-  `values.yaml` comment + `README.md.gotmpl` and regenerating the README, which
-  couples doc-generation churn into the RBAC-fix commit for no functional gain.
-  **Recommendation:** in a docs pass, change "node ServiceAccount" →
-  "controller ServiceAccount (`csi-provisioner` ClusterRole)".
+- **Disposition — fixed:** Fixed in the final-review fix wave. `values.yaml`'s
+  `freezer.enabled` comment and `README.md.gotmpl`'s "Common tweaks" row now
+  read "controller ClusterRole" instead of "node ServiceAccount"; README.md
+  was regenerated via `helm-docs`. Comment/doc-only change, no render impact.
 
 ### F11 — `node.kubeletDir` with a trailing slash yields `//` paths — LOW — ACCEPTED
 - **Where:** `templates/node-daemonset.yaml` (`{{ .Values.node.kubeletDir }}/...`

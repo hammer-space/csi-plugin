@@ -58,12 +58,12 @@ and how to work around it.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| commonAnnotations | object | `{}` | Extra annotations applied to every resource this chart renders. |
+| commonAnnotations | object | `{}` | NOT YET IMPLEMENTED: reserved for future use. No template currently consumes this value, so setting it has no effect on rendered resources. |
 | commonLabels | object | `{}` | Extra labels applied to every resource this chart renders. |
 | controller.affinity | object | `{}` | `affinity` for the controller StatefulSet. |
 | controller.attacher.enabled | bool | `true` | Run the `csi-attacher` sidecar on the controller. PRESERVES TODAY'S BEHAVIOR (on), matching `csiDriver.attachRequired` defaulting to `true`. Set `false` together with `csiDriver.attachRequired: false` to drop the no-op attacher (the driver has no volume-attach step). |
 | controller.nodeSelector | object | `{}` | `nodeSelector` for the controller StatefulSet. |
-| controller.replicaCount | int | `1` | Replica count for the controller StatefulSet. |
+| controller.replicaCount | int | `1` | Replica count for the controller StatefulSet. Keep at `1`: no sidecar runs with `--leader-election`, so multiple replicas would race each other rather than fail over cleanly. |
 | controller.resources | object | `{}` | Resource requests/limits for the controller's driver container. Empty preserves today's behavior (no requests/limits set). |
 | controller.sidecars.attacher.image | string | `"registry.k8s.io/sig-storage/csi-attacher"` |  |
 | controller.sidecars.attacher.tag | string | `"v4.4.0"` |  |
@@ -82,12 +82,12 @@ and how to work around it.
 | envConfig.mountCheckTimeout | string | `"30s"` | Timeout for the driver's mount-check probe. |
 | envConfig.unmountRetryCount | string | `"5"` | Number of unmount retries before the driver gives up. |
 | envConfig.unmountRetryInterval | string | `"1s"` | Delay between unmount retries. |
-| freezer.enabled | bool | `true` | Grant the node ServiceAccount `pods/exec` (needed for filesystem-freeze snapshot support). PRESERVES TODAY'S BEHAVIOR (on). Set `false` to drop the grant if freeze/snapshot isn't used. |
+| freezer.enabled | bool | `true` | Grant the controller ClusterRole `pods/exec` (needed for filesystem-freeze snapshot support). PRESERVES TODAY'S BEHAVIOR (on). Set `false` to drop the grant if freeze/snapshot isn't used. |
 | fullnameOverride | string | `""` | Override the fully-qualified app name used to build resource names. Defaults to the chart name. |
 | hammerspace.dataPortalMountPrefix | string | `""` | Optional prefix prepended to Data Portal mount paths. |
 | hammerspace.endpoint | string | `""` | Anvil management endpoint URL, e.g. `https://anvil.example.com`. Required unless supplied via the `endpoint` key of `hammerspace.existingSecret`. |
 | hammerspace.existingSecret | string | `"com.hammerspace.csi.credentials"` | Name of a pre-existing Secret holding `username`, `password`, and `endpoint` keys for Anvil auth. Used as-is unless `hammerspace.secret.create` is `true`. |
-| hammerspace.logLevel | string | `""` | Driver log level (e.g. `DEBUG`, `INFO`). Empty uses the driver's built-in default. |
+| hammerspace.logLevel | string | `""` | NOT YET IMPLEMENTED: reserved for future use. No template currently wires this into a driver env var, so setting it has no effect; the driver always uses its built-in default log level. |
 | hammerspace.secret.create | bool | `false` | Render a Secret from `username`/`password`/`endpoint` below instead of using `existingSecret`. Dev/test convenience only — prefer an externally-managed Secret in production. |
 | hammerspace.secret.password | string | `""` | Anvil password. Only used when `hammerspace.secret.create` is `true`. |
 | hammerspace.secret.username | string | `""` | Anvil username. Only used when `hammerspace.secret.create` is `true`. |
@@ -180,4 +180,4 @@ Opt-in hardening, once you've validated it against your cluster:
 | `controller.attacher.enabled` + `csiDriver.attachRequired` | Drop the no-op `csi-attacher` sidecar (set both to `false` together). |
 | `securityContext.seccompProfile.enabled` | Set `RuntimeDefault` seccomp on driver containers. |
 | `controller.resources` / `node.resources` | Set CPU/memory requests and limits on the driver containers. |
-| `freezer.enabled` | Set `false` to drop the node ServiceAccount's `pods/exec` grant if you don't use freeze/snapshot. |
+| `freezer.enabled` | Set `false` to drop the controller ClusterRole's `pods/exec` grant if you don't use freeze/snapshot. |

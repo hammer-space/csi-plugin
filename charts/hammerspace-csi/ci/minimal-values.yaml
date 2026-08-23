@@ -1,0 +1,4 @@
+# CI preset exercising the smallest valid install: only the required
+# hammerspace.endpoint value set, everything else left at chart defaults.
+hammerspace:
+  endpoint: https://anvil.example.com

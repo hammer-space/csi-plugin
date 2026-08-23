@@ -10,7 +10,8 @@ fullnameOverride: ""
 namespaceOverride: "kube-system"
 # -- Extra labels applied to every resource this chart renders.
 commonLabels: {}
-# -- Extra annotations applied to every resource this chart renders.
+# -- NOT YET IMPLEMENTED: reserved for future use. No template currently consumes this value, so
+# setting it has no effect on rendered resources.
 commonAnnotations: {}
 # -- `priorityClassName` applied to the controller and node pods.
 priorityClassName: ""
@@ -32,7 +33,8 @@ hammerspace:
   # -- Verify the Anvil TLS certificate. PRESERVES TODAY'S BEHAVIOR (off). Set `true` (and ensure the
   # Anvil cert is trusted) to harden.
   tlsVerify: false
-  # -- Driver log level (e.g. `DEBUG`, `INFO`). Empty uses the driver's built-in default.
+  # -- NOT YET IMPLEMENTED: reserved for future use. No template currently wires this into a driver
+  # env var, so setting it has no effect; the driver always uses its built-in default log level.
   logLevel: ""
   # -- Optional prefix prepended to Data Portal mount paths.
   dataPortalMountPrefix: ""
@@ -49,7 +51,8 @@ hammerspace:
     password: ""
 
 controller:
-  # -- Replica count for the controller StatefulSet.
+  # -- Replica count for the controller StatefulSet. Keep at `1`: no sidecar runs with
+  # `--leader-election`, so multiple replicas would race each other rather than fail over cleanly.
   replicaCount: 1
   # -- Resource requests/limits for the controller's driver container. Empty preserves today's
   # behavior (no requests/limits set).
@@ -110,7 +113,7 @@ serviceAccount:
   nodeName: csi-node
 
 freezer:
-  # -- Grant the node ServiceAccount `pods/exec` (needed for filesystem-freeze snapshot support).
+  # -- Grant the controller ClusterRole `pods/exec` (needed for filesystem-freeze snapshot support).
   # PRESERVES TODAY'S BEHAVIOR (on). Set `false` to drop the grant if freeze/snapshot isn't used.
   enabled: true
 

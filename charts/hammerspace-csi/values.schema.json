@@ -17,7 +17,15 @@
         "repository": {"type": "string"},
         "tag": {"type": "string"},
         "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]},
-        "pullSecrets": {"type": "array"}
+        "pullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"}
+            }
+          }
+        }
       }
     },
 
@@ -116,7 +124,7 @@
         "enabled": {"type": "boolean"},
         "controllerPort": {"type": "integer", "minimum": 1, "maximum": 65535},
         "nodePort": {"type": "integer", "minimum": 1, "maximum": 65535},
-        "tracesExporter": {"type": "string", "enum": ["none", "otlp"]},
+        "tracesExporter": {"type": "string", "enum": ["none", "console", "otlp"]},
         "otlpEndpoint": {"type": "string"},
         "serviceMonitor": {
           "type": "object",
@@ -168,7 +176,9 @@
     "snapshotClass": {
       "type": "object",
       "properties": {
-        "enabled": {"type": "boolean"}
+        "enabled": {"type": "boolean"},
+        "deletionPolicy": {"type": "string", "enum": ["Delete", "Retain"]},
+        "parameters": {"type": "object"}
       }
     }
   },

@@ -109,4 +109,4 @@ Opt-in hardening, once you've validated it against your cluster:
 | `controller.attacher.enabled` + `csiDriver.attachRequired` | Drop the no-op `csi-attacher` sidecar (set both to `false` together). |
 | `securityContext.seccompProfile.enabled` | Set `RuntimeDefault` seccomp on driver containers. |
 | `controller.resources` / `node.resources` | Set CPU/memory requests and limits on the driver containers. |
-| `freezer.enabled` | Set `false` to drop the node ServiceAccount's `pods/exec` grant if you don't use freeze/snapshot. |
+| `freezer.enabled` | Set `false` to drop the controller ClusterRole's `pods/exec` grant if you don't use freeze/snapshot. |

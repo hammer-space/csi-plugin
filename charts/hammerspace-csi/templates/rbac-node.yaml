@@ -15,7 +15,7 @@ rules:
   # credential Secret (get, not cluster-wide list). See deploy/kubernetes/SECRETS.md.
   - apiGroups: [""]
     resources: ["secrets"]
-    resourceNames: ["com.hammerspace.csi.credentials"]
+    resourceNames: [{{ include "hammerspace-csi.secretName" . | quote }}]
     verbs: ["get"]
   - apiGroups: [""]
     resources: ["nodes"]
