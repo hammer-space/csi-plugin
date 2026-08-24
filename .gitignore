@@ -12,4 +12,3 @@ vendor/
 .IDEA/
 .idea/
 .vscode
-go.sum

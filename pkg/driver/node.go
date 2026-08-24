@@ -17,6 +17,7 @@ limitations under the License.
 package driver
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -32,6 +33,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+)
+
+// Filesystem operations are variables so error paths that require kernel-level
+// failures (notably EIO from a shut-down XFS mount) can be regression tested.
+var (
+	statVolumePath     = os.Stat
+	lstatTargetPath    = os.Lstat
+	forceUnmountTarget = common.ForceUnmountFilesystem
 )
 
 func (d *CSIDriver) NodeGetInfo(ctx context.Context, req *csi.NodeGetInfoRequest) (*csi.NodeGetInfoResponse, error) {
@@ -81,8 +90,14 @@ func (d *CSIDriver) NodeGetVolumeStats(ctx context.Context, req *csi.NodeGetVolu
 	}
 
 	// Check if path exists
-	info, err := os.Stat(req.GetVolumePath())
+	info, err := statVolumePath(req.GetVolumePath())
 	if err != nil {
+		if errors.Is(err, syscall.EIO) {
+			log.Errorf("volume path is inaccessible due to an I/O error: %s, err: %v", req.GetVolumePath(), err)
+			return nil, status.Errorf(codes.Unavailable,
+				"volume path %s is inaccessible due to an I/O error; filesystem teardown and retry are required",
+				req.GetVolumePath())
+		}
 		log.Errorf("volume path not found: %s, err: %v", req.GetVolumePath(), err)
 		return nil, status.Error(codes.NotFound, common.VolumeNotFound)
 	}
@@ -385,10 +400,18 @@ func (d *CSIDriver) NodeUnpublishVolume(ctx context.Context, req *csi.NodeUnpubl
 	defer unlock()
 
 	targetPath := req.GetTargetPath()
-	fi, err := os.Lstat(targetPath)
+	fi, err := lstatTargetPath(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			log.Infof("target path does not exist on this host: %s", targetPath)
+			return &csi.NodeUnpublishVolumeResponse{}, nil
+		}
+		if errors.Is(err, syscall.EIO) {
+			log.Warnf("target path %s returned EIO; force-detaching shut-down filesystem", targetPath)
+			if unmountErr := forceUnmountTarget(targetPath); unmountErr != nil {
+				return nil, status.Errorf(codes.Internal,
+					"failed to clean up target path after I/O error: %v", unmountErr)
+			}
 			return &csi.NodeUnpublishVolumeResponse{}, nil
 		}
 		return nil, status.Errorf(codes.Internal, "error stating target path: %v", err)
