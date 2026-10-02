@@ -1,0 +1,129 @@
+{{- if .Values.rbac.create }}
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  {{- if .Values.freezer.enabled }}
+  # pods/exec: needed by the driver's Freezer to run `fsfreeze --freeze`
+  # inside the app pod holding a source volume during CreateSnapshot. Without
+  # this the driver falls back to snapshotting without quiescing, which for
+  # XFS can produce an inconsistent-log snapshot that log-recovery empties on
+  # restore. See pkg/driver/freezer.go.
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  {{- end }}
+  - apiGroups: [""]
+    resources: ["persistentvolumes"]
+    verbs: ["get", "patch", "list", "watch", "create", "delete", "update"]
+  - apiGroups: [""]
+    resources: ["persistentvolumeclaims", "persistentvolumeclaims/status"]
+    verbs: ["get", "patch", "list", "watch", "update"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch", "create", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["list", "watch", "create", "update", "delete", "get"]
+  # Least-privilege: the driver's Anvil credentials are injected into the pods by
+  # the kubelet via secretKeyRef, which needs no ServiceAccount RBAC. This grant is
+  # scoped to only the named credential Secret (get, not cluster-wide list) so a
+  # compromised provisioner ServiceAccount can't enumerate or read other Secrets.
+  # If you set per-volume secrets on a StorageClass
+  # (csi.storage.k8s.io/provisioner-secret-name), add those Secret name(s) here.
+  # See deploy/kubernetes/SECRETS.md.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: [{{ include "hammerspace-csi.secretName" . | quote }}]
+    verbs: ["get"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents"]
+    verbs: ["create", "get", "list", "watch", "update", "delete"]
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["create", "list", "watch", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["volumeattachments", "volumeattachments/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses"]
+    verbs: ["get", "list", "watch", "update"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.controllerName }}
+    namespace: {{ include "hammerspace-csi.namespace" . }}
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner
+  apiGroup: rbac.authorization.k8s.io
+---
+# Grants the csi-provisioner/external-snapshotter sidecar update/patch on
+# volumesnapshotcontents/status. Introduced in the v1.3.0 manifest, replacing
+# the earlier no-op csi-provisioner-volumeattachment-status-binding (see the
+# comment below and tests/ADVERSARIAL-REVIEW.md).
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status-binding
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.controllerName }}
+    namespace: {{ include "hammerspace-csi.namespace" . }}
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner-snapshot-content-status
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}
+{{/*
+  History (adversarial review, Task 12 → reconciled with v1.3.0 manifest):
+  Through v1.2.x the shipped manifest carried a dead
+  ClusterRoleBinding/csi-provisioner-volumeattachment-status-binding whose
+  roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status",
+  which was defined nowhere — a binding to a non-existent role grants nothing,
+  so it was a functional no-op (its intended volumeattachments/status perms are
+  already granted by the csi-provisioner ClusterRole above). The chart
+  originally dropped it. The v1.3.0 manifest instead REPURPOSED that binding
+  into the functional csi-provisioner-snapshot-content-status role+binding
+  rendered above (volumesnapshotcontents/status for the snapshotter sidecar),
+  so the chart now renders that real grant rather than dropping a dead one.
+*/}}

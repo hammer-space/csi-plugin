@@ -1,0 +1,33 @@
+{{- range $index, $sc := .Values.storageClasses }}
+{{- if $index }}
+---
+{{- end }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ $sc.name }}
+  labels:
+    {{- include "hammerspace-csi.labels" $ | nindent 4 }}
+  {{- if $sc.isDefault }}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+  {{- end }}
+provisioner: com.hammerspace.csi
+{{- with $sc.mountOptions }}
+mountOptions:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $sc.parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- with $sc.reclaimPolicy }}
+reclaimPolicy: {{ . }}
+{{- end }}
+{{- with $sc.volumeBindingMode }}
+volumeBindingMode: {{ . }}
+{{- end }}
+{{- if hasKey $sc "allowVolumeExpansion" }}
+allowVolumeExpansion: {{ $sc.allowVolumeExpansion }}
+{{- end }}
+{{- end }}

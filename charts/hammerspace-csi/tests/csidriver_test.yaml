@@ -1,0 +1,18 @@
+suite: csidriver
+templates:
+  - templates/csidriver.yaml
+tests:
+  - it: matches today by default (attachRequired + fsGroupPolicy absent)
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - equal: {path: metadata.name, value: com.hammerspace.csi}
+      - equal: {path: spec.podInfoOnMount, value: true}
+      - equal: {path: spec.requiresRepublish, value: true}
+      - equal: {path: spec.storageCapacity, value: true}
+      - notExists: {path: spec.attachRequired}
+      - notExists: {path: spec.fsGroupPolicy}
+  - it: renders attachRequired/fsGroupPolicy when set
+    set: {hammerspace.endpoint: https://x, csiDriver.attachRequired: false, csiDriver.fsGroupPolicy: File}
+    asserts:
+      - equal: {path: spec.attachRequired, value: false}
+      - equal: {path: spec.fsGroupPolicy, value: File}

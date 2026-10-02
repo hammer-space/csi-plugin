@@ -1,0 +1,36 @@
+# CI preset exercising every available hardening toggle. This is the ONLY
+# preset where all improvement toggles are turned on simultaneously; the
+# chart's own values.yaml defaults preserve today's (pre-chart) behavior.
+hammerspace:
+  endpoint: https://anvil.example.com
+  tlsVerify: true
+
+controller:
+  attacher:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+node:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 64Mi
+    limits:
+      cpu: 250m
+      memory: 128Mi
+
+csiDriver:
+  attachRequired: false
+
+freezer:
+  enabled: false
+
+securityContext:
+  seccompProfile:
+    enabled: true

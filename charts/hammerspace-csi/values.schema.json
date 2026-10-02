@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "title": "hammerspace-csi values",
+  "type": "object",
+  "required": ["image", "hammerspace"],
+  "properties": {
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "namespaceOverride": {"type": "string"},
+    "commonLabels": {"type": "object"},
+    "commonAnnotations": {"type": "object"},
+    "priorityClassName": {"type": "string"},
+
+    "image": {
+      "type": "object",
+      "properties": {
+        "repository": {"type": "string"},
+        "tag": {"type": "string"},
+        "pullPolicy": {"type": "string", "enum": ["Always", "IfNotPresent", "Never"]},
+        "pullSecrets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {"type": "string"}
+            }
+          }
+        }
+      }
+    },
+
+    "hammerspace": {
+      "type": "object",
+      "properties": {
+        "endpoint": {"type": "string"},
+        "tlsVerify": {"type": "boolean"},
+        "logLevel": {"type": "string", "enum": ["", "panic", "fatal", "error", "warn", "info", "debug", "trace"]},
+        "dataPortalMountPrefix": {"type": "string"},
+        "existingSecret": {"type": "string", "minLength": 1},
+        "secret": {
+          "type": "object",
+          "properties": {
+            "create": {"type": "boolean"},
+            "username": {"type": "string"},
+            "password": {"type": "string"}
+          }
+        }
+      }
+    },
+
+    "controller": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {"type": "integer", "minimum": 0},
+        "resources": {"type": "object"},
+        "nodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "affinity": {"type": "object"},
+        "attacher": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
+        "sidecars": {
+          "type": "object",
+          "properties": {
+            "provisioner": {"$ref": "#/definitions/sidecarImage"},
+            "attacher": {"$ref": "#/definitions/sidecarImage"},
+            "snapshotter": {"$ref": "#/definitions/sidecarImage"},
+            "resizer": {"$ref": "#/definitions/sidecarImage"}
+          }
+        }
+      }
+    },
+
+    "node": {
+      "type": "object",
+      "properties": {
+        "resources": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "kubeletDir": {"type": "string"},
+        "registrar": {"$ref": "#/definitions/sidecarImage"}
+      }
+    },
+
+    "csiDriver": {
+      "type": "object",
+      "properties": {
+        "attachRequired": {"type": ["boolean", "null"]},
+        "fsGroupPolicy": {"type": "string", "enum": ["", "None", "File", "ReadWriteOnceWithFSType"]},
+        "podInfoOnMount": {"type": "boolean"},
+        "storageCapacity": {"type": "boolean"},
+        "requiresRepublish": {"type": "boolean"}
+      }
+    },
+
+    "rbac": {
+      "type": "object",
+      "properties": {
+        "create": {"type": "boolean"}
+      }
+    },
+
+    "serviceAccount": {
+      "type": "object",
+      "properties": {
+        "create": {"type": "boolean"},
+        "controllerName": {"type": "string"},
+        "nodeName": {"type": "string"}
+      }
+    },
+
+    "freezer": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+
+    "metrics": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "controllerPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "nodePort": {"type": "integer", "minimum": 1, "maximum": 65535},
+        "tracesExporter": {"type": "string", "enum": ["none", "console", "otlp"]},
+        "otlpEndpoint": {"type": "string"},
+        "serviceMonitor": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        }
+      }
+    },
+
+    "envConfig": {
+      "type": "object",
+      "properties": {
+        "mountCheckTimeout": {"type": "string"},
+        "unmountRetryCount": {"type": "string"},
+        "unmountRetryInterval": {"type": "string"}
+      }
+    },
+
+    "securityContext": {
+      "type": "object",
+      "properties": {
+        "seccompProfile": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        }
+      }
+    },
+
+    "storageClasses": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name"],
+        "properties": {
+          "name": {"type": "string"},
+          "isDefault": {"type": "boolean"},
+          "reclaimPolicy": {"type": "string", "enum": ["Delete", "Retain"]},
+          "volumeBindingMode": {"type": "string", "enum": ["Immediate", "WaitForFirstConsumer"]},
+          "allowVolumeExpansion": {"type": "boolean"},
+          "mountOptions": {"type": "array", "items": {"type": "string"}},
+          "parameters": {"type": "object"}
+        }
+      }
+    },
+
+    "snapshotClass": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "deletionPolicy": {"type": "string", "enum": ["Delete", "Retain"]},
+        "parameters": {"type": "object"}
+      }
+    }
+  },
+  "definitions": {
+    "sidecarImage": {
+      "type": "object",
+      "properties": {
+        "image": {"type": "string"},
+        "tag": {"type": "string"},
+        "args": {"type": "array"}
+      }
+    }
+  }
+}

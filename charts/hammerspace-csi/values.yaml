@@ -1,0 +1,161 @@
+# Default values for hammerspace-csi.
+# Defaults preserve today's (pre-chart) driver behavior. See ci/hardened-values.yaml
+# for a preset that turns on every available hardening toggle.
+
+# -- Override the chart name used to build resource names (see `fullnameOverride`).
+nameOverride: ""
+# -- Override the fully-qualified app name used to build resource names. Defaults to the chart name.
+fullnameOverride: ""
+# -- Namespace the driver's resources are installed into. Set to `""` to install into `.Release.Namespace` instead.
+namespaceOverride: "kube-system"
+# -- Extra labels applied to every resource this chart renders.
+commonLabels: {}
+# -- NOT YET IMPLEMENTED: reserved for future use. No template currently consumes this value, so
+# setting it has no effect on rendered resources.
+commonAnnotations: {}
+# -- `priorityClassName` applied to the controller and node pods.
+priorityClassName: ""
+
+image:
+  # -- Driver image repository.
+  repository: hammerspaceinc/csi-plugin
+  # -- Driver image tag. Defaults to `.Chart.AppVersion` when empty.
+  tag: ""
+  # -- Image pull policy for the driver image.
+  pullPolicy: Always
+  # -- `imagePullSecrets` for the driver image.
+  pullSecrets: []
+
+hammerspace:
+  # -- Anvil management endpoint URL, e.g. `https://anvil.example.com`. Required unless supplied via
+  # the `endpoint` key of `hammerspace.existingSecret`.
+  endpoint: ""
+  # -- Verify the Anvil TLS certificate. PRESERVES TODAY'S BEHAVIOR (off). Set `true` (and ensure the
+  # Anvil cert is trusted) to harden.
+  tlsVerify: false
+  # -- Driver log verbosity, rendered as the `LOG_LEVEL` env var on both driver containers:
+  # `panic`, `fatal`, `error`, `warn`, `info`, `debug`, or `trace`. PRESERVES TODAY'S BEHAVIOR
+  # (`info`). `debug` logs every Anvil REST call — use it for troubleshooting, not steady-state
+  # operation. Set `""` to omit the env var and let the driver use its built-in default.
+  logLevel: "info"
+  # -- Optional prefix prepended to Data Portal mount paths.
+  dataPortalMountPrefix: ""
+  # -- Name of a pre-existing Secret holding `username`, `password`, and `endpoint` keys for Anvil auth.
+  # Used as-is unless `hammerspace.secret.create` is `true`.
+  existingSecret: "com.hammerspace.csi.credentials"
+  secret:
+    # -- Render a Secret from `username`/`password`/`endpoint` below instead of using `existingSecret`.
+    # Dev/test convenience only — prefer an externally-managed Secret in production.
+    create: false
+    # -- Anvil username. Only used when `hammerspace.secret.create` is `true`.
+    username: ""
+    # -- Anvil password. Only used when `hammerspace.secret.create` is `true`.
+    password: ""
+
+controller:
+  # -- Replica count for the controller StatefulSet. Keep at `1`: no sidecar runs with
+  # `--leader-election`, so multiple replicas would race each other rather than fail over cleanly.
+  replicaCount: 1
+  # -- Resource requests/limits for the controller's driver container. Empty preserves today's
+  # behavior (no requests/limits set).
+  resources: {}
+  # -- `nodeSelector` for the controller StatefulSet.
+  nodeSelector: {}
+  # -- `tolerations` for the controller StatefulSet.
+  tolerations: []
+  # -- `affinity` for the controller StatefulSet.
+  affinity: {}
+  attacher:
+    # -- Run the `csi-attacher` sidecar on the controller. PRESERVES TODAY'S BEHAVIOR (on), matching
+    # `csiDriver.attachRequired` defaulting to `true`. Set `false` together with
+    # `csiDriver.attachRequired: false` to drop the no-op attacher (the driver has no volume-attach step).
+    enabled: true
+  sidecars:
+    provisioner: {image: registry.k8s.io/sig-storage/csi-provisioner, tag: v3.6.0}
+    attacher:    {image: registry.k8s.io/sig-storage/csi-attacher, tag: v4.4.0}
+    snapshotter: {image: registry.k8s.io/sig-storage/csi-snapshotter, tag: v6.2.1}
+    resizer:     {image: registry.k8s.io/sig-storage/csi-resizer, tag: v1.10.1}
+
+node:
+  # -- Resource requests/limits for the node driver container. Empty preserves today's behavior
+  # (no requests/limits set).
+  resources: {}
+  # -- `tolerations` for the node DaemonSet.
+  tolerations: []
+  # -- Path to the kubelet's root directory on each node. Change only if kubelet is configured with a
+  # non-default `--root-dir`.
+  kubeletDir: /var/lib/kubelet
+  registrar: {image: registry.k8s.io/sig-storage/csi-node-driver-registrar, tag: v2.9.0}
+
+csiDriver:
+  # -- `CSIDriver.spec.attachRequired`. `null` omits the field (today's behavior; Kubernetes then
+  # defaults it to `true`). IMMUTABLE on the CSIDriver object once created — changing this on an
+  # existing release requires deleting the `CSIDriver/com.hammerspace.csi` object first.
+  attachRequired: null
+  # -- `CSIDriver.spec.fsGroupPolicy`. Empty omits the field (today's behavior). IMMUTABLE on the
+  # CSIDriver object once created — changing this on an existing release requires deleting the
+  # `CSIDriver/com.hammerspace.csi` object first.
+  fsGroupPolicy: ""
+  # -- `CSIDriver.spec.podInfoOnMount`.
+  podInfoOnMount: true
+  # -- `CSIDriver.spec.storageCapacity`.
+  storageCapacity: true
+  # -- `CSIDriver.spec.requiresRepublish`.
+  requiresRepublish: true
+
+rbac:
+  # -- Create the ClusterRoles/ClusterRoleBindings the driver needs.
+  create: true
+serviceAccount:
+  # -- Create the controller and node ServiceAccounts.
+  create: true
+  # -- Name of the controller ServiceAccount.
+  controllerName: csi-provisioner
+  # -- Name of the node ServiceAccount.
+  nodeName: csi-node
+
+freezer:
+  # -- Grant the controller ClusterRole `pods/exec` (needed for filesystem-freeze snapshot support).
+  # PRESERVES TODAY'S BEHAVIOR (on). Set `false` to drop the grant if freeze/snapshot isn't used.
+  enabled: true
+
+metrics:
+  # -- Expose Prometheus metrics via a `hostPort` on the controller and node containers.
+  enabled: true
+  # -- `hostPort`/listen port for controller metrics.
+  controllerPort: 9090
+  # -- `hostPort`/listen port for node metrics.
+  nodePort: 9091
+  # -- OpenTelemetry traces exporter (`none`, `console`, or `otlp`).
+  tracesExporter: none
+  # -- OTLP collector endpoint, used when `metrics.tracesExporter` is `otlp`.
+  otlpEndpoint: ""
+  serviceMonitor:
+    # -- Render a Prometheus Operator `ServiceMonitor`. NOTE: the driver exposes metrics via
+    # `hostPort` only (no metrics Service), so this alone will not let the ServiceMonitor discover
+    # any targets — see the README's metrics/ServiceMonitor caveat before enabling.
+    enabled: false
+
+envConfig:
+  # -- Timeout for the driver's mount-check probe.
+  mountCheckTimeout: "30s"
+  # -- Number of unmount retries before the driver gives up.
+  unmountRetryCount: "5"
+  # -- Delay between unmount retries.
+  unmountRetryInterval: "1s"
+
+securityContext:
+  seccompProfile:
+    # -- Set `securityContext.seccompProfile.type: RuntimeDefault` on driver containers. Off by
+    # default to preserve today's behavior; opt-in hardening.
+    enabled: false
+
+# -- Extra StorageClasses to render. See `ci/block-values.yaml` for an example entry.
+storageClasses: []
+snapshotClass:
+  # -- Render a VolumeSnapshotClass.
+  enabled: false
+  # -- `deletionPolicy` for the rendered VolumeSnapshotClass (`Delete` or `Retain`).
+  deletionPolicy: Delete
+  # -- Extra `parameters` for the rendered VolumeSnapshotClass.
+  parameters: {}

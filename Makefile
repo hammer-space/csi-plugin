@@ -33,3 +33,22 @@ build:
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
 	@docker build --build-arg version=${VERSION} -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
+
+CHART := charts/hammerspace-csi
+CI_VALUES := $(wildcard $(CHART)/ci/*-values.yaml)
+
+.PHONY: docs-check
+docs-check:
+	@echo "== helm-docs README drift check =="
+	@helm-docs --chart-search-root $(CHART) --dry-run 2>/dev/null | diff -u - $(CHART)/README.md || \
+	  { echo "$(CHART)/README.md is out of sync with README.md.gotmpl/values.yaml -- regenerate with: helm-docs --chart-search-root $(CHART)"; exit 1; }
+
+.PHONY: chart-test
+chart-test:
+	helm lint $(CHART)
+	helm unittest $(CHART)
+	@for v in $(CI_VALUES); do echo "== render $$v =="; \
+	  helm template hs $(CHART) -f $$v > /dev/null || exit 1; done
+	bash $(CHART)/tests/golden/run.sh
+	bash $(CHART)/tests/validate.sh
+	$(MAKE) docs-check
