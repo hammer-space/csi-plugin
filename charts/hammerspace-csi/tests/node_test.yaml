@@ -16,3 +16,9 @@ tests:
       - contains:
           path: spec.template.spec.volumes
           content: {name: mountpoint-dir, hostPath: {path: /data/kubelet/}}
+  - it: sets LOG_LEVEL=info on the node driver container by default
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-node")].env
+          content: {name: LOG_LEVEL, value: "info"}

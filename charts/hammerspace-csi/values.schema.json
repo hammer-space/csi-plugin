@@ -34,7 +34,7 @@
       "properties": {
         "endpoint": {"type": "string"},
         "tlsVerify": {"type": "boolean"},
-        "logLevel": {"type": "string"},
+        "logLevel": {"type": "string", "enum": ["", "panic", "fatal", "error", "warn", "info", "debug", "trace"]},
         "dataPortalMountPrefix": {"type": "string"},
         "existingSecret": {"type": "string", "minLength": 1},
         "secret": {

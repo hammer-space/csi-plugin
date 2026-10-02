@@ -82,16 +82,48 @@ roleRef:
   kind: ClusterRole
   name: csi-provisioner
   apiGroup: rbac.authorization.k8s.io
+---
+# Grants the csi-provisioner/external-snapshotter sidecar update/patch on
+# volumesnapshotcontents/status. Introduced in the v1.3.0 manifest, replacing
+# the earlier no-op csi-provisioner-volumeattachment-status-binding (see the
+# comment below and tests/ADVERSARIAL-REVIEW.md).
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status-binding
+  namespace: {{ include "hammerspace-csi.namespace" . }}
+  labels:
+    {{- include "hammerspace-csi.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.serviceAccount.controllerName }}
+    namespace: {{ include "hammerspace-csi.namespace" . }}
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner-snapshot-content-status
+  apiGroup: rbac.authorization.k8s.io
 {{- end }}
 {{/*
-  Adversarial review (Task 12): the shipped manifest also carried a
+  History (adversarial review, Task 12 → reconciled with v1.3.0 manifest):
+  Through v1.2.x the shipped manifest carried a dead
   ClusterRoleBinding/csi-provisioner-volumeattachment-status-binding whose
-  roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status" —
-  a ClusterRole that is defined nowhere in the manifest or this chart. A
-  RoleBinding to a non-existent role grants nothing, so the binding was a
-  functional no-op. The permissions it intended (volumeattachments +
-  volumeattachments/status) are ALREADY granted by the csi-provisioner
-  ClusterRole above, which the csi-provisioner ServiceAccount is bound to via
-  the csi-provisioner binding. The chart therefore drops the dead binding;
-  behavior is unchanged. See tests/ADVERSARIAL-REVIEW.md.
+  roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status",
+  which was defined nowhere — a binding to a non-existent role grants nothing,
+  so it was a functional no-op (its intended volumeattachments/status perms are
+  already granted by the csi-provisioner ClusterRole above). The chart
+  originally dropped it. The v1.3.0 manifest instead REPURPOSED that binding
+  into the functional csi-provisioner-snapshot-content-status role+binding
+  rendered above (volumesnapshotcontents/status for the snapshotter sidecar),
+  so the chart now renders that real grant rather than dropping a dead one.
 */}}

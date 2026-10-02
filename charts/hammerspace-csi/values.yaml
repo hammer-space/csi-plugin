@@ -33,9 +33,11 @@ hammerspace:
   # -- Verify the Anvil TLS certificate. PRESERVES TODAY'S BEHAVIOR (off). Set `true` (and ensure the
   # Anvil cert is trusted) to harden.
   tlsVerify: false
-  # -- NOT YET IMPLEMENTED: reserved for future use. No template currently wires this into a driver
-  # env var, so setting it has no effect; the driver always uses its built-in default log level.
-  logLevel: ""
+  # -- Driver log verbosity, rendered as the `LOG_LEVEL` env var on both driver containers:
+  # `panic`, `fatal`, `error`, `warn`, `info`, `debug`, or `trace`. PRESERVES TODAY'S BEHAVIOR
+  # (`info`). `debug` logs every Anvil REST call — use it for troubleshooting, not steady-state
+  # operation. Set `""` to omit the env var and let the driver use its built-in default.
+  logLevel: "info"
   # -- Optional prefix prepended to Data Portal mount paths.
   dataPortalMountPrefix: ""
   # -- Name of a pre-existing Secret holding `username`, `password`, and `endpoint` keys for Anvil auth.

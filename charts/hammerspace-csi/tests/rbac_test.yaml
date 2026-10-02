@@ -21,3 +21,23 @@ tests:
       - notContains:
           path: rules
           content: {apiGroups: [""], resources: ["pods/exec"], verbs: ["create"]}
+  - it: renders the snapshot-content-status ClusterRole for the snapshotter sidecar (v1.3.0)
+    set: {hammerspace.endpoint: https://x}
+    documentSelector: {path: metadata.name, value: csi-provisioner-snapshot-content-status}
+    asserts:
+      - equal: {path: kind, value: ClusterRole}
+      - contains:
+          path: rules
+          content: {apiGroups: ["snapshot.storage.k8s.io"], resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"], verbs: ["get", "list", "watch", "update", "patch"]}
+          any: true
+  - it: binds snapshot-content-status to the controller SA, threading a custom SA name
+    set: {hammerspace.endpoint: https://x, serviceAccount.controllerName: my-provisioner-sa}
+    documentSelector: {path: metadata.name, value: csi-provisioner-snapshot-content-status-binding}
+    asserts:
+      - equal: {path: kind, value: ClusterRoleBinding}
+      - equal: {path: roleRef.name, value: csi-provisioner-snapshot-content-status}
+      - equal: {path: "subjects[0].name", value: my-provisioner-sa}
+  - it: renders no RBAC documents when rbac.create is false
+    set: {hammerspace.endpoint: https://x, rbac.create: false}
+    asserts:
+      - hasDocuments: {count: 0}

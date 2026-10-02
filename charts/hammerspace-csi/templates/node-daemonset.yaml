@@ -102,6 +102,13 @@ spec:
               value: {{ .Values.hammerspace.tlsVerify | quote }}
             - name: CSI_MAJOR_VERSION
               value: "1"
+            {{- with .Values.hammerspace.logLevel }}
+            # Log verbosity: panic, fatal, error, warn, info, debug, trace.
+            # debug logs every Anvil REST call — use it for troubleshooting,
+            # not steady-state operation.
+            - name: LOG_LEVEL
+              value: {{ . | quote }}
+            {{- end }}
             {{- with .Values.hammerspace.dataPortalMountPrefix }}
             - name: HS_DATA_PORTAL_MOUNT_PREFIX
               value: {{ . | quote }}

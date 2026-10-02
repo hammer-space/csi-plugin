@@ -2,12 +2,12 @@
 # expected-1.36.yaml — GOLDEN reference for the chart's default render.
 #
 # DERIVATION (source of truth):
-#   This file is a PRISTINE copy of deploy/kubernetes/kubernetes-1.36/plugin.yaml
-#   (the shipped Kubernetes 1.36 manifest). It is intentionally NOT generated
-#   from the chart's own render — that would be circular. tests/golden/run.sh
-#   renders the chart with ci/default-values.yaml (namespace kube-system),
-#   pushes both this file and the render through tests/golden/normalize.sh, and
-#   fails on ANY surviving difference.
+#   This file is a PRISTINE, VERBATIM copy of
+#   deploy/kubernetes/kubernetes-1.36/plugin.yaml (the shipped Kubernetes 1.36
+#   manifest, v1.3.0). It is intentionally NOT generated from the chart's own
+#   render — that would be circular. tests/golden/run.sh renders the chart with
+#   ci/default-values.yaml (namespace kube-system), pushes both this file and the
+#   render through tests/golden/normalize.sh, and fails on ANY surviving difference.
 #
 # TOLERATED DIFFERENCE #1 — cosmetic labels (reconciled, not a bug):
 #   The chart adds four standard Helm/Kubernetes recommended labels to EVERY
@@ -17,35 +17,37 @@
 #       app.kubernetes.io/managed-by   (= "Helm")
 #       helm.sh/chart                  (= "<chart>-<version>")
 #   Rather than pollute this pristine manifest with those cosmetic labels on all
-#   11 resources, normalize.sh STRIPS exactly those four keys from .metadata.labels
+#   13 resources, normalize.sh STRIPS exactly those four keys from .metadata.labels
 #   before diffing (and drops the labels map if that empties it). Every resource
 #   in the shipped manifest therefore reconciles against the render:
-#       CSIDriver/com.hammerspace.csi                         (+4 cosmetic labels)
-#       Service/csi-provisioner                               (+4 cosmetic labels; keeps app: csi-provisioner)
-#       StatefulSet/csi-provisioner                           (+4 cosmetic labels)
-#       ServiceAccount/csi-provisioner                        (+4 cosmetic labels)
-#       ClusterRole/csi-provisioner                           (+4 cosmetic labels)
-#       ClusterRoleBinding/csi-provisioner                    (+4 cosmetic labels)
-#       DaemonSet/csi-node                                    (+4 cosmetic labels)
-#       ServiceAccount/csi-node                               (+4 cosmetic labels)
-#       ClusterRole/csi-node                                  (+4 cosmetic labels)
-#       ClusterRoleBinding/csi-node                           (+4 cosmetic labels)
-#       ConfigMap/csi-env-config                              (+4 cosmetic labels)
+#       CSIDriver/com.hammerspace.csi                              (+4 cosmetic labels)
+#       Service/csi-provisioner                                    (+4 cosmetic labels; keeps app: csi-provisioner)
+#       StatefulSet/csi-provisioner                                (+4 cosmetic labels)
+#       ServiceAccount/csi-provisioner                             (+4 cosmetic labels)
+#       ClusterRole/csi-provisioner                                (+4 cosmetic labels)
+#       ClusterRoleBinding/csi-provisioner                         (+4 cosmetic labels)
+#       ClusterRole/csi-provisioner-snapshot-content-status        (+4 cosmetic labels)
+#       ClusterRoleBinding/csi-provisioner-snapshot-content-status-binding (+4 cosmetic labels)
+#       DaemonSet/csi-node                                         (+4 cosmetic labels)
+#       ServiceAccount/csi-node                                    (+4 cosmetic labels)
+#       ClusterRole/csi-node                                       (+4 cosmetic labels)
+#       ClusterRoleBinding/csi-node                                (+4 cosmetic labels)
+#       ConfigMap/csi-env-config                                   (+4 cosmetic labels)
 #
-# TOLERATED DIFFERENCE #2 — dropped dead RBAC binding (Task 12 adversarial review):
-#   The chart drops the broken no-op csi-provisioner-volumeattachment-status-binding;
-#   its intended volumeattachments/status permissions are already granted by the
-#   csi-provisioner ClusterRole; behavior unchanged. Because the chart no longer
-#   renders it, this reference manifest was edited to remove it too (it was the
-#   ONLY resource removed vs. the pristine plugin.yaml). The dead binding's
-#   roleRef pointed at ClusterRole "csi-provisioner-volumeattachment-status",
-#   which is defined nowhere — a RoleBinding to a non-existent role grants
-#   nothing. See tests/ADVERSARIAL-REVIEW.md and templates/rbac-controller.yaml.
+# NO OTHER DIFFERENCE. This is a verbatim copy with no resource added or removed.
+#   History: through v1.2.x the manifest carried a dead no-op
+#   csi-provisioner-volumeattachment-status-binding (roleRef to a ClusterRole
+#   defined nowhere). The chart originally dropped it (Task 12 adversarial
+#   review). The v1.3.0 manifest instead REPURPOSED it into the functional
+#   ClusterRole/ClusterRoleBinding csi-provisioner-snapshot-content-status
+#   (volumesnapshotcontents/status for the snapshotter sidecar), which the chart
+#   now renders — so the two sides match verbatim again, with no removed resource.
+#   See tests/ADVERSARIAL-REVIEW.md and templates/rbac-controller.yaml.
 #
-#   NOTHING else differs. Functional labels/selectors (app: csi-provisioner on
-#   the Service metadata + selector, app: csi-node, all matchLabels and pod
-#   template labels) are preserved verbatim and are NOT stripped, so a genuine
-#   functional change still fails the gate.
+#   Functional labels/selectors (app: csi-provisioner on the Service metadata +
+#   selector, app: csi-node, all matchLabels and pod-template labels) and the
+#   LOG_LEVEL env added in v1.3.0 are preserved verbatim and are NOT stripped, so
+#   a genuine functional change still fails the gate.
 #
 # If you intentionally change the shipped manifest, re-copy it here (keeping this
 # header) and confirm run.sh is green again.
@@ -208,6 +210,11 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # Log verbosity: panic, fatal, error, warn, info, debug, trace.
+            # debug logs every Anvil REST call — use it for troubleshooting,
+            # not steady-state operation.
+            - name: LOG_LEVEL
+              value: "info"
             # OTel toggles — Prometheus /metrics on :9090 (on by default). Set
             # OTEL_TRACES_EXPORTER=console/otlp to also emit spans (off by default).
             - name: OTEL_TRACES_EXPORTER
@@ -414,6 +421,11 @@ spec:
               value: "false"
             - name: CSI_MAJOR_VERSION
               value: "1"
+            # Log verbosity: panic, fatal, error, warn, info, debug, trace.
+            # debug logs every Anvil REST call — use it for troubleshooting,
+            # not steady-state operation.
+            - name: LOG_LEVEL
+              value: "info"
             # OTel toggles. hostNetwork=true means we bind directly to the
             # node's :9091 (must differ from controller's :9090 in case the
             # controller lands on the same node).
@@ -511,6 +523,29 @@ roleRef:
   name: csi-node
   apiGroup: rbac.authorization.k8s.io
 
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshotcontents", "volumesnapshotcontents/status"]
+    verbs: ["get", "list", "watch", "update", "patch"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: csi-provisioner-snapshot-content-status-binding
+  namespace: kube-system
+subjects:
+  - kind: ServiceAccount
+    name: csi-provisioner
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: csi-provisioner-snapshot-content-status
+  apiGroup: rbac.authorization.k8s.io
 ---
 apiVersion: v1
 kind: ConfigMap

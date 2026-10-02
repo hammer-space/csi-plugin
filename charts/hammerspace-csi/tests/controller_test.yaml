@@ -20,3 +20,27 @@ tests:
       - contains:
           path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
           content: {name: HS_TLS_VERIFY, value: "false"}
+  - it: sets LOG_LEVEL=info on the driver container by default
+    set: {hammerspace.endpoint: https://x}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
+          content: {name: LOG_LEVEL, value: "info"}
+  - it: honors a custom logLevel
+    set: {hammerspace.endpoint: https://x, hammerspace.logLevel: debug}
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
+          content: {name: LOG_LEVEL, value: "debug"}
+  - it: omits LOG_LEVEL when logLevel is empty (driver uses its built-in default)
+    # With logLevel="" the only value the template could emit is "" (via the
+    # {{- with }} guard failing open), so asserting neither "info" nor "" is
+    # present proves the env var is omitted entirely.
+    set: {hammerspace.endpoint: https://x, hammerspace.logLevel: ""}
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
+          content: {name: LOG_LEVEL, value: "info"}
+      - notContains:
+          path: spec.template.spec.containers[?(@.name=="hs-csi-plugin-controller")].env
+          content: {name: LOG_LEVEL, value: ""}

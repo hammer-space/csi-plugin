@@ -87,7 +87,7 @@ and how to work around it.
 | hammerspace.dataPortalMountPrefix | string | `""` | Optional prefix prepended to Data Portal mount paths. |
 | hammerspace.endpoint | string | `""` | Anvil management endpoint URL, e.g. `https://anvil.example.com`. Required unless supplied via the `endpoint` key of `hammerspace.existingSecret`. |
 | hammerspace.existingSecret | string | `"com.hammerspace.csi.credentials"` | Name of a pre-existing Secret holding `username`, `password`, and `endpoint` keys for Anvil auth. Used as-is unless `hammerspace.secret.create` is `true`. |
-| hammerspace.logLevel | string | `""` | NOT YET IMPLEMENTED: reserved for future use. No template currently wires this into a driver env var, so setting it has no effect; the driver always uses its built-in default log level. |
+| hammerspace.logLevel | string | `"info"` | Driver log verbosity, rendered as the `LOG_LEVEL` env var on both driver containers: `panic`, `fatal`, `error`, `warn`, `info`, `debug`, or `trace`. PRESERVES TODAY'S BEHAVIOR (`info`). `debug` logs every Anvil REST call — use it for troubleshooting, not steady-state operation. Set `""` to omit the env var and let the driver use its built-in default. |
 | hammerspace.secret.create | bool | `false` | Render a Secret from `username`/`password`/`endpoint` below instead of using `existingSecret`. Dev/test convenience only — prefer an externally-managed Secret in production. |
 | hammerspace.secret.password | string | `""` | Anvil password. Only used when `hammerspace.secret.create` is `true`. |
 | hammerspace.secret.username | string | `""` | Anvil username. Only used when `hammerspace.secret.create` is `true`. |

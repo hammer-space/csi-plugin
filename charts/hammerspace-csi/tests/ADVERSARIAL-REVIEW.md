@@ -30,11 +30,19 @@ hardening toggles reduce the attack surface (see §3).
   which the `csi-provisioner` ServiceAccount is bound to via the working
   `csi-provisioner` binding. Verified in the rendered controller ClusterRole
   before removal.
-- **Fix:** Removed the dead binding from the template and from
-  `expected-1.36.yaml`; documented as the one intentional divergence in that
-  file's header ("chart drops the broken no-op ...; permissions already granted
-  by the csi-provisioner ClusterRole; behavior unchanged"). Behavior unchanged —
-  golden gate stays green.
+- **Fix (original, vs v1.2.x manifest):** Removed the dead binding from the
+  template and from `expected-1.36.yaml`; documented as the one intentional
+  divergence in that file's header. Behavior unchanged — golden gate stayed green.
+- **v1.3.0 reconciliation (superseded):** When the branch was rebased onto the
+  v1.3.0 `master`, the shipped manifest had itself **repurposed** this binding
+  into a *functional* `ClusterRole`/`ClusterRoleBinding`
+  `csi-provisioner-snapshot-content-status` (grants
+  `volumesnapshotcontents` + `/status: get,list,watch,update,patch` to the
+  snapshotter sidecar). The chart now **renders** that real grant rather than
+  dropping a dead one, so there is no longer any removed resource:
+  `expected-1.36.yaml` is a verbatim copy of the manifest again. The original
+  finding stands for v1.2.x; v1.3.0 fixed the same bug a better way. Covered by
+  new `rbac_test.yaml` cases.
 
 ### F2 — `serviceAccount.controllerName`/`nodeName` overrides silently break RBAC — HIGH — FIXED
 - **Where:** `templates/controller-statefulset.yaml:19` (`serviceAccountName`),
@@ -131,21 +139,24 @@ hardening toggles reduce the attack surface (see §3).
   NOT YET IMPLEMENTED so the README stops overclaiming; wiring is still
   deferred per above.
 
-### F9 — `hammerspace.logLevel` is a dead knob — MEDIUM — DEFERRED
-- **Where:** `values.yaml:35`; consumed by no template.
-- **Scenario:** Documented "Driver log level (e.g. DEBUG, INFO)," but no
-  `LOG_LEVEL`/log-level env var is set on the containers.
-- **Disposition — deferred (non-blocking):** The driver currently reads **no**
-  log-level env var (`grep os.Getenv` over `pkg/`+`main.go` shows none), so there
-  is nothing correct to wire it to yet. Per the project's own
-  `csi-log-level-validation-pending` note, the LOG_LEVEL change is explicitly
-  gated on comparing INFO vs DEBUG on a real cluster before shipping. Wiring it
-  now would be speculative. Default is empty → no behavioral impact.
-  **Recommendation:** wire `logLevel → LOG_LEVEL` in the same change that adds
-  driver-side support, after the pending cluster validation.
-  **Update (final-review fix wave):** the `values.yaml` comment now says
-  NOT YET IMPLEMENTED so the README stops overclaiming; wiring is still
-  deferred per above.
+### F9 — `hammerspace.logLevel` is a dead knob — MEDIUM — FIXED (v1.3.0 re-sync)
+- **Where:** `values.yaml` (`hammerspace.logLevel`); now consumed by
+  `controller-statefulset.yaml` + `node-daemonset.yaml`.
+- **Scenario (original):** Documented a driver log level, but no `LOG_LEVEL` env
+  var was set on the containers, so the knob was inert.
+- **Original disposition (superseded) — deferred:** At the time the driver read
+  no log-level env var, and the `csi-log-level-validation-pending` note gated a
+  LOG_LEVEL *default change* on real-cluster INFO-vs-DEBUG comparison, so wiring
+  it would have been speculative.
+- **Resolution (v1.3.0 re-sync):** The v1.3.0 manifest itself now ships
+  `LOG_LEVEL=info` on both driver containers, so the knob mirrors a real,
+  already-shipped default rather than a speculative one. This change wires
+  `hammerspace.logLevel → LOG_LEVEL` (guarded by `{{- with }}`, so an empty value
+  omits the env var), defaults it to `info`, tightens the schema to the documented
+  level enum, regenerates the README, and adds helm-unittest coverage (controller
+  default/custom/omit + node default). The earlier validation concern was about
+  the driver's own default-change decision (#70); the chart simply ports what
+  v1.3.0 already ships.
 
 ### F10 — Doc wording: freezer `pods/exec` is a controller grant, not "node ServiceAccount" — LOW — FIXED
 - **Where:** `values.yaml:113` (freezer comment), README rows generated from it
@@ -270,11 +281,13 @@ F4-dimension docs above.
 `ci/*` presets — green after fixes.
 
 ### 8. Drift from tested manifest — PASS
-Golden gate green. After the F1 removal, the render's only remaining divergences
-from the raw `plugin.yaml` are (a) the four documented cosmetic
-`app.kubernetes.io/*` + `helm.sh/chart` labels (stripped by `normalize.sh`), and
-(b) the removed dead binding (removed from `expected-1.36.yaml` too and documented
-in its header). No functional drift.
+Golden gate green against the **v1.3.0** `plugin.yaml` (re-synced on rebase:
+`LOG_LEVEL=info` on both containers + the `csi-provisioner-snapshot-content-status`
+role/binding). After the v1.3.0 reconciliation of F1, the render's only remaining
+divergence from the raw `plugin.yaml` is the four documented cosmetic
+`app.kubernetes.io/*` + `helm.sh/chart` labels (stripped by `normalize.sh`);
+`expected-1.36.yaml` is otherwise a verbatim copy (no resource added or removed).
+No functional drift.
 
 ---
 
@@ -307,7 +320,7 @@ in its header). No functional drift.
 7. **F7** `hammerspace.existingSecret` given `"minLength": 1` in the schema.
 8. `storageclass.yaml` `allowVolumeExpansion` `with`→`hasKey`.
 
-Deferred: **F8** (`commonAnnotations` dead knob), **F9** (`logLevel` dead knob,
-gated on cluster validation), **F10** (freezer doc wording), **F11**
-(`kubeletDir` trailing slash) — all non-blocking, defaults have no behavioral
-impact, recommendations recorded above.
+Deferred: **F8** (`commonAnnotations` dead knob), **F10** (freezer doc wording),
+**F11** (`kubeletDir` trailing slash) — all non-blocking, defaults have no
+behavioral impact, recommendations recorded above. (**F9** `logLevel` was wired
+up in the v1.3.0 re-sync — see F9 above, now FIXED.)
