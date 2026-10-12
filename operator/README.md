@@ -54,6 +54,10 @@ The Operator's Kubernetes RBAC includes the explicit permissions delegated to
 the driver roles, because the API server checks these when it creates those
 roles. It does not receive an unrestricted RBAC `escalate` grant. Its code limits
 management and deletion to the declared Operator-owned operands.
+`config/rbac.yaml` is maintained by hand, so `generate-operands` checks that its
+ClusterRole holds every permission granted by the operand ClusterRoles in
+`plugin.yaml`. The check runs on every `make generate`, `make build`,
+`make test` and image build, and fails with the missing grants listed.
 
 **Host ports.** Both operands use `hostNetwork`, so their ports open on each
 node's IP: controller metrics `9090` and liveness `29791`, node metrics `9091`

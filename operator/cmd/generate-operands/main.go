@@ -16,6 +16,7 @@ func main() {
 	output := flag.String("output", "internal/operator/operands.json", "generated embedded template")
 	imagesOutput := flag.String("images-output", "config/development-images.json", "generated development image inventory")
 	manager := flag.String("manager", "config/manager.yaml", "manager manifest whose image defaults are synchronized")
+	rbac := flag.String("rbac", "config/rbac.yaml", "operator RBAC that must cover every operand ClusterRole rule")
 	check := flag.Bool("check", false, "fail if the embedded template is stale, without changing files")
 	flag.Parse()
 	if err := run(*source, *output, *check); err != nil {
@@ -26,6 +27,25 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	// Runs on every generate, build, test, and image build, so a driver RBAC
+	// change in plugin.yaml cannot ship without the matching rbac.yaml grant.
+	if err := checkRBAC(*output, *rbac); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func checkRBAC(operands, rbac string) error {
+	data, err := os.ReadFile(operands)
+	if err != nil {
+		return err
+	}
+	f, err := os.Open(rbac)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return manifests.CheckDelegatedRBAC(data, f)
 }
 
 func syncImages(operands, imagesOutput, manager string, check bool) error {
