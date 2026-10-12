@@ -15,8 +15,12 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/util/csaupgrade"
 )
+
+const fieldManager = "hammerspace-csi-operator"
 
 type Reconciler struct {
 	Client dynamic.Interface
@@ -181,7 +185,7 @@ func (r *Reconciler) workloadFailure(ctx context.Context, o *unstructured.Unstru
 func (r *Reconciler) apply(ctx context.Context, cr, desired *unstructured.Unstructured) error {
 	current, err := r.resource(desired).Get(ctx, desired.GetName(), metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
-		_, err = r.resource(desired).Create(ctx, desired, metav1.CreateOptions{FieldManager: "hammerspace-csi-operator"})
+		_, err = r.resource(desired).Create(ctx, desired, metav1.CreateOptions{FieldManager: fieldManager})
 		return err // AlreadyExists is retried with ownership checking next time.
 	}
 	if err != nil {
@@ -189,6 +193,9 @@ func (r *Reconciler) apply(ctx context.Context, cr, desired *unstructured.Unstru
 	}
 	if !ownedBy(current, cr) {
 		return fmt.Errorf("ownership changed for %s %s", desired.GetKind(), desired.GetName())
+	}
+	if current, err = r.upgradeManagedFields(ctx, current); err != nil {
+		return err
 	}
 	// The UID stops a delete/recreate between GET and PATCH from adopting an
 	// unrelated replacement with the same name: metadata.uid is immutable, so
@@ -203,8 +210,31 @@ func (r *Reconciler) apply(ctx context.Context, cr, desired *unstructured.Unstru
 		return err
 	}
 	force := true // Only fields of resources already owned by this CR.
-	_, err = r.resource(desired).Patch(ctx, desired.GetName(), types.ApplyPatchType, b, metav1.PatchOptions{FieldManager: "hammerspace-csi-operator", Force: &force})
+	_, err = r.resource(desired).Patch(ctx, desired.GetName(), types.ApplyPatchType, b, metav1.PatchOptions{FieldManager: fieldManager, Force: &force})
 	return err
+}
+
+// upgradeManagedFields hands fields this Operator set with a plain create or
+// update over to its server-side apply manager. Server-side apply only removes
+// fields its own Apply entry owns, so without this a field dropped from the
+// manifest stays behind. Changing a list item's key, such as a port number,
+// then leaves the old item next to the new one, and the API server rejects
+// the duplicate port name. Earlier releases created every operand that way.
+func (r *Reconciler) upgradeManagedFields(ctx context.Context, current *unstructured.Unstructured) (*unstructured.Unstructured, error) {
+	const attempts = 3 // The patch tests resourceVersion, which workload status updates keep moving.
+	for i := 0; ; i++ {
+		patch, err := csaupgrade.UpgradeManagedFieldsPatch(current, sets.New(fieldManager), fieldManager)
+		if err != nil || patch == nil {
+			return current, err
+		}
+		upgraded, err := r.resource(current).Patch(ctx, current.GetName(), types.JSONPatchType, patch, metav1.PatchOptions{})
+		if err == nil || i+1 == attempts {
+			return upgraded, err
+		}
+		if current, err = r.resource(current).Get(ctx, current.GetName(), metav1.GetOptions{}); err != nil {
+			return nil, err
+		}
+	}
 }
 
 func workload(o *unstructured.Unstructured) bool {

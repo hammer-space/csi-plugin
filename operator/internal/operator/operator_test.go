@@ -622,3 +622,43 @@ func TestFailingWorkloadPodMarksDegraded(t *testing.T) {
 		})
 	}
 }
+
+// Operands created by earlier releases carry an Update managedFields entry.
+// It must become the Operator's Apply entry, or server-side apply cannot drop
+// fields the manifest no longer sets (a renumbered port stays as a duplicate).
+func TestApplyUpgradesCreateOwnedFieldsToApply(t *testing.T) {
+	r, c := harness(t)
+	ctx := context.Background()
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
+	sts, err := c.Resource(gvr).Namespace(Namespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sts.SetManagedFields([]metav1.ManagedFieldsEntry{
+		{Manager: fieldManager, Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "apps/v1", FieldsType: "FieldsV1",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:spec":{"f:replicas":{}}}`)}},
+		{Manager: "kube-controller-manager", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "apps/v1", FieldsType: "FieldsV1",
+			FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)}, Subresource: "status"},
+	})
+	if _, err := c.Resource(gvr).Namespace(Namespace).Update(ctx, sts, metav1.UpdateOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Reconcile(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sts, err = c.Resource(gvr).Namespace(Namespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, m := range sts.GetManagedFields() {
+		got = append(got, fmt.Sprintf("%s/%s/%s", m.Manager, m.Operation, m.Subresource))
+	}
+	want := []string{fieldManager + "/Apply/", "kube-controller-manager/Update/status"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("managedFields = %v, want %v", got, want)
+	}
+}
