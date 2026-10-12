@@ -30,14 +30,6 @@ rules:
   resourceNames:
   - cluster
 - apiGroups:
-  - ''
-  resources:
-  - namespaces
-  verbs:
-  - get
-  resourceNames:
-  - hammerspace-csi
-- apiGroups:
   - storage.k8s.io
   resources:
   - csidrivers

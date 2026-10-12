@@ -7,7 +7,8 @@ file-backed volumes. It is not yet a certified or cluster-tested release.
 ## What is implemented
 
 - Cluster-scoped `HammerspaceCSIDriver/cluster` API and schema validation.
-- Leader election and reconciliation every 15 seconds in `hammerspace-csi`.
+- Leader election and reconciliation every 15 seconds in the namespace the
+  Operator is installed in.
 - Controller StatefulSet, node DaemonSet, service accounts, RBAC, configuration,
   CSIDriver, an operand-specific SCC, and optional StorageClasses.
 - Explicit release image configuration, drift repair, credential rotation using
@@ -21,7 +22,9 @@ file-backed volumes. It is not yet a certified or cluster-tested release.
 - Local OLM bundle and file-based catalog generation from the same deployment
   and RBAC inputs. No registry push or certification submission is automatic.
 
-The first release fixes the namespace to `hammerspace-csi`. StorageClass
+The Operator deploys the driver into the namespace it is installed in and reads
+the credentials Secret from there. `hammerspace-csi` is the suggested and
+default namespace. StorageClass
 definitions are immutable after CR creation. Generated classes use
 WaitForFirstConsumer, Retain and expansion enabled. Classes are not defaults.
 Capacity publication is enabled in CSIDriver and the provisioner. It uses the
@@ -65,7 +68,7 @@ roles grant. The broadest standing grants are `create` on `clusterroles` and
 `clusterrolebindings` (Kubernetes cannot scope `create` by name), cluster-wide
 `create` on `pods/exec` (used by the driver to freeze filesystems during
 snapshots), and full control of PersistentVolumes. The grants are bounded: no
-`bind` or `escalate`, Secrets are `get`-only in `hammerspace-csi`, and the
+`bind` or `escalate`, Secrets are `get`-only in the Operator's namespace, and the
 custom resource is limited to the `cluster` name. Even so, anyone who
 compromises the Operator pod gains control of cluster storage and can exec into
 any pod. Treat the Operator's namespace and service account as
@@ -191,8 +194,10 @@ python3 hack/build_bundle.py \
 
 This creates ignored `bundle/` containing the CSV, CRD, annotations, bundle
 Dockerfile and `catalog.json`. It supports OwnNamespace installation in
-`hammerspace-csi` only. The namespace must permit the privileged operands. The
-CSV's `operatorframework.io/suggested-namespace-template` annotation creates it
+the namespace OLM installs it into; `hammerspace-csi` is suggested. That namespace
+must permit the privileged operands. The CSV's
+`operatorframework.io/suggested-namespace-template` annotation creates
+`hammerspace-csi`
 with the `pod-security.kubernetes.io/enforce: privileged` label from
 `config/manager.yaml` during a console install. For CLI installs, create and
 label it as shown in `config/manager.yaml` first.

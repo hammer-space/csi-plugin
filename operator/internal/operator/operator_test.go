@@ -47,7 +47,7 @@ func mustRender(t *testing.T, cr *unstructured.Unstructured) []*unstructured.Uns
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Render(cr, spec, testImages(), "secret-uid/1")
+	result, err := Render(cr, spec, testImages(), "secret-uid/1", DefaultNamespace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +221,7 @@ func TestRenderRejectsUnknownContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Render(cr, spec, testImages(), "secret-uid/1"); err == nil {
+	if _, err := Render(cr, spec, testImages(), "secret-uid/1", DefaultNamespace); err == nil {
 		t.Fatal("unknown container must fail before deploying an empty image reference")
 	}
 }
@@ -290,8 +290,8 @@ func TestCRDNamesMatchKubernetesValidation(t *testing.T) {
 func harness(t *testing.T) (*Reconciler, *fake.FakeDynamicClient) {
 	t.Helper()
 	cr := testCR()
-	ns := object(map[string]interface{}{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]interface{}{"name": Namespace}})
-	secret := object(map[string]interface{}{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]interface{}{"name": "credentials", "namespace": Namespace, "uid": "secret-uid", "resourceVersion": "1"}, "data": map[string]interface{}{"username": "dXNlcg==", "password": "cGFzcw==", "endpoint": "aHR0cHM6Ly9leGFtcGxlLmludmFsaWQ="}})
+	ns := object(map[string]interface{}{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]interface{}{"name": DefaultNamespace}})
+	secret := object(map[string]interface{}{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]interface{}{"name": "credentials", "namespace": DefaultNamespace, "uid": "secret-uid", "resourceVersion": "1"}, "data": map[string]interface{}{"username": "dXNlcg==", "password": "cGFzcw==", "endpoint": "aHR0cHM6Ly9leGFtcGxlLmludmFsaWQ="}})
 	listKinds := map[schema.GroupVersionResource]string{{Version: "v1", Resource: "pods"}: "PodList"}
 	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, cr, ns, secret)
 	client.PrependReactor("patch", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
@@ -350,20 +350,20 @@ func TestReconcileCreateDriftRotationAndUpgrade(t *testing.T) {
 		t.Fatal(err)
 	}
 	secretGVR := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	secret, _ := c.Resource(secretGVR).Namespace(Namespace).Get(ctx, "credentials", metav1.GetOptions{})
+	secret, _ := c.Resource(secretGVR).Namespace(DefaultNamespace).Get(ctx, "credentials", metav1.GetOptions{})
 	secret.SetResourceVersion("2")
-	c.Resource(secretGVR).Namespace(Namespace).Update(ctx, secret, metav1.UpdateOptions{})
+	c.Resource(secretGVR).Namespace(DefaultNamespace).Update(ctx, secret, metav1.UpdateOptions{})
 	nodeGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"}
-	node, _ := c.Resource(nodeGVR).Namespace(Namespace).Get(ctx, "csi-node", metav1.GetOptions{})
+	node, _ := c.Resource(nodeGVR).Namespace(DefaultNamespace).Get(ctx, "csi-node", metav1.GetOptions{})
 	containers, _, _ := unstructured.NestedSlice(node.Object, "spec", "template", "spec", "containers")
 	containers[0].(map[string]interface{})["image"] = "drift"
 	unstructured.SetNestedSlice(node.Object, containers, "spec", "template", "spec", "containers")
-	c.Resource(nodeGVR).Namespace(Namespace).Update(ctx, node, metav1.UpdateOptions{})
+	c.Resource(nodeGVR).Namespace(DefaultNamespace).Update(ctx, node, metav1.UpdateOptions{})
 	r.Images["driver"] = "example.invalid/driver:upgrade"
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	node, _ = c.Resource(nodeGVR).Namespace(Namespace).Get(ctx, "csi-node", metav1.GetOptions{})
+	node, _ = c.Resource(nodeGVR).Namespace(DefaultNamespace).Get(ctx, "csi-node", metav1.GetOptions{})
 	version, _, _ := unstructured.NestedString(node.Object, "spec", "template", "metadata", "annotations", "storage.hammerspace.com/credentials-version")
 	if version != "secret-uid/2" {
 		t.Fatalf("Secret rotation did not roll workloads: %q", version)
@@ -461,8 +461,8 @@ func TestMissingCredentialsAndCleanupPreserveUserData(t *testing.T) {
 	r, c := harness(t)
 	ctx := context.Background()
 	secretGVR := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	secret, _ := c.Resource(secretGVR).Namespace(Namespace).Get(ctx, "credentials", metav1.GetOptions{})
-	c.Resource(secretGVR).Namespace(Namespace).Delete(ctx, "credentials", metav1.DeleteOptions{})
+	secret, _ := c.Resource(secretGVR).Namespace(DefaultNamespace).Get(ctx, "credentials", metav1.GetOptions{})
+	c.Resource(secretGVR).Namespace(DefaultNamespace).Delete(ctx, "credentials", metav1.DeleteOptions{})
 	c.ClearActions()
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
@@ -472,7 +472,7 @@ func TestMissingCredentialsAndCleanupPreserveUserData(t *testing.T) {
 			t.Fatal("created operands without credentials")
 		}
 	}
-	c.Resource(secretGVR).Namespace(Namespace).Create(ctx, secret, metav1.CreateOptions{})
+	c.Resource(secretGVR).Namespace(DefaultNamespace).Create(ctx, secret, metav1.CreateOptions{})
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestMissingCredentialsAndCleanupPreserveUserData(t *testing.T) {
 			}
 		}
 	}
-	if _, err := c.Resource(secretGVR).Namespace(Namespace).Get(ctx, "credentials", metav1.GetOptions{}); err != nil {
+	if _, err := c.Resource(secretGVR).Namespace(DefaultNamespace).Get(ctx, "credentials", metav1.GetOptions{}); err != nil {
 		t.Fatal("Secret removed")
 	}
 	cr, _ = c.Resource(DriverResource).Get(ctx, "cluster", metav1.GetOptions{})
@@ -573,7 +573,7 @@ func TestFailingWorkloadPodMarksDegraded(t *testing.T) {
 	pod := func(reason string, restarts int64) *unstructured.Unstructured {
 		return object(map[string]interface{}{
 			"apiVersion": "v1", "kind": "Pod",
-			"metadata": map[string]interface{}{"name": "csi-node-abc", "namespace": Namespace, "labels": map[string]interface{}{"app": "csi-node"}},
+			"metadata": map[string]interface{}{"name": "csi-node-abc", "namespace": DefaultNamespace, "labels": map[string]interface{}{"app": "csi-node"}},
 			"status": map[string]interface{}{"containerStatuses": []interface{}{map[string]interface{}{
 				"name": "hs-csi-plugin-node", "restartCount": restarts,
 				"state": map[string]interface{}{"waiting": map[string]interface{}{"reason": reason}},
@@ -596,7 +596,7 @@ func TestFailingWorkloadPodMarksDegraded(t *testing.T) {
 			r, c := harness(t)
 			ctx := context.Background()
 			if tc.pod != nil {
-				if _, err := c.Resource(podGVR).Namespace(Namespace).Create(ctx, tc.pod, metav1.CreateOptions{}); err != nil {
+				if _, err := c.Resource(podGVR).Namespace(DefaultNamespace).Create(ctx, tc.pod, metav1.CreateOptions{}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -633,7 +633,7 @@ func TestApplyUpgradesCreateOwnedFieldsToApply(t *testing.T) {
 		t.Fatal(err)
 	}
 	gvr := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"}
-	sts, err := c.Resource(gvr).Namespace(Namespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
+	sts, err := c.Resource(gvr).Namespace(DefaultNamespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -643,13 +643,13 @@ func TestApplyUpgradesCreateOwnedFieldsToApply(t *testing.T) {
 		{Manager: "kube-controller-manager", Operation: metav1.ManagedFieldsOperationUpdate, APIVersion: "apps/v1", FieldsType: "FieldsV1",
 			FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:status":{"f:replicas":{}}}`)}, Subresource: "status"},
 	})
-	if _, err := c.Resource(gvr).Namespace(Namespace).Update(ctx, sts, metav1.UpdateOptions{}); err != nil {
+	if _, err := c.Resource(gvr).Namespace(DefaultNamespace).Update(ctx, sts, metav1.UpdateOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.Reconcile(ctx); err != nil {
 		t.Fatal(err)
 	}
-	sts, err = c.Resource(gvr).Namespace(Namespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
+	sts, err = c.Resource(gvr).Namespace(DefaultNamespace).Get(ctx, "csi-provisioner", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,5 +660,41 @@ func TestApplyUpgradesCreateOwnedFieldsToApply(t *testing.T) {
 	want := []string{fieldManager + "/Apply/", "kube-controller-manager/Update/status"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("managedFields = %v, want %v", got, want)
+	}
+}
+
+// OLM installs the operator into the namespace the user (or preflight) picks.
+// Every namespaced operand, binding subject and SCC user must follow it.
+func TestRenderUsesTheOperatorNamespace(t *testing.T) {
+	cr := testCR()
+	spec, err := ParseSpec(cr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ns = "storage-team"
+	objects, err := Render(cr, spec, testImages(), "secret-uid/1", ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objects {
+		switch o.GetKind() {
+		case "Service", "ServiceAccount", "ConfigMap", "StatefulSet", "DaemonSet":
+			if o.GetNamespace() != ns {
+				t.Errorf("%s %s namespace = %q, want %q", o.GetKind(), o.GetName(), o.GetNamespace(), ns)
+			}
+		case "ClusterRoleBinding":
+			subjects, _, _ := unstructured.NestedSlice(o.Object, "subjects")
+			for _, s := range subjects {
+				if got := s.(map[string]interface{})["namespace"]; got != ns {
+					t.Errorf("ClusterRoleBinding %s subject namespace = %v, want %s", o.GetName(), got, ns)
+				}
+			}
+		case "SecurityContextConstraints":
+			users, _, _ := unstructured.NestedStringSlice(o.Object, "users")
+			want := []string{"system:serviceaccount:" + ns + ":csi-node", "system:serviceaccount:" + ns + ":csi-provisioner"}
+			if !reflect.DeepEqual(users, want) {
+				t.Errorf("SCC users = %v, want %v", users, want)
+			}
+		}
 	}
 }

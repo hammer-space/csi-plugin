@@ -72,7 +72,7 @@ def generate(args):
         "metadata": {"name": name, "annotations": annotations},
         "spec": {
             "displayName": "Hammerspace CSI Operator",
-            "description": "Manages Hammerspace CSI workloads for NFS, raw block, and ext4/xfs file-backed volumes. Install in hammerspace-csi. Requires an existing credentials Secret and Linux nodes with NFS and loop-device support."
+            "description": "Manages Hammerspace CSI workloads for NFS, raw block, and ext4/xfs file-backed volumes. Install in hammerspace-csi (suggested); the driver is deployed into the Operator's namespace. Requires an existing credentials Secret and Linux nodes with NFS and loop-device support."
             + ("" if args.release else " Development packaging; certification is a separate release gate."),
             "version": args.version, "maturity": args.channel, "provider": {"name": "Hammerspace"},
             "minKubeVersion": "1.29.0",

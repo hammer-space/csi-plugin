@@ -15,7 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
-const Namespace = "hammerspace-csi"
+// DefaultNamespace is the suggested install namespace. The operator manages its
+// operands in whatever namespace OLM installs it into.
+const DefaultNamespace = "hammerspace-csi"
 const DriverName = "com.hammerspace.csi"
 const Finalizer = "storage.hammerspace.com/operands"
 
@@ -100,7 +102,7 @@ func object(v map[string]interface{}) *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: v}
 }
 
-func Render(cr *unstructured.Unstructured, spec Spec, images Images, secretVersion string) ([]*unstructured.Unstructured, error) {
+func Render(cr *unstructured.Unstructured, spec Spec, images Images, secretVersion, namespace string) ([]*unstructured.Unstructured, error) {
 	for _, key := range ImageKeys {
 		if images[key] == "" {
 			return nil, fmt.Errorf("missing release image %s", key)
@@ -115,12 +117,12 @@ func Render(cr *unstructured.Unstructured, spec Spec, images Images, secretVersi
 		o := object(v)
 		switch o.GetKind() {
 		case "Service", "ServiceAccount", "ConfigMap", "StatefulSet", "DaemonSet":
-			o.SetNamespace(Namespace)
+			o.SetNamespace(namespace)
 		}
 		if o.GetKind() == "ClusterRoleBinding" {
 			subjects, _, _ := unstructured.NestedSlice(v, "subjects")
 			for _, sub := range subjects {
-				sub.(map[string]interface{})["namespace"] = Namespace
+				sub.(map[string]interface{})["namespace"] = namespace
 			}
 			unstructured.SetNestedSlice(v, subjects, "subjects")
 		}
@@ -204,7 +206,7 @@ func Render(cr *unstructured.Unstructured, spec Spec, images Images, secretVersi
 		"runAsUser": map[string]interface{}{"type": "RunAsAny"}, "seLinuxContext": map[string]interface{}{"type": "RunAsAny"},
 		"fsGroup": map[string]interface{}{"type": "RunAsAny"}, "supplementalGroups": map[string]interface{}{"type": "RunAsAny"},
 		"volumes": []interface{}{"hostPath", "emptyDir", "secret", "configMap", "projected", "downwardAPI"},
-		"users":   []interface{}{"system:serviceaccount:" + Namespace + ":csi-node", "system:serviceaccount:" + Namespace + ":csi-provisioner"},
+		"users":   []interface{}{"system:serviceaccount:" + namespace + ":csi-node", "system:serviceaccount:" + namespace + ":csi-provisioner"},
 		"groups":  []interface{}{}, "readOnlyRootFilesystem": false,
 	}))
 	controller := true

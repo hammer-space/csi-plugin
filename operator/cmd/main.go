@@ -45,9 +45,6 @@ func main() {
 	if id == "" || namespace == "" {
 		log.Fatal("POD_NAME and POD_NAMESPACE must be set")
 	}
-	if namespace != operator.Namespace {
-		log.Fatal("this release must be installed in the hammerspace-csi namespace")
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	server := &http.Server{Addr: ":8081", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -63,7 +60,9 @@ func main() {
 		}
 	}()
 	defer server.Close()
-	reconciler := &operator.Reconciler{Client: client, Images: images}
+	// OLM installs the operator into the namespace the user picks (OwnNamespace);
+	// the driver is deployed alongside it.
+	reconciler := &operator.Reconciler{Client: client, Images: images, Namespace: namespace}
 	leaderelection.RunOrDie(ctx, leaderelection.LeaderElectionConfig{
 		Lock:          &resourcelock.LeaseLock{LeaseMeta: metav1.ObjectMeta{Name: "hammerspace-csi-operator", Namespace: namespace}, Client: kube.CoordinationV1(), LockConfig: resourcelock.ResourceLockConfig{Identity: id}},
 		LeaseDuration: 30 * time.Second, RenewDeadline: 20 * time.Second, RetryPeriod: 5 * time.Second,

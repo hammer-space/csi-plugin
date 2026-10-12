@@ -25,6 +25,17 @@ const fieldManager = "hammerspace-csi-operator"
 type Reconciler struct {
 	Client dynamic.Interface
 	Images Images
+	// Namespace is where the operator runs. It reads the credentials Secret
+	// from it and deploys the namespaced operands into it. Empty means
+	// DefaultNamespace.
+	Namespace string
+}
+
+func (r *Reconciler) namespace() string {
+	if r.Namespace == "" {
+		return DefaultNamespace
+	}
+	return r.Namespace
 }
 
 func (r *Reconciler) resource(o *unstructured.Unstructured) dynamic.ResourceInterface {
@@ -58,11 +69,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 	if err != nil {
 		return r.condition(ctx, cr, false, false, "InvalidConfiguration", err.Error())
 	}
-	ns := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
-	if _, err := r.Client.Resource(ns).Get(ctx, Namespace, metav1.GetOptions{}); err != nil {
-		return r.condition(ctx, cr, false, false, "NamespaceMissing", "Create the hammerspace-csi operand namespace before installation")
-	}
-	secret, err := r.Client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}).Namespace(Namespace).Get(ctx, spec.CredentialsSecretName, metav1.GetOptions{})
+	secret, err := r.Client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}).Namespace(r.namespace()).Get(ctx, spec.CredentialsSecretName, metav1.GetOptions{})
 	if err != nil {
 		return r.condition(ctx, cr, false, false, "CredentialsUnavailable", "Cannot read the referenced credentials Secret")
 	}
@@ -73,7 +80,7 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 			return r.condition(ctx, cr, false, false, "InvalidCredentials", "The Secret must contain nonempty username, password and endpoint keys")
 		}
 	}
-	desired, err := Render(cr, spec, r.Images, string(secret.GetUID())+"/"+secret.GetResourceVersion())
+	desired, err := Render(cr, spec, r.Images, string(secret.GetUID())+"/"+secret.GetResourceVersion(), r.namespace())
 	if err != nil {
 		return err
 	}
@@ -268,7 +275,7 @@ func (r *Reconciler) cleanup(ctx context.Context, cr *unstructured.Unstructured,
 	if !hasFinalizer(cr) {
 		return nil
 	}
-	objects, err := Render(cr, spec, r.Images, "")
+	objects, err := Render(cr, spec, r.Images, "", r.namespace())
 	if err != nil {
 		return err
 	}
