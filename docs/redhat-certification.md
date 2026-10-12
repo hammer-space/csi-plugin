@@ -100,7 +100,7 @@ documentation must include the drain step.
 
 The OpenShift CSI suite fails for reasons that have nothing to do with the
 driver when the environment is wrong. Each of these came up during the 2026-09
-certification work; details are in `openshift-certification-results.md`.
+certification work.
 
 - **StorageClasses must use `volumeBindingMode: WaitForFirstConsumer`**, as the
   Operator ships them. The external-provisioner publishes no

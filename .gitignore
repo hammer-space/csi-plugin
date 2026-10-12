@@ -12,3 +12,6 @@ vendor/
 .IDEA/
 .idea/
 .vscode
+# Local certification working notes (contain lab IPs); not for the public repo.
+openshift-certification-*.md
+CLAUDE.md
