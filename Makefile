@@ -1,5 +1,9 @@
 VERSION ?= $(shell cat ./VERSION)
-GITHASH = $(shell git describe --match nEvErMatch --always --abbrev=10 --dirty)
+# Overridable from the environment for builds without a .git directory;
+# otherwise evaluated once rather than on every use.
+ifeq ($(origin GITHASH),undefined)
+GITHASH := $(shell git describe --match nEvErMatch --always --abbrev=10 --dirty)
+endif
 RELEASE ?= 1
 NAME=bin/hs-csi-plugin
 RUNTIME_BASE ?= runtime
