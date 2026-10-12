@@ -150,10 +150,10 @@ spec:
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--health-port=9808"
-            # The driver's Probe logs in to the Anvil, which can take several
-            # seconds when the Anvil is busy. The 1s default then fails healthy
-            # probes and gets the driver restarted in a loop, interrupting
-            # in-flight mounts. A failed login still fails the probe at once.
+            # The driver's Probe reports process health only and never contacts
+            # the Anvil, so an Anvil outage does not restart the driver. The
+            # longer timeout keeps a briefly busy driver from being restarted
+            # and interrupting in-flight mounts.
             - "--probe-timeout=10s"
           env:
             - name: CSI_ENDPOINT
@@ -400,10 +400,10 @@ spec:
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--health-port=9809"
-            # The driver's Probe logs in to the Anvil, which can take several
-            # seconds when the Anvil is busy. The 1s default then fails healthy
-            # probes and gets the driver restarted in a loop, interrupting
-            # in-flight mounts. A failed login still fails the probe at once.
+            # The driver's Probe reports process health only and never contacts
+            # the Anvil, so an Anvil outage does not restart the driver. The
+            # longer timeout keeps a briefly busy driver from being restarted
+            # and interrupting in-flight mounts.
             - "--probe-timeout=10s"
           env:
             - name: CSI_ENDPOINT

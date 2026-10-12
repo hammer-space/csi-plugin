@@ -21,8 +21,6 @@ import (
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/hammer-space/csi-plugin/pkg/common"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 	wrappers "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
@@ -46,14 +44,12 @@ func (d *CSIDriver) Probe(
 	req *csi.ProbeRequest) (
 	*csi.ProbeResponse, error) {
 
-	// Make sure the client and backend can communicate
-	err := d.hsclient.EnsureLogin()
-	if err != nil {
-		return &csi.ProbeResponse{
-			Ready: &wrappers.BoolValue{Value: false},
-		}, status.Errorf(codes.Unavailable, "%s", err.Error())
-	}
-
+	// Report process health only. The liveness-probe sidecar calls this every
+	// period on every controller and node pod, and kubelet restarts the driver
+	// when it fails. Checking the Anvil here turned any Anvil outage or upgrade
+	// into a cluster-wide restart loop that interrupted in-flight mounts.
+	// Startup already requires a successful Anvil login (NewCSIDriver), and
+	// RPCs that need the Anvil report its errors themselves.
 	return &csi.ProbeResponse{
 		Ready: &wrappers.BoolValue{Value: true},
 	}, nil
