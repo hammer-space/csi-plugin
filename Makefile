@@ -39,9 +39,11 @@ build:
 	@echo "==> Building Docker Image $(IMAGE)"
 	@docker build $(BUILD_FLAGS) --build-arg RUNTIME_BASE="$(RUNTIME_BASE)" --build-arg version="$(VERSION)" --build-arg release="$(RELEASE)" --build-arg githash="$(GITHASH)" -t "$(IMAGE)" . -f Dockerfile
 
+# Release images always rebuild from a freshly pulled base: a cached layer would
+# skip the package upgrade and ship RPMs with fixes already published.
 build-release:
 	@echo "==> Building Docker Image ${VERSION} ${GITHASH}"
-	@docker build $(BUILD_FLAGS) --build-arg RUNTIME_BASE="$(RUNTIME_BASE)" --build-arg version="$(VERSION)" --build-arg release="$(RELEASE)" --build-arg githash="$(GITHASH)" -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
+	@docker build --no-cache --pull $(BUILD_FLAGS) --build-arg RUNTIME_BASE="$(RUNTIME_BASE)" --build-arg version="$(VERSION)" --build-arg release="$(RELEASE)" --build-arg githash="$(GITHASH)" -t "hammerspaceinc/csi-plugin:${VERSION}" . -f Dockerfile
 	@hack/verify_certification_image.sh "hammerspaceinc/csi-plugin:${VERSION}"
 
 test-image:
