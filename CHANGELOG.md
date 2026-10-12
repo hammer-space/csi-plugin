@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The Operator's `internal/operator/operands.json` is now generated from `deploy/kubernetes/kubernetes-1.36/plugin.yaml` by `make -C operator generate`, making the manifest the single source of truth. `make -C operator build` regenerates it and `make -C operator test` fails on drift, so an edit to the manifest can no longer silently miss Operator-managed installs.
 
 ### Fixed
+- File-backed and block provisioning failed with `backing share ... is mounted ... from <Anvil IP>, which is not an NFS server of the current Anvil` once a backing share had been mounted over NFS 4.2. A 4.2 mount made through a data portal lists the Anvil, the 4.2 metadata server, as its server, and the foreign-mount check counted only data portals and floating IPs. The Anvil's management IPs now count as its own NFS servers.
 - Snapshot freezing locates the node driver in the controller's installation namespace, including Operator installations in `hammerspace-csi`.
 - Invalid CR settings no longer prevent finalizer cleanup during deletion. Secret and StorageClass name schemas now match Kubernetes validation.
 - Operator development image defaults and bundle inventory are generated from the canonical deployment manifest; the v1.4.0 manifest uses the matching driver image for capacity publication.

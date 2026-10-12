@@ -132,7 +132,9 @@ func TestClusterStateIsCached(t *testing.T) {
 
 // A portal in maintenance or briefly down is still this Anvil's: its address
 // must count as an NFS server, or a healthy backing mount through it is
-// treated as foreign and torn down. Mount selection still uses only up portals.
+// treated as foreign and torn down. So must the Anvil's management IP, which a
+// 4.2 mount through a portal lists as its server. Mount selection still uses
+// only up portals.
 func TestNFSServerAddressesIncludesPortalsInAnyState(t *testing.T) {
 	setupHTTP()
 	defer tearDownHTTP()
@@ -151,14 +153,14 @@ func TestNFSServerAddressesIncludesPortalsInAnyState(t *testing.T) {
 		]`)
 	})
 	Mux.HandleFunc(BasePath+"/cntl/state", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprint(w, `{"name":"c","portalFloatingIps":[{"address":"10.0.0.9"}]}`)
+		fmt.Fprint(w, `{"name":"c","portalFloatingIps":[{"address":"10.0.0.9"}],"mgmtIps":[{"address":"10.0.0.20"}]}`)
 	})
 
 	addresses, err := hsclient.NFSServerAddresses(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]bool{"10.0.0.1": true, "10.0.0.2": true, "10.0.0.9": true}
+	want := map[string]bool{"10.0.0.1": true, "10.0.0.2": true, "10.0.0.9": true, "10.0.0.20": true}
 	if len(addresses) != len(want) {
 		t.Fatalf("addresses = %v, want %v", addresses, want)
 	}

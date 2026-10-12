@@ -191,6 +191,10 @@ type FileSnapshot struct {
 type Cluster struct {
 	Name              string              `json:"name"`
 	PortalFloatingIps []PortalFloatingIps `json:"portalFloatingIps"`
+	// The Anvil's own management addresses. It is the NFS 4.2 metadata
+	// server, so a 4.2 mount made through a data portal shows this address
+	// as its server.
+	MgmtIps []PortalFloatingIps `json:"mgmtIps"`
 }
 
 // Portal Data Floating IPs are a cluster-wide resource

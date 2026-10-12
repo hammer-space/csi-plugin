@@ -172,10 +172,13 @@ func (client *HammerspaceClient) clusterState(ctx context.Context) (*common.Clus
 }
 
 // NFSServerAddresses returns every address this Anvil serves shares from: all
-// of its data portals and floating data-portal IPs. A backing-share mount from
-// any other server was made against a different Anvil. Portals count whatever
-// their state: one in maintenance, or briefly down, still belongs to this
-// Anvil, and its mount must not be mistaken for a foreign one.
+// of its data portals, floating data-portal IPs and its own management IPs.
+// The management IPs count because the Anvil is the NFS 4.2 metadata server:
+// a 4.2 mount made through a data portal lists the Anvil as its server. A
+// backing-share mount from any other server was made against a different
+// Anvil. Portals count whatever their state: one in maintenance, or briefly
+// down, still belongs to this Anvil, and its mount must not be mistaken for a
+// foreign one.
 func (client *HammerspaceClient) NFSServerAddresses(ctx context.Context) ([]string, error) {
 	portals, err := client.dataPortals(ctx)
 	if err != nil {
@@ -185,11 +188,14 @@ func (client *HammerspaceClient) NFSServerAddresses(ctx context.Context) ([]stri
 	if err != nil {
 		return nil, err
 	}
-	addresses := make([]string, 0, len(portals)+len(clusters.PortalFloatingIps))
+	addresses := make([]string, 0, len(portals)+len(clusters.PortalFloatingIps)+len(clusters.MgmtIps))
 	for _, p := range portals {
 		addresses = append(addresses, p.Node.MgmtIpAddress.Address)
 	}
 	for _, p := range clusters.PortalFloatingIps {
+		addresses = append(addresses, p.Address)
+	}
+	for _, p := range clusters.MgmtIps {
 		addresses = append(addresses, p.Address)
 	}
 	return addresses, nil
