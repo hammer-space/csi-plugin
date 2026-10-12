@@ -185,7 +185,7 @@
             {
               "args": [
                 "--csi-address=$(CSI_ENDPOINT)",
-                "--health-port=9808",
+                "--health-port=29791",
                 "--probe-timeout=10s"
               ],
               "env": [
@@ -295,8 +295,8 @@
                   "protocol": "TCP"
                 },
                 {
-                  "containerPort": 9808,
-                  "hostPort": 9808,
+                  "containerPort": 29791,
+                  "hostPort": 29791,
                   "name": "healthz",
                   "protocol": "TCP"
                 }
@@ -708,7 +708,7 @@
             {
               "args": [
                 "--csi-address=$(CSI_ENDPOINT)",
-                "--health-port=9809",
+                "--health-port=29793",
                 "--probe-timeout=10s"
               ],
               "env": [
@@ -826,8 +826,8 @@
                   "protocol": "TCP"
                 },
                 {
-                  "containerPort": 9809,
-                  "hostPort": 9809,
+                  "containerPort": 29793,
+                  "hostPort": 29793,
                   "name": "healthz",
                   "protocol": "TCP"
                 }

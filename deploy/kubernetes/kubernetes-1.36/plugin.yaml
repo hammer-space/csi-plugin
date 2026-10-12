@@ -149,7 +149,7 @@ spec:
           image: registry.k8s.io/sig-storage/livenessprobe:v2.12.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
-            - "--health-port=9808"
+            - "--health-port=29791"
             # The driver's Probe reports process health only and never contacts
             # the Anvil, so an Anvil outage does not restart the driver. The
             # longer timeout keeps a briefly busy driver from being restarted
@@ -174,9 +174,9 @@ spec:
               name: metrics
               hostPort: 9090
               protocol: TCP
-            - containerPort: 9808
+            - containerPort: 29791
               name: healthz
-              hostPort: 9808
+              hostPort: 29791
               protocol: TCP
           # Served by the liveness-probe sidecar above (shares this pod's
           # network via hostNetwork), which polls this container's CSI
@@ -399,7 +399,7 @@ spec:
           image: registry.k8s.io/sig-storage/livenessprobe:v2.12.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
-            - "--health-port=9809"
+            - "--health-port=29793"
             # The driver's Probe reports process health only and never contacts
             # the Anvil, so an Anvil outage does not restart the driver. The
             # longer timeout keeps a briefly busy driver from being restarted
@@ -424,9 +424,9 @@ spec:
               name: metrics
               hostPort: 9091
               protocol: TCP
-            - containerPort: 9809
+            - containerPort: 29793
               name: healthz
-              hostPort: 9809
+              hostPort: 29793
               protocol: TCP
           # Served by the liveness-probe sidecar above (shares this pod's
           # network via hostNetwork), which polls this container's CSI

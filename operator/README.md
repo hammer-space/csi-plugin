@@ -55,6 +55,18 @@ the driver roles, because the API server checks these when it creates those
 roles. It does not receive an unrestricted RBAC `escalate` grant. Its code limits
 management and deletion to the declared Operator-owned operands.
 
+**Host ports.** Both operands use `hostNetwork`, so their ports open on each
+node's IP: controller metrics `9090` and liveness `29791`, node metrics `9091`
+and liveness `29793`. The liveness ports avoid the upstream `livenessprobe`
+default `9808`, which other CSI drivers also bind. If something else on a node
+uses one of these ports, the driver pod stays Pending on the port conflict. To
+change a liveness port, edit the sidecar's `--health-port` argument and the
+matching `healthz` `containerPort`/`hostPort`. To change a metrics port, edit
+`OTEL_METRICS_PROMETHEUS_LISTEN` and the matching `metrics` port. Make the edits
+in `plugin.yaml`, then run `make generate`. The dedicated SCC sets
+`allowHostPorts: true` and `allowHostNetwork: true`. `/healthz` reports only
+whether the driver process is answering. It does not contact the Anvil.
+
 The driver image must include losetup, mkfs.ext4 and mkfs.xfs as appropriate.
 Block and filesystem-backed expansion, snapshots, restoration, restart
 persistence and loop-device cleanup require separate functional validation.
