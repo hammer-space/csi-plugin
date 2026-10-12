@@ -292,7 +292,8 @@ func harness(t *testing.T) (*Reconciler, *fake.FakeDynamicClient) {
 	cr := testCR()
 	ns := object(map[string]interface{}{"apiVersion": "v1", "kind": "Namespace", "metadata": map[string]interface{}{"name": Namespace}})
 	secret := object(map[string]interface{}{"apiVersion": "v1", "kind": "Secret", "metadata": map[string]interface{}{"name": "credentials", "namespace": Namespace, "uid": "secret-uid", "resourceVersion": "1"}, "data": map[string]interface{}{"username": "dXNlcg==", "password": "cGFzcw==", "endpoint": "aHR0cHM6Ly9leGFtcGxlLmludmFsaWQ="}})
-	client := fake.NewSimpleDynamicClient(runtime.NewScheme(), cr, ns, secret)
+	listKinds := map[schema.GroupVersionResource]string{{Version: "v1", Resource: "pods"}: "PodList"}
+	client := fake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), listKinds, cr, ns, secret)
 	client.PrependReactor("patch", "*", func(action ktesting.Action) (bool, runtime.Object, error) {
 		a := action.(ktesting.PatchAction)
 		if a.GetPatchType() != types.ApplyPatchType {
@@ -562,6 +563,61 @@ func TestWorkloadReadinessRejectsStaleAndEmptyRollouts(t *testing.T) {
 			status["updatedNumberScheduled"] = int64(0)
 			if workloadReady(o) {
 				t.Fatal("old ready pods hid pending upgrade")
+			}
+		})
+	}
+}
+
+func TestFailingWorkloadPodMarksDegraded(t *testing.T) {
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+	pod := func(reason string, restarts int64) *unstructured.Unstructured {
+		return object(map[string]interface{}{
+			"apiVersion": "v1", "kind": "Pod",
+			"metadata": map[string]interface{}{"name": "csi-node-abc", "namespace": Namespace, "labels": map[string]interface{}{"app": "csi-node"}},
+			"status": map[string]interface{}{"containerStatuses": []interface{}{map[string]interface{}{
+				"name": "hs-csi-plugin-node", "restartCount": restarts,
+				"state": map[string]interface{}{"waiting": map[string]interface{}{"reason": reason}},
+			}}},
+		})
+	}
+	for _, tc := range []struct {
+		name           string
+		pod            *unstructured.Unstructured
+		reason         string
+		degraded, prog string
+	}{
+		{"no pods yet", nil, "RollingOut", "False", "True"},
+		{"early crash during rollout", pod("CrashLoopBackOff", 1), "RollingOut", "False", "True"},
+		{"still creating", pod("ContainerCreating", 0), "RollingOut", "False", "True"},
+		{"crash loop", pod("CrashLoopBackOff", 5), "WorkloadFailing", "True", "False"},
+		{"image pull", pod("ImagePullBackOff", 0), "WorkloadFailing", "True", "False"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, c := harness(t)
+			ctx := context.Background()
+			if tc.pod != nil {
+				if _, err := c.Resource(podGVR).Namespace(Namespace).Create(ctx, tc.pod, metav1.CreateOptions{}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := r.Reconcile(ctx); err != nil {
+				t.Fatal(err)
+			}
+			cr, err := c.Resource(DriverResource).Get(ctx, "cluster", metav1.GetOptions{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			conditions, _, _ := unstructured.NestedSlice(cr.Object, "status", "conditions")
+			got := map[string]string{}
+			for _, item := range conditions {
+				m := item.(map[string]interface{})
+				got[m["type"].(string)] = m["status"].(string)
+				if m["reason"] != tc.reason {
+					t.Errorf("%s reason = %v, want %s", m["type"], m["reason"], tc.reason)
+				}
+			}
+			if got["Degraded"] != tc.degraded || got["Progressing"] != tc.prog || got["Available"] != "False" {
+				t.Errorf("conditions = %v, want Degraded=%s Progressing=%s Available=False", got, tc.degraded, tc.prog)
 			}
 		})
 	}

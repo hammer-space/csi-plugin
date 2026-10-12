@@ -12,6 +12,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
@@ -112,14 +113,69 @@ func (r *Reconciler) Reconcile(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		if !workloadReady(current) {
-			ready = false
+		if workloadReady(current) {
+			continue
+		}
+		ready = false
+		// A rollout and a broken workload both look "not ready". Without this
+		// the CR reported RollingOut indefinitely while the driver crash-looped.
+		failure, err := r.workloadFailure(ctx, current)
+		if err != nil {
+			return err
+		}
+		if failure != "" {
+			return r.condition(ctx, cr, false, false, "WorkloadFailing", failure)
 		}
 	}
 	if ready {
 		return r.condition(ctx, cr, true, false, "Ready", "Controller and node workloads are ready")
 	}
 	return r.condition(ctx, cr, false, true, "RollingOut", "Waiting for controller and node workloads")
+}
+
+// crashLoopRestarts is how many restarts a CrashLoopBackOff container needs
+// before it counts as failing. Kubernetes reports CrashLoopBackOff after the
+// first crash; one or two can happen in a normal rollout (e.g. a slow
+// dependency), and three back-offs (10s, 20s, 40s) are over a minute of failing.
+const crashLoopRestarts = 3
+
+// Waiting reasons that do not resolve without a change to the image or spec.
+var stuckWaitingReasons = map[string]bool{
+	"ImagePullBackOff":           true,
+	"InvalidImageName":           true,
+	"CreateContainerConfigError": true,
+	"CreateContainerError":       true,
+}
+
+// workloadFailure returns a description of the first workload pod container
+// that is failing rather than starting, or "" if none is.
+func (r *Reconciler) workloadFailure(ctx context.Context, o *unstructured.Unstructured) (string, error) {
+	selector, _, err := unstructured.NestedStringMap(o.Object, "spec", "selector", "matchLabels")
+	if err != nil || len(selector) == 0 {
+		return "", err
+	}
+	pods, err := r.Client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).Namespace(o.GetNamespace()).
+		List(ctx, metav1.ListOptions{LabelSelector: labels.SelectorFromSet(selector).String()})
+	if err != nil {
+		return "", err
+	}
+	for _, pod := range pods.Items {
+		statuses, _, _ := unstructured.NestedSlice(pod.Object, "status", "containerStatuses")
+		for _, item := range statuses {
+			c, ok := item.(map[string]interface{})
+			if !ok {
+				continue
+			}
+			name, _, _ := unstructured.NestedString(c, "name")
+			reason, _, _ := unstructured.NestedString(c, "state", "waiting", "reason")
+			restarts, _, _ := unstructured.NestedInt64(c, "restartCount")
+			if stuckWaitingReasons[reason] || (reason == "CrashLoopBackOff" && restarts >= crashLoopRestarts) {
+				return fmt.Sprintf("%s %s: pod %s container %s is %s (%d restarts); inspect the pod events and container logs",
+					o.GetKind(), o.GetName(), pod.GetName(), name, reason, restarts), nil
+			}
+		}
+	}
+	return "", nil
 }
 
 func (r *Reconciler) apply(ctx context.Context, cr, desired *unstructured.Unstructured) error {
