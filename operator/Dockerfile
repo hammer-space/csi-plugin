@@ -9,7 +9,7 @@ COPY --chown=1001:0 deploy/kubernetes/kubernetes-1.36/plugin.yaml ../deploy/kube
 RUN go run ./cmd/generate-operands
 RUN CGO_ENABLED=0 go build -trimpath -o /tmp/manager ./cmd
 
-FROM registry.access.redhat.com/ubi9/ubi-micro:9.8@sha256:7a0454cbd9bd847e8f6a63b6f0254a6efbeb6e0ed71a5d824a4f6cccbe626650
+FROM registry.access.redhat.com/ubi9/ubi-micro:9.8@sha256:ff30602252a3e92706585c7c34cd3c74028eaac4ab815e6b19f8b27562bdd7e3
 ARG VERSION=0.1.1
 ARG RELEASE=1
 LABEL name="hammerspace-csi-operator" \
