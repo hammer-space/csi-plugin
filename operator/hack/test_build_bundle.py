@@ -36,7 +36,7 @@ class BundleTests(unittest.TestCase):
             version="0.1.0", operator_image="example.invalid/operator:dev",
             bundle_image="example.invalid/bundle:dev", images=ROOT / "config/development-images.json",
             output=Path(self.temp.name) / "bundle", release=False, openshift_versions=None,
-            created_at=date.today().isoformat(), support="Hammerspace",
+            created_at=date.today().isoformat(), support="Hammerspace", channel="alpha",
             valid_subscription="A valid Hammerspace software subscription is required.")
 
     def test_inventory_matches_deployed_images_and_permissions(self):
@@ -116,6 +116,18 @@ class BundleTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             generate(self.args)
 
+
+    def test_channel_sets_bundle_catalog_and_maturity(self):
+        self.args.channel = "stable"
+        generate(self.args)
+        csv = yaml.safe_load((self.args.output / "manifests/hammerspace-csi-operator.clusterserviceversion.yaml").read_text())
+        self.assertEqual(csv["spec"]["maturity"], "stable")
+        annotations = yaml.safe_load((self.args.output / "metadata/annotations.yaml").read_text())["annotations"]
+        self.assertEqual(annotations["operators.operatorframework.io.bundle.channels.v1"], "stable")
+        self.assertEqual(annotations["operators.operatorframework.io.bundle.channel.default.v1"], "stable")
+        catalog = [json.loads(line) for line in (self.args.output / "catalog.json").read_text().splitlines()]
+        self.assertEqual(catalog[0]["defaultChannel"], "stable")
+        self.assertEqual(catalog[1]["name"], "stable")
 
 if __name__ == "__main__":
     unittest.main()

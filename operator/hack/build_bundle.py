@@ -74,7 +74,7 @@ def generate(args):
             "displayName": "Hammerspace CSI Operator",
             "description": "Manages Hammerspace CSI workloads for NFS, raw block, and ext4/xfs file-backed volumes. Install in hammerspace-csi. Requires an existing credentials Secret and Linux nodes with NFS and loop-device support."
             + ("" if args.release else " Development packaging; certification is a separate release gate."),
-            "version": args.version, "maturity": "alpha", "provider": {"name": "Hammerspace"},
+            "version": args.version, "maturity": args.channel, "provider": {"name": "Hammerspace"},
             "minKubeVersion": "1.29.0",
             "installModes": [{"type": mode, "supported": mode == "OwnNamespace"} for mode in ["OwnNamespace", "SingleNamespace", "MultiNamespace", "AllNamespaces"]],
             "customresourcedefinitions": {"owned": [{"name": "hammerspacecsidrivers.storage.hammerspace.com", "version": "v1alpha1", "kind": "HammerspaceCSIDriver", "displayName": "Hammerspace CSI Driver", "description": "Singleton configuration for the Hammerspace CSI installation"}]},
@@ -96,8 +96,8 @@ def generate(args):
         "operators.operatorframework.io.bundle.manifests.v1": "manifests/",
         "operators.operatorframework.io.bundle.metadata.v1": "metadata/",
         "operators.operatorframework.io.bundle.package.v1": "hammerspace-csi-operator",
-        "operators.operatorframework.io.bundle.channels.v1": "alpha",
-        "operators.operatorframework.io.bundle.channel.default.v1": "alpha",
+        "operators.operatorframework.io.bundle.channels.v1": args.channel,
+        "operators.operatorframework.io.bundle.channel.default.v1": args.channel,
     }
     # Red Hat's certified-operators pipeline reads the OpenShift range from the bundle metadata.
     if args.openshift_versions:
@@ -106,8 +106,8 @@ def generate(args):
     labels = "\n".join("LABEL " + json.dumps(k) + "=" + json.dumps(v) for k, v in bundle_annotations.items())
     (out / "Dockerfile").write_text("FROM scratch\n" + labels + "\nCOPY manifests /manifests/\nCOPY metadata /metadata/\n")
     catalog = [
-        {"schema": "olm.package", "name": "hammerspace-csi-operator", "defaultChannel": "alpha"},
-        {"schema": "olm.channel", "package": "hammerspace-csi-operator", "name": "alpha", "entries": [{"name": name}]},
+        {"schema": "olm.package", "name": "hammerspace-csi-operator", "defaultChannel": args.channel},
+        {"schema": "olm.channel", "package": "hammerspace-csi-operator", "name": args.channel, "entries": [{"name": name}]},
         {"schema": "olm.bundle", "package": "hammerspace-csi-operator", "name": name, "image": args.bundle_image,
          "properties": [{"type": "olm.package", "value": {"packageName": "hammerspace-csi-operator", "version": args.version}},
                         {"type": "olm.gvk", "value": {"group": "storage.hammerspace.com", "version": "v1alpha1", "kind": "HammerspaceCSIDriver"}}],
@@ -130,6 +130,8 @@ def main():
         "--valid-subscription",
         default="A valid Hammerspace software subscription is required.",
     )
+    parser.add_argument("--channel", default="alpha", choices=["alpha", "stable"],
+                        help="OLM channel, also used as the CSV maturity")
     parser.add_argument("--release", action="store_true", help="require digest pins and explicit OpenShift range; does not imply certification")
     args = parser.parse_args()
     try:

@@ -204,8 +204,9 @@ upstream sidecars are allowed as generator inputs; Red Hat payload sidecars can
 be selected instead when appropriate for the target release. See
 [`config/certified-images.example.json`](config/certified-images.example.json)
 and [`../docs/redhat-certification.md`](../docs/redhat-certification.md).
-That switch validates inputs; it does not certify them. The generated catalog starts an alpha channel and has
-no upgrade edge until an upgrade path is tested.
+That switch validates inputs; it does not certify them. `--channel` selects the OLM channel and CSV maturity (`alpha` by default; use
+`stable` for releases). The generated catalog has no upgrade edge until an
+upgrade path is tested.
 
 Run Operator SDK bundle validation, `opm validate`, container certification
 preflight, OLM installation and upgrade tests before publishing. These tools and
