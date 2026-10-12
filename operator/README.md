@@ -175,8 +175,11 @@ python3 hack/build_bundle.py \
 
 This creates ignored `bundle/` containing the CSV, CRD, annotations, bundle
 Dockerfile and `catalog.json`. It supports OwnNamespace installation in
-`hammerspace-csi` only. The namespace must permit the privileged operands;
-create/label it as shown in `config/manager.yaml` before OLM installation.
+`hammerspace-csi` only. The namespace must permit the privileged operands. The
+CSV's `operatorframework.io/suggested-namespace-template` annotation creates it
+with the `pod-security.kubernetes.io/enforce: privileged` label from
+`config/manager.yaml` during a console install. For CLI installs, create and
+label it as shown in `config/manager.yaml` first.
 The CSV lists all eight images, including the Operator, under relatedImages.
 Use `--images` with a release image JSON file, `--release`, and an explicit
 `--openshift-versions` range to require digest pins. Every sidecar must be listed

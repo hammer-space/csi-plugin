@@ -72,6 +72,10 @@ class BundleTests(unittest.TestCase):
                     "features.operators.openshift.io/token-auth-gcp",
                     "features.operators.openshift.io/csi"]:
             self.assertIn(key, annotations)
+        template = json.loads(annotations["operatorframework.io/suggested-namespace-template"])
+        self.assertEqual(template["kind"], "Namespace")
+        self.assertEqual(template["metadata"]["name"], annotations["operatorframework.io/suggested-namespace"])
+        self.assertEqual(template["metadata"]["labels"]["pod-security.kubernetes.io/enforce"], "privileged")
 
     def test_release_requires_digests_and_explicit_range(self):
         self.args.release = True

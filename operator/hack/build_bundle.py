@@ -38,6 +38,12 @@ def generate(args):
     cluster_rules = next(d["rules"] for d in rbac if d["kind"] == "ClusterRole")
     rules = next(d["rules"] for d in rbac if d["kind"] == "Role")
     example = yaml.safe_load((ROOT / "examples/driver.yaml").read_text())
+    namespace = next(d for d in yaml.safe_load_all((ROOT / "config/manager.yaml").read_text()) if d["kind"] == "Namespace")
+    # The csi-node and csi-provisioner pods are privileged. A console one-click
+    # install creates the namespace from this template, so it must carry the
+    # privileged Pod Security label or admission rejects the driver pods.
+    namespace_template = {"apiVersion": "v1", "kind": "Namespace",
+                          "metadata": {"name": namespace["metadata"]["name"], "labels": namespace["metadata"]["labels"]}}
     name = "hammerspace-csi-operator.v" + args.version
     annotations = {
         "capabilities": "Basic Install",
@@ -55,7 +61,8 @@ def generate(args):
         "features.operators.openshift.io/token-auth-azure": "false",
         "features.operators.openshift.io/token-auth-gcp": "false",
         "features.operators.openshift.io/csi": "true",
-        "operatorframework.io/suggested-namespace": "hammerspace-csi",
+        "operatorframework.io/suggested-namespace": namespace["metadata"]["name"],
+        "operatorframework.io/suggested-namespace-template": json.dumps(namespace_template),
         "alm-examples": json.dumps([example]),
     }
     if args.openshift_versions:
