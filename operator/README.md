@@ -59,6 +59,18 @@ ClusterRole holds every permission granted by the operand ClusterRoles in
 `plugin.yaml`. The check runs on every `make generate`, `make build`,
 `make test` and image build, and fails with the missing grants listed.
 
+**Security note.** Because the Operator creates the driver's ClusterRoles
+without `escalate`, its own service account must hold every permission those
+roles grant. The broadest standing grants are `create` on `clusterroles` and
+`clusterrolebindings` (Kubernetes cannot scope `create` by name), cluster-wide
+`create` on `pods/exec` (used by the driver to freeze filesystems during
+snapshots), and full control of PersistentVolumes. The grants are bounded: no
+`bind` or `escalate`, Secrets are `get`-only in `hammerspace-csi`, and the
+custom resource is limited to the `cluster` name. Even so, anyone who
+compromises the Operator pod gains control of cluster storage and can exec into
+any pod. Treat the Operator's namespace and service account as
+cluster-admin-equivalent when deciding who may access them.
+
 **Host ports.** Both operands use `hostNetwork`, so their ports open on each
 node's IP: controller metrics `9090` and liveness `29791`, node metrics `9091`
 and liveness `29793`. The liveness ports avoid the upstream `livenessprobe`
