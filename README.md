@@ -12,6 +12,14 @@ CSI Mode | CSI Spec Version | `CSI_MAJOR_VERSION` | Compatibility | Notes
 -------- | ---------------- | ------------------- | ------------- | -----
 CSI v1   | v1.9.0           | `1`                 | Kubernetes 1.29, 1.34–1.36 | Default mode for current deployments. There is no blanket minimum — deploy the per-minor manifest matching your cluster's version. **1.34–1.36** are the validated set and **1.29** is bundled for older clusters; manifests for minors older than 1.29 (1.13 through 1.28) are archived, unsupported, under `deploy/kubernetes/archive/`.
 CSI v0.3 | v0.3.0           | `0`                 | Kubernetes 1.10-1.12 | Legacy compatibility mode. Supports filesystem (Mount) volumes only. See `deploy/kubernetes/archive/kubernetes-1.10-1.12/README.md`.
+
+#### Red Hat OpenShift
+
+OpenShift Version | Architecture | Status | Installation
+----------------- | ------------ | ------ | ------------
+4.22 and later | x86_64 | Supported. Validated on OpenShift 4.22.13. | Hammerspace CSI Operator, a Red Hat certified operator. See [operator/README.md](operator/README.md).
+
+The Operator deploys Red Hat certified images: driver `registry.connect.redhat.com/hammerspaceinc/csi-plugin:v1.4.0` and Operator `registry.connect.redhat.com/hammerspaceinc/csi-operator:v0.1.1`.
  
 #### Supported Capabilities
 Controller service
