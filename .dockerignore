@@ -1,0 +1,10 @@
+.git
+.codex
+.agents
+bin
+tmp
+vendor
+operator/bin
+operator/bundle
+**/__pycache__
+*.log

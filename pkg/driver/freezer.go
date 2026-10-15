@@ -14,7 +14,7 @@ you may not use this file except in compliance with the License.
 // file on restore runs XFS log recovery, which for a dirty log can roll back
 // legitimate transactions and produce an empty filesystem.
 //
-// The fix is to freeze the filesystem inside the pod that holds it open,
+// The fix is to freeze the filesystem through the CSI node pod on that worker,
 // so XFS quiesces (log flushed, no in-flight transactions) before Anvil takes
 // the snapshot. This is the same approach Velero pre-hooks / Kanister
 // blueprints take, but done inside the driver so the user doesn't have to
@@ -25,6 +25,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	corev1 "k8s.io/api/core/v1"
@@ -43,7 +45,7 @@ import (
 // guaranteed to have `fsfreeze` from util-linux — and freeze the mount via
 // its shared /var/lib/kubelet propagation.
 type FrozenTarget struct {
-	Namespace string // kube-system, where csi-node lives
+	Namespace string // Namespace where the driver's csi-node pod lives
 	PodName   string // csi-node-XXXXX
 	Container string // hs-csi-plugin-node
 	MountPath string // /var/lib/kubelet/pods/<uid>/volumes/kubernetes.io~csi/<pv>/mount
@@ -54,8 +56,9 @@ type FrozenTarget struct {
 
 // Freezer holds the kube client + REST config needed to exec into pods.
 type Freezer struct {
-	clientset *kubernetes.Clientset
+	clientset kubernetes.Interface
 	restCfg   *rest.Config
+	namespace string
 }
 
 // NewFreezer builds a Freezer from the pod's in-cluster credentials. If the
@@ -72,13 +75,28 @@ func NewFreezer() *Freezer {
 		log.Warnf("Freezer: kubernetes.NewForConfig failed (%v); consistency-freeze disabled", err)
 		return nil
 	}
-	return &Freezer{clientset: cs, restCfg: cfg}
+	return &Freezer{clientset: cs, restCfg: cfg, namespace: driverNamespace("/var/run/secrets/kubernetes.io/serviceaccount/namespace")}
+}
+
+// The Operator and manual manifests install the driver in different namespaces.
+// Prefer a downward-API override, then the service account's namespace. The
+// fallback preserves legacy installations without either namespace source.
+func driverNamespace(namespaceFile string) string {
+	if namespace := strings.TrimSpace(os.Getenv("POD_NAMESPACE")); namespace != "" {
+		return namespace
+	}
+	if data, err := os.ReadFile(namespaceFile); err == nil {
+		if namespace := strings.TrimSpace(string(data)); namespace != "" {
+			return namespace
+		}
+	}
+	return "kube-system"
 }
 
 // FreezeForVolumeHandle locates every running Pod that has the CSI volume
 // (identified by volumeHandle) mounted, then execs `fsfreeze --freeze <path>`
-// inside the first container of each such Pod. Returns the list of targets
-// that were successfully frozen — pass those to Unfreeze after the snapshot.
+// inside the CSI node container on each worker holding a mount. Returns the
+// successfully frozen targets — pass those to Unfreeze after the snapshot.
 //
 // Failure to freeze is best-effort by design: the snapshot proceeds even if
 // freeze fails on some/all pods, matching Velero's default behavior. Callers
@@ -221,9 +239,8 @@ func (f *Freezer) findMountsForVolumeHandle(ctx context.Context, volumeHandle st
 // running on the given node, along with the container that has fsfreeze
 // available (the hs-csi-plugin-node container).
 func (f *Freezer) findCsiNodePodOnNode(ctx context.Context, nodeName string) (*corev1.Pod, string, error) {
-	// The csi-node DS is deployed in kube-system with label app=csi-node
-	// (matching the bundled plugin.yaml). Filter by that + spec.nodeName.
-	list, err := f.clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
+	// Both installation methods label the driver's DaemonSet app=csi-node.
+	list, err := f.clientset.CoreV1().Pods(f.namespace).List(ctx, metav1.ListOptions{
 		LabelSelector: "app=csi-node",
 		FieldSelector: "spec.nodeName=" + nodeName,
 	})

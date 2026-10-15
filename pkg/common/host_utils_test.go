@@ -2,6 +2,7 @@ package common
 
 import (
 	"errors"
+	"os"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -222,5 +223,209 @@ func TestExpandDeviceFileSizeOrdering(t *testing.T) {
 	}
 	if got := calls[idxRefresh][len(calls[idxRefresh])-1]; got != loopdev {
 		t.Errorf("losetup -c target = %q, want %s", got, loopdev)
+	}
+}
+
+// ReconcileFilesystemToBackingFile must refresh the loop device before growing
+// the filesystem, must never pass a target size, and must hand xfs_growfs the
+// mount point while handing resize2fs the loop device.
+func TestReconcileFilesystemToBackingFile(t *testing.T) {
+	orig := ExecCommand
+	defer func() { ExecCommand = orig }()
+
+	for _, tc := range []struct {
+		fsType      string
+		wantGrowCmd string
+		wantGrowArg string
+	}{
+		{fsType: "xfs", wantGrowCmd: "xfs_growfs", wantGrowArg: "/var/lib/kubelet/target"},
+		{fsType: "ext4", wantGrowCmd: "resize2fs", wantGrowArg: "/dev/loop3"},
+	} {
+		var calls [][]string
+		ExecCommand = func(command string, args ...string) ([]byte, error) {
+			calls = append(calls, append([]string{command}, args...))
+			if command == "losetup" && len(args) == 1 && args[0] == "-a" {
+				return []byte("/dev/loop3: 0 /mnt/backing/vol\n"), nil
+			}
+			return []byte(""), nil
+		}
+
+		err := ReconcileFilesystemToBackingFile("/var/lib/kubelet/target", "/mnt/backing/vol", tc.fsType)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.fsType, err)
+		}
+
+		var refresh, grow []string
+		for _, call := range calls {
+			if call[0] == "losetup" && len(call) > 1 && call[1] == "-c" {
+				refresh = call
+			}
+			if call[0] == tc.wantGrowCmd {
+				grow = call
+			}
+		}
+		if refresh == nil {
+			t.Fatalf("%s: expected the loop device size to be refreshed, calls were %v", tc.fsType, calls)
+		}
+		if len(refresh) != 3 || refresh[2] != "/dev/loop3" {
+			t.Fatalf("%s: expected losetup -c /dev/loop3, got %v", tc.fsType, refresh)
+		}
+		if grow == nil {
+			t.Fatalf("%s: expected %s to run, calls were %v", tc.fsType, tc.wantGrowCmd, calls)
+		}
+		if len(grow) != 2 {
+			t.Fatalf("%s: expected %s to be called with exactly one argument (no target size), got %v",
+				tc.fsType, tc.wantGrowCmd, grow)
+		}
+		if grow[1] != tc.wantGrowArg {
+			t.Fatalf("%s: expected %s %s, got %v", tc.fsType, tc.wantGrowCmd, tc.wantGrowArg, grow)
+		}
+	}
+}
+
+// ExpandRawFileSize resizes only the raw file: no loop device is looked up or
+// refreshed, so it works from the controller, which has no loop device at all.
+func TestExpandRawFileSizeTouchesOnlyTheFile(t *testing.T) {
+	orig := ExecCommand
+	defer func() { ExecCommand = orig }()
+
+	var calls [][]string
+	ExecCommand = func(command string, args ...string) ([]byte, error) {
+		calls = append(calls, append([]string{command}, args...))
+		return []byte(""), nil
+	}
+
+	if err := ExpandRawFileSize("/mnt/backing/vol", 2147483648); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("expected exactly one command, got %v", calls)
+	}
+	expected := []string{"qemu-img", "resize", "-fraw", "/mnt/backing/vol", "2147483648"}
+	if !reflect.DeepEqual(calls[0], expected) {
+		t.Fatalf("expected %v, got %v", expected, calls[0])
+	}
+}
+
+func TestRemountBindReadOnly(t *testing.T) {
+	orig := ExecCommand
+	defer func() { ExecCommand = orig }()
+
+	var got []string
+	ExecCommand = func(command string, args ...string) ([]byte, error) {
+		got = append([]string{command}, args...)
+		return []byte(""), nil
+	}
+
+	if err := RemountBindReadOnly("/tmp/.hscsi-bind-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := []string{"mount", "-o", "remount,bind,ro", "/tmp/.hscsi-bind-1"}
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("expected %v, got %v", expected, got)
+	}
+}
+
+func TestGetFilesystemTypeUsesDeviceSignature(t *testing.T) {
+	original := ExecCommand
+	defer func() { ExecCommand = original }()
+
+	const backing = "/mnt/backing/volume.img"
+	ExecCommand = func(command string, args ...string) ([]byte, error) {
+		switch command {
+		case "losetup":
+			return []byte("/dev/loop7: [2049]:999 (" + backing + ")\n"), nil
+		case "blkid":
+			return []byte("btrfs\n"), nil
+		default:
+			t.Fatalf("unexpected command %q", command)
+			return nil, nil
+		}
+	}
+
+	fsType, err := GetFilesystemType(backing)
+	if err != nil {
+		t.Fatalf("GetFilesystemType returned error: %v", err)
+	}
+	if fsType != "btrfs" {
+		t.Fatalf("filesystem type = %q, want btrfs", fsType)
+	}
+}
+
+// Node-side expansion must hand each resize tool the target it accepts:
+// xfs_growfs the mount point, resize2fs the loop device. Passing the mount path
+// to resize2fs exits 1, which is how ext4 node expansion silently broke while
+// XFS kept working.
+func TestExpandMountedFilesystemTargetsPerFsType(t *testing.T) {
+	orig := ExecCommand
+	defer func() { ExecCommand = orig }()
+
+	const mountPath = "/var/lib/kubelet/pods/abc/volumes/kubernetes.io~csi/pvc-1/mount"
+	const backing = "/mnt/backing/pvc-1"
+
+	for _, tc := range []struct{ fsType, wantCmd, wantArg string }{
+		{"xfs", "xfs_growfs", mountPath},
+		{"ext4", "resize2fs", "/dev/loop9"},
+	} {
+		var got []string
+		ExecCommand = func(command string, args ...string) ([]byte, error) {
+			if command == "losetup" {
+				return []byte("/dev/loop9: 0 " + backing + "\n"), nil
+			}
+			got = append([]string{command}, args...)
+			return []byte(""), nil
+		}
+		if err := ExpandMountedFilesystem(mountPath, backing, tc.fsType); err != nil {
+			t.Fatalf("%s: unexpected error: %v", tc.fsType, err)
+		}
+		expected := []string{tc.wantCmd, tc.wantArg}
+		if !reflect.DeepEqual(got, expected) {
+			t.Fatalf("%s: expected %v, got %v", tc.fsType, expected, got)
+		}
+	}
+}
+
+// mkfs.ext4 leaves the last 1 MiB of a 1025Mi file unused, and resize2fs
+// cannot use it either, so that gap must not count as needing growth. A
+// restore into a larger PVC leaves a gap far beyond the slack.
+func TestFilesystemNeedsGrowthAllowsUnusableTail(t *testing.T) {
+	file, err := os.CreateTemp(t.TempDir(), "filesystem")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer file.Close()
+
+	original := ExecCommand
+	defer func() { ExecCommand = original }()
+	ExecCommand = func(string, ...string) ([]byte, error) {
+		return []byte("Block count: 262144\nBlock size: 4096\n"), nil
+	}
+	for _, tc := range []struct {
+		size int64
+		grow bool
+	}{
+		{1025 << 20, false}, // 1024Mi filesystem in a 1025Mi file
+		{2 << 30, true},     // 1Gi snapshot restored into a 2Gi PVC
+	} {
+		if err := file.Truncate(tc.size); err != nil {
+			t.Fatal(err)
+		}
+		if grow, err := FilesystemNeedsGrowth(file.Name(), "ext4"); err != nil || grow != tc.grow {
+			t.Fatalf("file size %d: grow=%v err=%v, want grow=%v", tc.size, grow, err, tc.grow)
+		}
+	}
+}
+
+func TestParseFilesystemSize(t *testing.T) {
+	ext4 := "dumpe2fs 1.46.5 (30-Dec-2021)\nFilesystem volume name:   <none>\nBlock count:              262144\nReserved block count:     13107\nBlock size:               4096\n"
+	if got, err := parseFilesystemSize(ext4, "ext4"); err != nil || got != 262144*4096 {
+		t.Fatalf("ext4 size = %d, %v", got, err)
+	}
+	xfs := "dblocks = 524288\nblocksize = 4096\n"
+	if got, err := parseFilesystemSize(xfs, "xfs"); err != nil || got != 524288*4096 {
+		t.Fatalf("xfs size = %d, %v", got, err)
+	}
+	if _, err := parseFilesystemSize("Block count: 10\n", "ext4"); err == nil {
+		t.Fatal("expected error when block size is missing")
 	}
 }

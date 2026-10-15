@@ -2,7 +2,13 @@ repos:
   - repo: https://github.com/dnephin/pre-commit-golang
     rev: v0.4.0
     hooks:
+      # operator/ is a separate Go module with its own `make -C operator test`;
+      # these hooks run from the root module and cannot resolve its packages.
       - id: go-fmt
+        exclude: ^operator/
       - id: go-vet
+        exclude: ^operator/
       - id: go-imports
+        exclude: ^operator/
       - id: go-mod-tidy
+        exclude: ^operator/

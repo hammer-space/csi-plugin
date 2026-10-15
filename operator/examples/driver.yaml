@@ -1,0 +1,19 @@
+apiVersion: storage.hammerspace.com/v1alpha1
+kind: HammerspaceCSIDriver
+metadata:
+  name: cluster
+spec:
+  credentialsSecretName: com.hammerspace.csi.credentials
+  tlsVerify: true
+  storageClasses:
+  - name: hammerspace-nfs
+    mode: NFS
+  - name: hammerspace-block
+    mode: Block
+    backingShareName: k8s-block-storage
+  - name: hammerspace-ext4
+    mode: ext4
+    backingShareName: k8s-file-storage
+  - name: hammerspace-xfs
+    mode: xfs
+    backingShareName: k8s-file-storage-xfs

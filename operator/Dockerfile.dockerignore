@@ -1,0 +1,12 @@
+# The build context is the repository root, but only Operator sources and the
+# canonical deployment manifest are needed.
+**
+!operator/
+!operator/**
+!deploy/
+!deploy/kubernetes/
+!deploy/kubernetes/kubernetes-1.36/
+!deploy/kubernetes/kubernetes-1.36/plugin.yaml
+operator/bin
+operator/bundle
+**/__pycache__

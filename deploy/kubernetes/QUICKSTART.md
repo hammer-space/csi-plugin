@@ -174,7 +174,11 @@ kubectl get volumesnapshot data-snapshot    # wait for READYTOUSE=true
 ```
 
 [`example_snapshot.yaml`](./example_snapshot.yaml) both snapshots `myfilesystem`
-and restores it into a new, independent PVC via `dataSource`.
+and restores it into a new, independent PVC via `dataSource`. New-PVC restore is
+supported for file-backed filesystem and block volumes. Native share-backed NFS
+volumes can be snapshotted, listed, and deleted, but their snapshots cannot be
+restored into a new PVC because Hammerspace can restore them only inside the
+original share.
 
 > Restoring a snapshot creates a **new** volume. Cloning an existing PVC
 > directly (PVC-to-PVC `dataSource`) is not supported by this driver.

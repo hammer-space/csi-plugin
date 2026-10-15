@@ -15,7 +15,12 @@ func GetCacheData(key string) (interface{}, error) {
 }
 
 func SetCacheData(key string, value interface{}, cacheExpireTime int) {
-	if cacheExpireTime != 0 {
+	// The condition used to be inverted (!= 0), so a caller-supplied TTL was
+	// always discarded in favour of 60s and a caller passing 0 got an entry
+	// that had already expired. Every cache in the driver was therefore capped
+	// at one minute: the objective lists and free capacity asked for 5 minutes,
+	// the NFS export list for an hour.
+	if cacheExpireTime == 0 {
 		cacheExpireTime = 60 // 1 min is default timeout
 	}
 	cache.Set(key, value, time.Duration(cacheExpireTime)*time.Second)

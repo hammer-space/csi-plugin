@@ -9,7 +9,7 @@
 # docker compose -f docker-compose-dev.yml up
 
 # ---------- Stage 1: Builder ----------
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 # Install required packages
 RUN apk add --no-cache \

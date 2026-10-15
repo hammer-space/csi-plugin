@@ -78,3 +78,37 @@ func TestNodeUnpublishVolumeForceUnmountsEIOPath(t *testing.T) {
 		t.Fatalf("force-unmount calls = %d, want 1", forceUnmountCalls)
 	}
 }
+
+func TestNodeUnpublishVolumeForceUnmountsESTALEPath(t *testing.T) {
+	originalLstat := lstatTargetPath
+	originalForceUnmount := forceUnmountTarget
+	t.Cleanup(func() {
+		lstatTargetPath = originalLstat
+		forceUnmountTarget = originalForceUnmount
+	})
+
+	targetPath := "/var/lib/kubelet/pods/test/stale-mount"
+	lstatTargetPath = func(path string) (os.FileInfo, error) {
+		return nil, &os.PathError{Op: "lstat", Path: path, Err: syscall.ESTALE}
+	}
+	forceUnmountCalls := 0
+	forceUnmountTarget = func(path string) error {
+		forceUnmountCalls++
+		if path != targetPath {
+			t.Fatalf("force-unmount path = %q, want %q", path, targetPath)
+		}
+		return nil
+	}
+
+	d := &CSIDriver{volumeLocks: make(map[string]*keyLock)}
+	_, err := d.NodeUnpublishVolume(context.Background(), &csi.NodeUnpublishVolumeRequest{
+		VolumeId:   "/csi/nfs-pvc-test",
+		TargetPath: targetPath,
+	})
+	if err != nil {
+		t.Fatalf("NodeUnpublishVolume returned error for recoverable ESTALE: %v", err)
+	}
+	if forceUnmountCalls != 1 {
+		t.Fatalf("force-unmount calls = %d, want 1", forceUnmountCalls)
+	}
+}

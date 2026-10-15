@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hammerspace-block-example
+spec:
+  restartPolicy: Never
+  containers:
+  - name: check
+    image: busybox:1.36
+    command:
+    - sh
+    - -ec
+    - printf hammerspace-block > /tmp/marker; dd if=/tmp/marker of=/dev/hsblock bs=512
+      conv=sync,notrunc; sync; dd if=/dev/hsblock bs=512 count=1 2>/dev/null | head
+      -c 17 | cmp - /tmp/marker; echo PASS
+    volumeDevices:
+    - name: data
+      devicePath: /dev/hsblock
+  volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: hammerspace-block-example

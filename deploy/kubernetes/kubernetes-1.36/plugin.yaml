@@ -10,8 +10,8 @@
 #                                               set to "none" to disable in prod,
 #                                               or "otlp" (+ OTEL_EXPORTER_OTLP_ENDPOINT)
 #                                               to ship to a collector.
-# Sidecar image tags (csi-provisioner / csi-attacher / csi-snapshotter /
-# csi-resizer / node-driver-registrar) match the 1.29 manifest.
+# Most sidecar image tags match the 1.29 manifest. The resizer is newer to
+# populate PVC expansion recovery status on Kubernetes 1.32 and later.
 #### CSI Object
 apiVersion: storage.k8s.io/v1
 kind: CSIDriver
@@ -22,6 +22,12 @@ spec:
   requiresRepublish: true
   volumeLifecycleModes:
     - Persistent
+  # Requires --enable-capacity on the provisioner below, plus the
+  # csistoragecapacities/csinodes/statefulsets grants in its ClusterRole.
+  # Enabling this without a publisher, or with a driver that reports 0, makes
+  # the scheduler reject every node with "did not have enough free storage".
+  # GetCapacity reports per StorageClass from the class parameters; it does
+  # not vary by topology segment, so every segment sees the cluster figure.
   storageCapacity: true
 
 #### Controller Service
@@ -76,9 +82,29 @@ spec:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--timeout=60s"  # Recommended as shares may take some time to create
             - "--v=5"
+            # Publishes the CSIStorageCapacity objects that back the
+            # CSIDriver's storageCapacity: true. ownerref-level=1 resolves
+            # this pod's StatefulSet as owner so they are garbage collected.
+            - "--enable-capacity"
+            - "--capacity-ownerref-level=1"
+            # The OpenShift CSI capacity test waits 60 seconds for a newly
+            # created StorageClass. Keep publication comfortably inside that
+            # window instead of relying on the provisioner's 1 minute default.
+            - "--capacity-poll-interval=30s"
+            # Refresh several StorageClasses at once, so one slow Anvil
+            # lookup can't hold a new class past that 60 second window.
+            - "--capacity-threads=4"
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/
@@ -108,10 +134,27 @@ spec:
               mountPath: /var/lib/csi/
         - name: csi-resizer
           imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
+          image: registry.k8s.io/sig-storage/csi-resizer:v1.14.0
           args:
             - "--csi-address=$(CSI_ENDPOINT)"
             - "--v=5"
+          env:
+            - name: CSI_ENDPOINT
+              value: /var/lib/csi/hs-csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /var/lib/csi/
+        - name: liveness-probe
+          imagePullPolicy: Always
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.12.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--health-port=29791"
+            # The driver's Probe reports process health only and never contacts
+            # the Anvil, so an Anvil outage does not restart the driver. The
+            # longer timeout keeps a briefly busy driver from being restarted
+            # and interrupting in-flight mounts.
+            - "--probe-timeout=10s"
           env:
             - name: CSI_ENDPOINT
               value: /var/lib/csi/hs-csi.sock
@@ -125,12 +168,28 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.3.0
+          image: hammerspaceinc/csi-plugin:v1.4.0
           ports:
             - containerPort: 9090
               name: metrics
               hostPort: 9090
               protocol: TCP
+            - containerPort: 29791
+              name: healthz
+              hostPort: 29791
+              protocol: TCP
+          # Served by the liveness-probe sidecar above (shares this pod's
+          # network via hostNetwork), which polls this container's CSI
+          # Probe RPC and restarts this container via kubelet on failure.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            # Longer than the sidecar's --probe-timeout, so kubelet waits for the
+            # sidecar's answer instead of timing it out first.
+            timeoutSeconds: 15
+            periodSeconds: 60
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -172,15 +231,24 @@ spec:
           volumeMounts:
             - name: socket-dir
               mountPath: /var/lib/csi/
+            # CreateVolume grows a restored ext4/xfs filesystem through a loop
+            # mount. The host /dev is needed to see loop devices the kernel
+            # creates after the container starts.
+            - name: dev-dir
+              mountPath: /dev
             - name: staging-dir
               mountPath: /tmp
               mountPropagation: Bidirectional
       volumes:
         - name: socket-dir
           emptyDir: {}
+        - name: dev-dir
+          hostPath:
+            path: /dev
         - name: staging-dir
           hostPath:
             path: /tmp
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -251,6 +319,19 @@ rules:
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
     verbs: ["get", "list", "watch", "update"]
+  # Capacity publication (--enable-capacity on the provisioner). csinodes
+  # enumerate the topology segments capacity is reported per; the statefulsets
+  # grant resolves the owner reference so the objects are garbage collected
+  # with the controller.
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csistoragecapacities"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["csinodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1
@@ -285,18 +366,6 @@ spec:
       hostNetwork: true
       dnsPolicy: ClusterFirstWithHostNet
       containers:
-        - name: csi-resizer
-          imagePullPolicy: Always
-          image: registry.k8s.io/sig-storage/csi-resizer:v1.10.1
-          args:
-            - "--csi-address=$(CSI_ENDPOINT)"
-            - "--v=5"
-          env:
-            - name: CSI_ENDPOINT
-              value: /csi/csi.sock
-          volumeMounts:
-            - name: socket-dir
-              mountPath: /csi
         - name: driver-registrar
           imagePullPolicy: Always
           image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.9.0
@@ -325,6 +394,23 @@ spec:
               mountPath: /csi
             - name: registration-dir
               mountPath: /registration
+        - name: liveness-probe
+          imagePullPolicy: Always
+          image: registry.k8s.io/sig-storage/livenessprobe:v2.12.0
+          args:
+            - "--csi-address=$(CSI_ENDPOINT)"
+            - "--health-port=29793"
+            # The driver's Probe reports process health only and never contacts
+            # the Anvil, so an Anvil outage does not restart the driver. The
+            # longer timeout keeps a briefly busy driver from being restarted
+            # and interrupting in-flight mounts.
+            - "--probe-timeout=10s"
+          env:
+            - name: CSI_ENDPOINT
+              value: /csi/csi.sock
+          volumeMounts:
+            - name: socket-dir
+              mountPath: /csi
         - name: hs-csi-plugin-node
           securityContext:
             privileged: true
@@ -332,12 +418,28 @@ spec:
               add: ["SYS_ADMIN"]
             allowPrivilegeEscalation: true
           imagePullPolicy: Always
-          image: hammerspaceinc/csi-plugin:v1.3.0
+          image: hammerspaceinc/csi-plugin:v1.4.0
           ports:
             - containerPort: 9091
               name: metrics
               hostPort: 9091
               protocol: TCP
+            - containerPort: 29793
+              name: healthz
+              hostPort: 29793
+              protocol: TCP
+          # Served by the liveness-probe sidecar above (shares this pod's
+          # network via hostNetwork), which polls this container's CSI
+          # Probe RPC and restarts this container via kubelet on failure.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: healthz
+            initialDelaySeconds: 10
+            # Longer than the sidecar's --probe-timeout, so kubelet waits for the
+            # sidecar's answer instead of timing it out first.
+            timeoutSeconds: 15
+            periodSeconds: 60
           envFrom:
             - configMapRef:
                 name: csi-env-config
@@ -418,6 +520,7 @@ spec:
         - name: staging-dir
           hostPath:
             path: /tmp
+            type: DirectoryOrCreate
 ---
 apiVersion: v1
 kind: ServiceAccount

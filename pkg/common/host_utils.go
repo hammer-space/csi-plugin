@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"os/exec"
@@ -218,6 +219,66 @@ func ExpandFilesystem(device, fsType string) error {
 	return nil
 }
 
+// ExpandMountedFilesystem grows the filesystem of an already-mounted volume,
+// handing each resize tool the target it actually accepts.
+//
+// This is not interchangeable with ExpandFilesystem: xfs_growfs operates on the
+// MOUNT POINT, while resize2fs requires the underlying block device and exits 1
+// ("Couldn't find valid filesystem superblock") when handed a directory. Passing
+// the mount path for both means XFS volumes expand and ext4 volumes always fail,
+// which is exactly how node-side expansion of ext4 file-backed volumes broke.
+//
+// backingFile is the raw file behind the volume; its loop device is resolved
+// here for the non-XFS case. The caller is responsible for having already grown
+// the backing file and refreshed the loop device (ExpandDeviceFileSize).
+func ExpandMountedFilesystem(targetPath, backingFile, fsType string) error {
+	if fsType == "xfs" {
+		return ExpandFilesystem(targetPath, fsType)
+	}
+	loopdev, err := determineLoopDeviceFromBackingFile(backingFile)
+	if err != nil {
+		return err
+	}
+	return ExpandFilesystem(loopdev, fsType)
+}
+
+// RemountBindReadOnly makes an existing bind mount in this namespace read-only.
+//
+// It must be applied to the SOURCE of a bind, before the bind is created.
+// Remounting the bind TARGET afterwards cannot work across the container/host
+// mount-namespace boundary that the node plugin's Bidirectional mount
+// propagation sets up: that boundary propagates mount and unmount topology
+// events, not flag-only remounts of an already-propagated mount. A bind created
+// after this remount is itself a new topology event, so it carries the source's
+// read-only flag with it.
+func RemountBindReadOnly(target string) error {
+	output, err := ExecCommand("mount", "-o", "remount,bind,ro", target)
+	if err != nil {
+		log.Errorf("could not remount %s read-only: %s: %v", target, output, err)
+	}
+	return err
+}
+
+// GetFilesystemType identifies the filesystem from the loop device's on-disk
+// signature. This avoids maintaining a filesystem-magic allowlist and works
+// even when a replacement CSI node container cannot see kubelet's existing
+// mount in its own mount namespace. An empty result means a raw block volume.
+func GetFilesystemType(backingFile string) (string, error) {
+	loopDevice, err := determineLoopDeviceFromBackingFile(backingFile)
+	if err != nil {
+		return "", err
+	}
+	output, err := ExecCommand("blkid", "-p", "-s", "TYPE", "-o", "value", loopDevice)
+	if err != nil {
+		var exitError *exec.ExitError
+		if errors.As(err, &exitError) && exitError.ExitCode() == 2 {
+			return "", nil // blkid: no recognizable filesystem signature
+		}
+		return "", fmt.Errorf("could not determine filesystem type on %q: %w", loopDevice, err)
+	}
+	return strings.TrimSpace(string(output)), nil
+}
+
 func BindMountDevice(sourcefile, destfile string) error {
 	mounter := mount.New("")
 	// Check if the file already exists
@@ -280,7 +341,6 @@ func MakeEmptyRawFile(ctx context.Context, pathname string, size int64) error {
 
 func ExpandDeviceFileSize(pathname string, size int64) error {
 	log.Infof("resizing device file '%s'", pathname)
-	sizeStr := strconv.FormatInt(size, 10)
 	loopdev, err := determineLoopDeviceFromBackingFile(pathname)
 	if err != nil {
 		// log.Errorf("DFERR: loopdev: '%s', error: '%v'", loopdev, err.Error())
@@ -292,19 +352,148 @@ func ExpandDeviceFileSize(pathname string, size int64) error {
 	// loop device is left reporting the old size, so the caller's resize2fs/xfs_growfs
 	// is a no-op — the first NodeExpandVolume fails for ext4/xfs (and silently under-
 	// sizes a block device, which has no filesystem check to catch it) until a retry.
+	if err := ExpandRawFileSize(pathname, size); err != nil {
+		return err
+	}
+	// Refresh the loop device size with losetup -c. Requires UBI image.
+	return refreshLoopDeviceSize(loopdev)
+}
+
+// ExpandRawFileSize grows the raw backing file itself. It does not touch any
+// attached loop device or mounted filesystem, so it is the only resize step
+// available to a caller that reaches the file over NFS but has no local loop
+// device — such as the controller growing a file-backed volume's backing file
+// right after restoring it from a snapshot at a larger requested capacity.
+func ExpandRawFileSize(pathname string, size int64) error {
+	log.Infof("resizing raw file '%s' to %d bytes", pathname, size)
+	sizeStr := strconv.FormatInt(size, 10)
 	output, err := ExecCommand("qemu-img", "resize", "-fraw", pathname, sizeStr)
 	if err != nil {
 		log.Errorf("%s, %v", output, err.Error())
 		return err
 	}
-	// Refresh the loop device size with losetup -c
-	// Requires UBI image
-	loresize, err := ExecCommand("losetup", "-c", loopdev)
+	return nil
+}
+
+// refreshLoopDeviceSize makes the kernel re-read a loop device's CURRENT
+// backing-file size (losetup -c / LOOP_SET_CAPACITY). It never changes the
+// backing file's own size.
+func refreshLoopDeviceSize(loopdev string) error {
+	output, err := ExecCommand("losetup", "-c", loopdev)
 	if err != nil {
-		log.Errorf("Resizing loop device '%s' failed with output '%s': '%v'", loopdev, loresize, err.Error())
+		log.Errorf("Resizing loop device '%s' failed with output '%s': '%v'", loopdev, output, err.Error())
 		return err
 	}
 	return nil
+}
+
+// ReconcileFilesystemToBackingFile grows the filesystem at targetPath to use
+// whatever space is CURRENTLY available in its backing file, without ever
+// changing the backing file's own size — growing the raw file is the
+// controller's job, at CreateVolume/ControllerExpandVolume time.
+//
+// It deliberately takes no target size. A caller-supplied size (for example
+// the CSI VolumeContext "size") is fixed at volume creation and is not
+// updated by a later expansion, so resizing toward it could shrink an
+// already-expanded volume. Instead it refreshes the loop device from the
+// backing file's actual current size and then grows the filesystem with no
+// explicit target: resize2fs and xfs_growfs both grow to fill all the space
+// the device reports. Both steps are idempotent — a no-op, not an error, when
+// there is nothing to grow — so this is safe to call unconditionally on every
+// publish of a file-backed mount volume, with no size pre-check.
+func ReconcileFilesystemToBackingFile(targetPath, backingFile, fsType string) error {
+	loopdev, err := determineLoopDeviceFromBackingFile(backingFile)
+	if err != nil {
+		return err
+	}
+	if err := refreshLoopDeviceSize(loopdev); err != nil {
+		return err
+	}
+	// xfs_growfs takes the mount point; resize2fs needs the underlying block
+	// device and fails when handed a directory.
+	if fsType == "xfs" {
+		return ExpandFilesystem(targetPath, fsType)
+	}
+	return ExpandFilesystem(loopdev, fsType)
+}
+
+// filesystemGrowthSlack is how much smaller than its backing file a filesystem
+// may be and still count as fully grown. mkfs.ext4 and resize2fs leave a
+// trailing partial block group unused when it is too small for its own
+// metadata (1 MiB of a 1025Mi file, for example), and older mkfs.xfs drops a
+// trailing allocation group under 16 MiB, so no filesystem can close such a
+// gap. A smaller slack would make those volumes need growth forever.
+const filesystemGrowthSlack = 16 << 20
+
+// FilesystemNeedsGrowth reports whether the ext4/xfs filesystem inside
+// backingFile is smaller than the file itself, i.e. a restored volume whose
+// filesystem has not yet been grown to the capacity its backing file was given.
+// It reads the superblock without mounting, so it is safe while the filesystem
+// is mounted read-only elsewhere.
+func FilesystemNeedsGrowth(backingFile, fsType string) (bool, error) {
+	info, err := os.Stat(backingFile)
+	if err != nil {
+		return false, err
+	}
+	var output []byte
+	if fsType == "xfs" {
+		output, err = ExecCommand("xfs_db", "-r", "-c", "sb 0", "-c", "print dblocks blocksize", backingFile)
+	} else {
+		output, err = ExecCommand("dumpe2fs", "-h", backingFile)
+	}
+	if err != nil {
+		return false, fmt.Errorf("read %s superblock of %s: %w: %s", fsType, backingFile, err, output)
+	}
+	blockCount, blockSize, err := parseFilesystemGeometry(string(output), fsType)
+	if err != nil {
+		return false, fmt.Errorf("read %s superblock of %s: %w", fsType, backingFile, err)
+	}
+	return info.Size()-blockCount*blockSize > filesystemGrowthSlack, nil
+}
+
+// parseFilesystemGeometry extracts the block count and block size from dumpe2fs -h
+// or xfs_db "print dblocks blocksize" output.
+func parseFilesystemGeometry(output, fsType string) (int64, int64, error) {
+	countKey, sizeKey, sep := "Block count", "Block size", ":"
+	if fsType == "xfs" {
+		countKey, sizeKey, sep = "dblocks", "blocksize", "="
+	}
+	values := map[string]int64{}
+	for _, line := range strings.Split(output, "\n") {
+		key, value, ok := strings.Cut(line, sep)
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		if key != countKey && key != sizeKey {
+			continue
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("parse %s: %w", key, err)
+		}
+		values[key] = n
+	}
+	count, haveCount := values[countKey]
+	size, haveSize := values[sizeKey]
+	if !haveCount || !haveSize {
+		return 0, 0, fmt.Errorf("superblock output has no %q and %q", countKey, sizeKey)
+	}
+	if count <= 0 || size <= 0 {
+		return 0, 0, fmt.Errorf("invalid filesystem geometry: %s=%d %s=%d", countKey, count, sizeKey, size)
+	}
+	return count, size, nil
+}
+
+func parseFilesystemSize(output, fsType string) (int64, error) {
+	count, size, err := parseFilesystemGeometry(output, fsType)
+	if err != nil {
+		return 0, err
+	}
+	if count > math.MaxInt64/size {
+		return 0, fmt.Errorf("filesystem size overflows int64")
+	}
+	return count * size, nil
 }
 
 func FormatDevice(ctx context.Context, device, fsType string) error {

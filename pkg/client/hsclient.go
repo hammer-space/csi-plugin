@@ -30,6 +30,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -128,25 +129,81 @@ func (client *HammerspaceClient) GetAnvilPortal() (string, error) {
 	return endpointUrl.Hostname(), nil
 }
 
-// Return a string with a floating data portal IP
-func (client *HammerspaceClient) GetPortalFloatingIp(ctx context.Context) (string, error) {
-	// Instead of using /cntl, use /cntl/state to simplify processing of the JSON
-	// struct. If using /cntl, add [] before cluster struct
+// portalCacheSeconds is how long the list of up data portals is reused. Every
+// NFS mount needs it, so without it a node staging many volumes at once asks
+// Anvil the same question once per volume. It is short enough that a portal
+// going down is noticed within one kubelet retry or two.
+const portalCacheSeconds = 30
+
+// clusterStateCacheSeconds is how long /cntl/state is reused for floating IP
+// lookups. Every NFS mount looks up the floating IPs, so without it a node
+// staging many volumes asks Anvil for the full cluster state once per volume,
+// and while Anvil is slow every mount waits on that call.
+const clusterStateCacheSeconds = 30
+
+// clusterState fetches /cntl/state, reusing a copy fetched in the last
+// clusterStateCacheSeconds. It is used instead of /cntl because it returns a
+// single cluster object rather than a list. Callers must not modify it.
+func (client *HammerspaceClient) clusterState(ctx context.Context) (*common.Cluster, error) {
+	if cached, _ := common.GetCacheData("CLUSTER_STATE"); cached != nil {
+		if clusters, ok := cached.(*common.Cluster); ok {
+			return clusters, nil
+		}
+	}
 	req, err := client.generateRequest(ctx, "GET", "/cntl/state", "")
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	statusCode, respBody, _, err := client.doRequest(ctx, *req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if statusCode != 200 {
-		return "", fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
+		return nil, fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 200)
 	}
 	var clusters common.Cluster
 	err = json.Unmarshal([]byte(respBody), &clusters)
 	if err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
+		return nil, err
+	}
+	common.SetCacheData("CLUSTER_STATE", &clusters, clusterStateCacheSeconds)
+	return &clusters, nil
+}
+
+// NFSServerAddresses returns every address this Anvil serves shares from: all
+// of its data portals, floating data-portal IPs and its own management IPs.
+// The management IPs count because the Anvil is the NFS 4.2 metadata server:
+// a 4.2 mount made through a data portal lists the Anvil as its server. A
+// backing-share mount from any other server was made against a different
+// Anvil. Portals count whatever their state: one in maintenance, or briefly
+// down, still belongs to this Anvil, and its mount must not be mistaken for a
+// foreign one.
+func (client *HammerspaceClient) NFSServerAddresses(ctx context.Context) ([]string, error) {
+	portals, err := client.dataPortals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	clusters, err := client.clusterState(ctx)
+	if err != nil {
+		return nil, err
+	}
+	addresses := make([]string, 0, len(portals)+len(clusters.PortalFloatingIps)+len(clusters.MgmtIps))
+	for _, p := range portals {
+		addresses = append(addresses, p.Node.MgmtIpAddress.Address)
+	}
+	for _, p := range clusters.PortalFloatingIps {
+		addresses = append(addresses, p.Address)
+	}
+	for _, p := range clusters.MgmtIps {
+		addresses = append(addresses, p.Address)
+	}
+	return addresses, nil
+}
+
+func (client *HammerspaceClient) GetPortalFloatingIp(ctx context.Context) (string, error) {
+	clusters, err := client.clusterState(ctx)
+	if err != nil {
 		return "", err
 	}
 
@@ -191,6 +248,54 @@ func (client *HammerspaceClient) GetPortalFloatingIp(ctx context.Context) (strin
 // GetDataPortals returns a list of operational data-portals
 // those with a matching nodeID are put at the top of the list
 func (client *HammerspaceClient) GetDataPortals(ctx context.Context, nodeID string) ([]common.DataPortal, error) {
+	filteredPortals, err := client.upDataPortals(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// sort dataportals
+	var colocatedPortals []common.DataPortal
+	var otherPortals []common.DataPortal
+	//// Find colocated node portals
+	for _, p := range filteredPortals {
+		if p.Node.Name == nodeID {
+			colocatedPortals = append(colocatedPortals, p)
+			log.Infof("Found co-located data-portal, %s, with node name, %s", p.Uoid["uuid"], p.Node.Name)
+		} else {
+			otherPortals = append(otherPortals, p)
+		}
+	}
+
+	sortedPortals := append(colocatedPortals, otherPortals...)
+
+	return sortedPortals, nil
+}
+
+// upDataPortals returns the NFS data portals that are up, from the list
+// fetched in the last portalCacheSeconds.
+func (client *HammerspaceClient) upDataPortals(ctx context.Context) ([]common.DataPortal, error) {
+	portals, err := client.dataPortals(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var filteredPortals []common.DataPortal
+	for _, p := range portals {
+		if p.OperState == "UP" && p.AdminState == "UP" && p.DataPortalType == "NFS_V3" {
+			filteredPortals = append(filteredPortals, p)
+		}
+	}
+	return filteredPortals, nil
+}
+
+// dataPortals returns every data portal of the Anvil, whatever its state,
+// reusing a list fetched in the last portalCacheSeconds. Callers must not
+// modify it.
+func (client *HammerspaceClient) dataPortals(ctx context.Context) ([]common.DataPortal, error) {
+	if cached, _ := common.GetCacheData("DATA_PORTALS"); cached != nil {
+		if portals, ok := cached.([]common.DataPortal); ok {
+			return portals, nil
+		}
+	}
 	req, err := client.generateRequest(ctx, "GET", "/data-portals/", "")
 
 	if err != nil {
@@ -215,30 +320,8 @@ func (client *HammerspaceClient) GetDataPortals(ctx context.Context, nodeID stri
 		return nil, err
 	}
 
-	// filter dataportals
-	var filteredPortals []common.DataPortal
-	for _, p := range portals {
-		if p.OperState == "UP" && p.AdminState == "UP" && p.DataPortalType == "NFS_V3" {
-			filteredPortals = append(filteredPortals, p)
-		}
-	}
-
-	// sort dataportals
-	var colocatedPortals []common.DataPortal
-	var otherPortals []common.DataPortal
-	//// Find colocated node portals
-	for _, p := range filteredPortals {
-		if p.Node.Name == nodeID {
-			colocatedPortals = append(colocatedPortals, p)
-			log.Infof("Found co-located data-portal, %s, with node name, %s", p.Uoid["uuid"], p.Node.Name)
-		} else {
-			otherPortals = append(otherPortals, p)
-		}
-	}
-
-	sortedPortals := append(colocatedPortals, otherPortals...)
-
-	return sortedPortals, nil
+	common.SetCacheData("DATA_PORTALS", portals, portalCacheSeconds)
+	return portals, nil
 }
 
 // Logs into Hammerspace Anvil Server
@@ -589,8 +672,12 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 
 	// Iterate over each share
 	for _, share := range shares {
-		// Skip shares that don't match the provided volume_id (if specified)
-		if volume_id != "" && share.Name != volume_id {
+		// Skip shares that don't match the provided volume_id (if specified).
+		// The CO identifies a share-backed volume by its EXPORT PATH ("/pvc-x"),
+		// not the bare share name ("pvc-x"), so compare against the path -- and
+		// against the same value reported as SourceVolumeId below, or filtering
+		// by source_volume_id silently matches nothing.
+		if volume_id != "" && path.Clean(share.ExportPath) != path.Clean(volume_id) {
 			continue
 		}
 
@@ -610,10 +697,19 @@ func (client *HammerspaceClient) ListSnapshots(ctx context.Context, snapshot_id,
 
 		// Iterate over the snapshots in the /.snapshot/ directory
 		for _, snapshotFile := range shareFile.Children {
+			// "current" is the live view of the share, not a snapshot. The
+			// snapshot-list API prunes it (see GetShareSnapshots); reading the
+			// directory directly has to prune it here.
+			if snapshotFile.Name == "current" {
+				continue
+			}
 			snapshot := common.SnapshotResponse{
-				Id:             snapshotFile.Name,
+				Id: snapshotFile.Name,
+				// The CO identifies a volume by its CSI volume ID, which for a
+				// share-backed volume is the share's export path, not the bare
+				// share name -- callers filter on this.
+				SourceVolumeId: share.ExportPath,
 				Created:        snapshotFile.CreateTime,
-				SourceVolumeId: share.Name,
 				ReadyToUse:     true, // Assume true if the snapshot exists
 				Size:           snapshotFile.Size,
 			}
@@ -766,6 +862,19 @@ func (client *HammerspaceClient) CreateShare(ctx context.Context,
 	}
 	if statusCode != 202 {
 		if statusCode == 400 {
+			// A retry of a create Anvil has already queued: wait on that task
+			// instead of listing every task on the cluster to find it.
+			if id := runningTaskID(respBody, "share-create"); id != "" {
+				log.Infof("share-create for %s is already queued as task %s; waiting on it", name, id)
+				success, err := client.WaitForTaskCompletion(ctx, "/tasks/"+id)
+				if err != nil {
+					return status.Errorf(codes.Aborted, "share-create task %s for %s has not finished: %v", id, name, err)
+				}
+				if !success {
+					return errors.New("share failed to create")
+				}
+				return nil
+			}
 			shareTaskRunning, taskErr := client.CheckIfShareCreateTaskIsRunning(ctx, name)
 			if taskErr != nil {
 				return taskErr
@@ -966,6 +1075,12 @@ func (client *HammerspaceClient) UpdateShareSize(ctx context.Context, name strin
 	if err != nil {
 		return errors.New(common.ShareNotFound)
 	}
+	// GetShareRawFields signals "no such share" as (nil, nil) on a 404, so a
+	// missing share reaches here with err == nil and a nil map. Writing to it
+	// panics the whole controller, taking every other in-flight RPC with it.
+	if share == nil {
+		return errors.New(common.ShareNotFound)
+	}
 
 	share["shareSizeLimit"] = size
 	shareString := new(bytes.Buffer)
@@ -1029,6 +1144,17 @@ func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, d
 		if strings.Contains(body, "Cannot remove a share with state REMOVED.") {
 			return nil
 		}
+		// A retry of a delete Anvil has already queued. Wait on that task:
+		// failing here made the provisioner retry, and send another DELETE,
+		// every few seconds until Anvil got to the first one.
+		if id := runningTaskID(body, "share-delete"); id != "" {
+			log.Infof("share-delete for %s is already queued as task %s; waiting on it", name, id)
+			return client.waitForShareDelete(ctx, "/tasks/"+id)
+		}
+		// The share is still being created, or another task holds it.
+		if strings.Contains(body, "BUSY") {
+			return status.Errorf(codes.Unavailable, "share %s is busy with another task: %s", name, body)
+		}
 	}
 	if statusCode == 404 || statusCode == 200 {
 		return nil
@@ -1037,22 +1163,42 @@ func (client *HammerspaceClient) DeleteShare(ctx context.Context, name string, d
 		return fmt.Errorf(common.UnexpectedHSStatusCode, statusCode, 202)
 	}
 
-	// ensure the location header is set and also make sure length >= 1
-	if locs, exists := respHeaders["Location"]; exists {
-		if !exists {
-			log.Errorf("No task returned to monitor")
-		} else {
-			success, err := client.WaitForTaskCompletion(ctx, locs[0])
-			if err != nil {
-				log.Error(err)
-			}
-			if !success {
-				return errors.New("share-delete task failed")
-			}
+	if locs, exists := respHeaders["Location"]; exists && len(locs) > 0 {
+		return client.waitForShareDelete(ctx, locs[0])
+	}
+	log.Errorf("No task returned to monitor")
+	return nil
+}
+
+// runningTaskRe matches Anvil's 400 for a request whose task is already
+// queued or running, e.g. "Task 'share-delete' is already running with ID
+// '<uuid>' and Status 'VALIDATED'".
+var runningTaskRe = regexp.MustCompile(`Task '([a-z-]+)' is already running with ID '([0-9A-Fa-f-]+)'`)
+
+// runningTaskID returns the ID of the action task that a 400 response body
+// reports as already running, or "".
+func runningTaskID(body, action string) string {
+	for _, m := range runningTaskRe.FindAllStringSubmatch(body, -1) {
+		if m[1] == action {
+			return m[2]
 		}
 	}
+	return ""
+}
 
-	return nil
+// waitForShareDelete waits for a share-delete task. If it can't see the task
+// finish, because the RPC ran out of time or Anvil didn't answer, it returns
+// Aborted rather than a failed delete: the task is still queued on Anvil, and
+// the provisioner's retry waits on it again.
+func (client *HammerspaceClient) waitForShareDelete(ctx context.Context, taskLocation string) error {
+	success, err := client.WaitForTaskCompletion(ctx, taskLocation)
+	if success {
+		return nil
+	}
+	if err != nil {
+		return status.Errorf(codes.Aborted, "share-delete task %s has not finished: %v", path.Base(taskLocation), err)
+	}
+	return errors.New("share-delete task failed")
 }
 
 func (client *HammerspaceClient) SnapshotShare(ctx context.Context, shareName string) (string, error) {
@@ -1151,16 +1297,46 @@ func (client *HammerspaceClient) GetFileSnapshots(ctx context.Context, filePath 
 	return snapshots, nil
 }
 
-func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePath, snapshotName string) error {
-	// Snapshot paths have the form
-	// <source>/.fsnapshot/<timestamp>/<source-base-name>. Use the directory
-	// component, not path.Base(snapshotName), which is the source file name.
-	snapshotDir := path.Base(path.Dir(snapshotName))
-	parts := strings.SplitN(snapshotDir, "-", 6)
-	if len(parts) < 5 {
-		return fmt.Errorf("invalid file snapshot name %q", snapshotName)
+// fileSnapshotTimestampPattern matches the date-time component of a file
+// snapshot path, e.g. "2026-09-23T08-25-16-0644-0".
+var fileSnapshotTimestampPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T`)
+
+// fileSnapshotTimestamp extracts the date-time expression the delete API needs
+// from a file snapshot's path.
+//
+// Hammerspace lays these out as
+//
+//	<share>/.fsnapshot/<source-file-name>/<timestamp>
+//
+// so the timestamp is the LAST component, not the second-to-last. Reading the
+// wrong component yielded the source FILE NAME, which was then truncated into a
+// nonsense "date" ("hscsi-cert-block-20260923-pvc"). The API matched no
+// snapshot, answered 400, and the caller treats 400 as success -- so every file
+// snapshot silently survived its own deletion, and DeleteVolume then refused
+// forever with VolumeDeleteHasSnapshots because the snapshot was still there.
+//
+// Both positions are still checked, since an earlier layout put the timestamp
+// first, and a name matching neither is an error rather than a silent no-op.
+func fileSnapshotTimestamp(snapshotName string) (string, error) {
+	for _, candidate := range []string{path.Base(snapshotName), path.Base(path.Dir(snapshotName))} {
+		if !fileSnapshotTimestampPattern.MatchString(candidate) {
+			continue
+		}
+		// "2026-09-23T08-25-16-0644-0" -> "2026-09-23T08-25-16"
+		parts := strings.SplitN(candidate, "-", 6)
+		if len(parts) < 5 {
+			continue
+		}
+		return strings.Join(parts[0:5], "-"), nil
 	}
-	snapshotTime := strings.Join(parts[0:5], "-")
+	return "", fmt.Errorf("could not find a timestamp in file snapshot name %q", snapshotName)
+}
+
+func (client *HammerspaceClient) DeleteFileSnapshot(ctx context.Context, filePath, snapshotName string) error {
+	snapshotTime, err := fileSnapshotTimestamp(snapshotName)
+	if err != nil {
+		return err
+	}
 
 	req, _ := client.generateRequest(ctx, "POST",
 		fmt.Sprintf("/file-snapshots/delete?filename-expression=%s&date-time-expression=%s", url.PathEscape(filePath), url.PathEscape(snapshotTime)), "")
@@ -1251,17 +1427,18 @@ func (client *HammerspaceClient) GetClusterAvailableCapacity(ctx context.Context
 	}
 
 	var cluster common.ClusterResponse
-	err = json.Unmarshal([]byte(respBody), &cluster)
-	if err != nil {
+	if err = json.Unmarshal([]byte(respBody), &cluster); err != nil {
 		log.Error("Error parsing JSON response: " + err.Error())
+		return 0, err
 	}
-	// set free capacity to cache expire in 5 min
-	common.SetCacheData("FREE_CAPACITY", cluster.Capacity["free"], 60*5)
 
-	free := cluster.Capacity["free"]
-	if err != nil {
-		log.Error("Error parsing free cluster capacity: " + err.Error())
+	free, ok := cluster.Capacity["free"]
+	if !ok {
+		return 0, fmt.Errorf("cluster state reported no free capacity")
 	}
+
+	// set free capacity to cache expire in 5 min
+	common.SetCacheData("FREE_CAPACITY", free, 60*5)
 
 	return free, nil
 }

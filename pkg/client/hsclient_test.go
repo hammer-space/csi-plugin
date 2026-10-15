@@ -554,3 +554,136 @@ func TestCloneShareSnapshotRequiresTaskLocation(t *testing.T) {
 		t.Fatalf("expected missing task location error, got %v", err)
 	}
 }
+
+func TestClusterCapacityRejectsMalformedOrMissingCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name, response string
+		want           int64
+		wantError      bool
+	}{
+		{"free space", `{"capacity":{"free":8192}}`, 8192, false},
+		{"full cluster", `{"capacity":{"free":0}}`, 0, false},
+		{"missing capacity", `{}`, 0, true},
+		{"missing free", `{"capacity":{"used":20}}`, 0, true},
+		{"invalid JSON", `{`, 0, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			setupHTTP()
+			defer tearDownHTTP()
+			Mux.HandleFunc(BasePath+"/cntl/state", func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, tc.response)
+			})
+			// Failed responses must not overwrite the last valid cache value.
+			common.SetCacheData("FREE_CAPACITY", int64(123), 300)
+			capacity, err := hsclient.GetClusterAvailableCapacity(context.Background())
+			if (err != nil) != tc.wantError || capacity != tc.want {
+				t.Fatalf("capacity = %d, error = %v; want %d, error=%v", capacity, err, tc.want, tc.wantError)
+			}
+			cached, err := common.GetCacheData("FREE_CAPACITY")
+			wantCache := tc.want
+			if tc.wantError {
+				wantCache = 123
+			}
+			if err != nil || cached != wantCache {
+				t.Fatalf("cache = %v, %v; want %d", cached, err, wantCache)
+			}
+		})
+	}
+}
+
+// GetShareRawFields reports a missing share as (nil, nil), so UpdateShareSize
+// used to write into a nil map and panic the entire controller process rather
+// than returning an error for one RPC.
+func TestUpdateShareSizeReturnsErrorForMissingShare(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	Mux.HandleFunc(BasePath+"/shares/gone", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(404)
+	})
+
+	err := hsclient.UpdateShareSize(context.Background(), "gone", 1073741824)
+	if err == nil {
+		t.Fatal("expected an error for a share that does not exist")
+	}
+	if err.Error() != common.ShareNotFound {
+		t.Fatalf("expected %q, got %q", common.ShareNotFound, err.Error())
+	}
+}
+
+// Hammerspace lays file snapshots out as <share>/.fsnapshot/<file>/<timestamp>,
+// so the timestamp is the LAST path component. Reading the second-to-last one
+// yielded the source file name, which was silently truncated into a nonsense
+// "date" -- the API then matched nothing, returned 400, and the caller treated
+// that as success, so snapshots survived deletion and blocked DeleteVolume.
+func TestFileSnapshotTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		snapshot string
+		want     string
+		wantErr  bool
+	}{
+		{
+			name:     "current layout: timestamp last",
+			snapshot: "/share/.fsnapshot/hscsi-cert-block-20260923-pvc-f397f67e-b54a-4a6d/2026-09-23T08-25-16-0644-0",
+			want:     "2026-09-23T08-25-16",
+		},
+		{
+			name:     "legacy layout: timestamp first",
+			snapshot: "/share/.fsnapshot/2026-09-23T08-25-16-0644-0/my-volume-file",
+			want:     "2026-09-23T08-25-16",
+		},
+		{
+			name:     "no timestamp anywhere is an error, not a silent no-op",
+			snapshot: "/share/.fsnapshot/some-file/another-file",
+			wantErr:  true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := fileSnapshotTimestamp(tc.snapshot)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected an error, got %q", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("timestamp = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// GetClusterAvailableCapacity must always query the Anvil and refresh
+// FREE_CAPACITY as a side effect. Callers that want the cached figure read it
+// themselves (CreateVolume, GetCapacity), so caching inside here would break
+// the callers that need a current value.
+func TestGetClusterAvailableCapacityAlwaysQueriesAndRefreshesCache(t *testing.T) {
+	setupHTTP()
+	defer tearDownHTTP()
+
+	calls := 0
+	Mux.HandleFunc(BasePath+"/cntl/state", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		fmt.Fprint(w, `{"capacity":{"free":8192}}`)
+	})
+
+	for i := 0; i < 2; i++ {
+		got, err := hsclient.GetClusterAvailableCapacity(context.Background())
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if got != 8192 {
+			t.Fatalf("capacity = %d, want 8192", got)
+		}
+	}
+	if calls != 2 {
+		t.Fatalf("Anvil queried %d times; this call must not serve from cache", calls)
+	}
+	if cached, _ := common.GetCacheData("FREE_CAPACITY"); cached != int64(8192) {
+		t.Fatalf("FREE_CAPACITY = %v, want the value to be refreshed to 8192", cached)
+	}
+}

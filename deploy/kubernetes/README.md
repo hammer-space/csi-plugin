@@ -46,6 +46,40 @@ Secrets Operator / Secrets Store CSI Driver), see [`SECRETS.md`](./SECRETS.md).
 To deploy updates to the plugin, simply change the image tag ```hammerspaceinc/csi-plugin``` of the StatefulSet and DaemonSet to the new plugin image, make any other update to environment variables, and reapply the yaml files.
 
 If you are using ```hammerspaceinc/csi-plugin:latest``` you must delete all the existing plugin pods so the new image is pulled and the pods are recreated automatically. Otherwise, changing the image tag will trigger an update to occur. Ex. ```hammerspaceinc/csi-plugin:v1.2.9``` -> ```hammerspaceinc/csi-plugin:v1.3.0```
+
+### Upgrading from 1.3.x or earlier: drain each node
+
+1.4.0 changes how NFS volumes are mounted on a node:
+
+- **1.3.x and earlier:** one node-wide mount of the Hammerspace root export, at `/var/lib/hammerspace/rootmount`. Each pod's volume was a bind out of it.
+- **1.4.0:** each NFS volume gets its own NFS mount at its CSI staging path, which is bound into the pods that use it. This covers native NFS volumes and NFS volumes inside a backing share (`fsType: nfs` with `mountBackingShareName`).
+
+A volume already in use on a node when you upgrade stays in the old layout until every pod using it leaves that node. Kubernetes does not re-stage a volume it already considers staged, so in the meantime:
+
+| After upgrading the plugin, without draining | Result |
+| --- | --- |
+| Pods that were already running | Keep working unchanged |
+| A **new** pod on the same node using a volume that is still in the old layout | Stuck in `ContainerCreating` with `FailedPrecondition: NFS volume ... is not mounted at staging path ...; refusing to publish an unbacked directory` until every other pod using that volume leaves the node |
+
+To avoid that, upgrade the plugin and then drain the nodes one at a time:
+
+1. Update the plugin images (or the Operator) as described above, and wait for the new node plugin pod on every node to be `Running`.
+2. For each node in turn:
+   ```sh
+   kubectl drain <node> --ignore-daemonsets --delete-emptydir-data
+   ```
+3. Wait until no Hammerspace volume is still attached to that node:
+   ```sh
+   kubectl get volumeattachments -o wide | grep <node>
+   ```
+4. Return the node to service:
+   ```sh
+   kubectl uncordon <node>
+   ```
+
+As each old-style volume is unstaged, the new plugin removes the marker the old version left in `/var/lib/hammerspace/volumes`. After the last one, it unmounts `/var/lib/hammerspace/rootmount`. Pods rescheduled onto the node get the new layout. A node rebooted after the upgrade needs no further action.
+
+File-backed (`ext4`/`xfs`) and raw block volumes are not affected. They already reach their backing file through the backing share and never used the root export, so the drain is only needed for nodes running NFS volumes.
 ## Kubernetes Cluster Prerequisites
 Kubernetes documentation for CSI support can be found [here](https://kubernetes-csi.github.io/)
 
@@ -261,6 +295,13 @@ The driver snapshots native share-backed volumes with a share snapshot and
 file-backed volumes with a file snapshot (freezing the source filesystem
 briefly for a crash-consistent image); there is nothing to configure.
 
+> **Known limitation:** A native share-backed NFS snapshot cannot be restored
+> into a new PVC. Hammerspace keeps the snapshot inside its source share and can
+> restore it only within that same share; each NFS PVC is a separate share.
+> `CreateVolume` therefore rejects that restore request rather than returning a
+> PVC backed by the wrong share. Snapshot creation, listing, and deletion remain
+> supported for backup and recovery workflows that operate on the source share.
+
 > **Known limitation:** Snapshot and restore are not supported for NFS volumes
 > provisioned as directories with `mountBackingShareName`. The backend does not
 > currently provide a recursive directory snapshot/clone operation. Snapshotting
@@ -271,7 +312,8 @@ briefly for a crash-consistent image); there is nothing to configure.
 
 Reference the snapshot as a PVC `dataSource`. This provisions a **new**,
 independent volume — see [`example_snapshot.yaml`](./example_snapshot.yaml) for
-the snapshot and restore together.
+the snapshot and restore together. This is supported for file-backed filesystem
+and block volumes, not native share-backed NFS volumes.
 
 ```yaml
 apiVersion: v1

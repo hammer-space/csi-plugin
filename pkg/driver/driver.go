@@ -64,6 +64,11 @@ type CSIDriver struct {
 	// share can no longer wedge refcount reads (backingMountInUse) or releases on
 	// every other in-flight file-backed operation. See acquireBackingMount.
 	mountLocks map[string]*sync.Mutex
+	// mountSlots caps how many NFS mounts this process runs at once. A node
+	// reboot, drain or scale-up stages every NFS volume on the node together;
+	// the cap turns that burst into a queue so the node, the data portals and
+	// the Anvil REST API see a steady load. Nil means no cap.
+	mountSlots *semaphore.Weighted
 	hsclient   *client.HammerspaceClient
 	NodeID     string
 	// freezer runs fsfreeze inside the pod(s) holding a source volume
@@ -95,6 +100,7 @@ func NewCSIDriver(endpoint, username, password, tlsVerifyStr string) *CSIDriver 
 		snapshotLocks: make(map[string]*keyLock),
 		mountRefs:     make(map[string]int),
 		mountLocks:    make(map[string]*sync.Mutex),
+		mountSlots:    semaphore.NewWeighted(maxConcurrentNFSMounts()),
 		NodeID:        os.Getenv("CSI_NODE_NAME"),
 		freezer:       NewFreezer(),
 	}
@@ -139,6 +145,55 @@ func (c *CSIDriver) acquireVolumeLock(ctx context.Context, volID string) (func()
 	}
 	release := probe.Acquired()
 	return func() { lk.unlock(); release() }, nil
+}
+
+// acquireRootMountLock serializes cleanup of the node-wide root NFS export at
+// common.BaseBackingShareMountPath, which driver versions before the
+// staged-NFS design mounted at stage time. NodeUnstageVolume holds it while it
+// drops an old volume's marker and unmounts the export after the last one, so
+// two concurrent unstages cannot both miscount the remaining markers.
+//
+// It reuses the volume lock map, keyed by the mount path. That key cannot
+// collide with a CSI volume ID, which is always a Hammerspace share or file
+// path. The lock carries the same 30s timeout as every other lock here, so
+// contention surfaces to kubelet as a retryable Aborted instead of a hang.
+func (c *CSIDriver) acquireRootMountLock(ctx context.Context) (func(), error) {
+	return c.acquireVolumeLock(ctx, common.BaseBackingShareMountPath)
+}
+
+// defaultMaxConcurrentNFSMounts is the default for MAX_CONCURRENT_NFS_MOUNTS.
+const defaultMaxConcurrentNFSMounts = 10
+
+// maxConcurrentNFSMounts reads MAX_CONCURRENT_NFS_MOUNTS, the number of NFS
+// mounts one driver process may run at once.
+func maxConcurrentNFSMounts() int64 {
+	value := os.Getenv("MAX_CONCURRENT_NFS_MOUNTS")
+	if value == "" {
+		return defaultMaxConcurrentNFSMounts
+	}
+	n, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || n < 1 {
+		log.Warnf("Invalid MAX_CONCURRENT_NFS_MOUNTS=%q; using default %d", value, defaultMaxConcurrentNFSMounts)
+		return defaultMaxConcurrentNFSMounts
+	}
+	return n
+}
+
+// acquireMountSlot waits for one of the node's NFS mount slots. It waits as
+// long as the caller's context allows, which for kubelet is the RPC deadline,
+// and then returns Aborted so kubelet retries with its own backoff instead of
+// the driver adding a second retry loop.
+func (c *CSIDriver) acquireMountSlot(ctx context.Context) (func(), error) {
+	if c.mountSlots == nil {
+		return func() {}, nil
+	}
+	probe := common.StartLockProbe(ctx, "mount_slot")
+	if err := c.mountSlots.Acquire(ctx, 1); err != nil {
+		probe.Failed()
+		return nil, status.Errorf(codes.Aborted, "timed out waiting for an NFS mount slot: %v", err)
+	}
+	release := probe.Acquired()
+	return func() { c.mountSlots.Release(1); release() }, nil
 }
 
 func (c *CSIDriver) acquireSnapshotLock(ctx context.Context, snapID string) (func(), error) {

@@ -18,6 +18,7 @@ package driver
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -247,9 +248,15 @@ func (d *CSIDriver) ensureNFSDirectoryExists(ctx context.Context, backingShareNa
 	targetPath := common.ShareStagingDir + backingShare.ExportPath
 	deviceFile := targetPath + "/" + hsVolume.Name
 
-	// mount the share to create the directory
+	// Mount the share to create the directory. The mount is shared with every
+	// file-backed and block volume on this share, so it must not carry this
+	// volume's own mount options: a StorageClass "ro" here would make the whole
+	// backing share read-only. The volume's options apply to its own mount at
+	// stage time instead.
+	shareMountVolume := *hsVolume
+	shareMountVolume.MountFlags = nil
 	defer d.UnmountBackingShareIfUnused(ctx, backingShare.Name)
-	err = d.EnsureBackingShareMounted(ctx, backingShare.Name, hsVolume) // check if share is mounted
+	err = d.EnsureBackingShareMounted(ctx, backingShare.Name, &shareMountVolume) // check if share is mounted
 	if err != nil {
 		log.Errorf("failed to ensure backing share is mounted, %v", err)
 		return err
@@ -341,7 +348,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 		)
 
 		if err != nil {
-			return status.Errorf(codes.Internal, "%s", err.Error())
+			return hsError(err)
 		}
 	}
 	// generate unique target path on host for setting file metadata
@@ -352,7 +359,7 @@ func (d *CSIDriver) ensureShareBackedVolumeExists(ctx context.Context, hsVolume 
 	defer common.UnmountFilesystem(ctx, targetPath)
 
 	log.Debugf("Created empty folder with path %s", targetPath)
-	err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
+	err = d.publishShareBackedVolume(ctx, hsVolume.Path, "", targetPath, hsVolume.MountFlags, false, map[string]string{"fqdn": hsVolume.FQDN})
 	if err != nil {
 		log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 	} else {
@@ -395,7 +402,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 			hsVolume.Comment,
 		)
 		if err != nil {
-			return nil, status.Errorf(codes.Internal, "%s", err.Error())
+			return nil, hsError(err)
 		}
 		share, err = d.hsclient.GetShare(ctx, backingShareName)
 		if err != nil {
@@ -409,7 +416,7 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 		// generate unique target path on host for setting file metadata
 		targetPath := common.ShareStagingDir + "/metadata-mounts" + hsVolume.Path
 		defer common.UnmountFilesystem(ctx, targetPath)
-		err = d.publishShareBackedVolume(ctx, hsVolume.Path, targetPath, hsVolume.MountFlags, hsVolume.FQDN)
+		err = d.publishShareBackedVolume(ctx, hsVolume.Path, "", targetPath, hsVolume.MountFlags, false, map[string]string{"fqdn": hsVolume.FQDN})
 		if err != nil {
 			log.Warnf("failed to get share backed volume on hsVolumePath %s targetPath %s. Err %v", hsVolume.Path, targetPath, err)
 		}
@@ -420,6 +427,50 @@ func (d *CSIDriver) ensureBackingShareExists(ctx context.Context, backingShareNa
 	}
 
 	return share, err
+}
+
+// growRestoredDeviceFile grows a just-restored backing file to the capacity the
+// PVC actually asked for. It reconciles both the sparse raw file and an
+// embedded ext4/xfs filesystem before CreateVolume returns.
+//
+// Raw-file growth is decided from Anvil metadata first. For ext4/xfs restores,
+// the backing share is also mounted long enough to verify and, when necessary,
+// grow the embedded filesystem before the volume becomes publishable.
+func (d *CSIDriver) growRestoredDeviceFile(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume, deviceFile string) error {
+	restored, err := d.hsclient.GetFile(ctx, hsVolume.Path)
+	if err != nil {
+		return status.Errorf(codes.Internal, "could not look up restored file %s: %v", hsVolume.Path, err)
+	}
+	rawGrowthNeeded := restored == nil || restored.Size < hsVolume.Size
+	filesystemGrowthPossible := hsVolume.FSType == "ext4" || hsVolume.FSType == "xfs"
+	if !rawGrowthNeeded && !filesystemGrowthPossible {
+		return nil
+	}
+
+	// CreateVolume has not returned yet, so no node can publish this new volume.
+	// This is the only safe window for the controller to mount a restored
+	// filesystem writable without racing a MULTI_NODE_READER_ONLY consumer.
+	if err := d.acquireBackingMount(ctx, backingShare, hsVolume); err != nil {
+		return status.Errorf(codes.Internal, "mount backing share to reconcile restored volume: %v", err)
+	}
+	defer d.releaseBackingMount(ctx, backingShare)
+
+	info, err := os.Stat(deviceFile)
+	if err != nil {
+		return status.Errorf(codes.Internal, "could not stat restored file %s: %v", deviceFile, err)
+	}
+	if info.Size() < hsVolume.Size {
+		log.Infof("growing restored file %s from %d to %d bytes", deviceFile, info.Size(), hsVolume.Size)
+		if err := common.ExpandRawFileSize(deviceFile, hsVolume.Size); err != nil {
+			return status.Errorf(codes.Internal, "could not grow restored file %s to %d bytes: %v", deviceFile, hsVolume.Size, err)
+		}
+	}
+	if filesystemGrowthPossible {
+		if err := growFilesystemPrivatelyIfNeeded(ctx, deviceFile, hsVolume.FSType); err != nil {
+			return status.Errorf(codes.Internal, "could not grow restored %s filesystem in %s: %v", hsVolume.FSType, deviceFile, err)
+		}
+	}
+	return nil
 }
 
 func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *common.ShareResponse, hsVolume *common.HSVolume) error {
@@ -466,6 +517,12 @@ func (d *CSIDriver) ensureDeviceFileExists(ctx context.Context, backingShare *co
 		if err != nil {
 			log.Errorf("Failed to restore from snapshot, %v", err)
 			return status.Error(codes.NotFound, common.UnknownError)
+		}
+
+		// Reconcile the sparse raw file and its embedded filesystem before
+		// CreateVolume returns, while no node can publish the volume.
+		if err := d.growRestoredDeviceFile(ctx, backingShare, hsVolume, deviceFile); err != nil {
+			return err
 		}
 	} else {
 		// Create empty file. Take a refcounted reference on the backing mount so it
@@ -723,6 +780,17 @@ func (d *CSIDriver) CreateVolume(ctx context.Context, req *csi.CreateVolumeReque
 			backingShareName = volumeName
 		}
 	}
+	// Decline an unsupported restore before doing any backend work -- capacity
+	// and objective lookups below are wasted round-trips for a request that
+	// cannot be served. This mirrors the branch selection further down: a
+	// share-backed NFS volume is one that is neither file-backed nor a
+	// directory inside an explicit mountBackingShareName.
+	shareBackedNFS := !fileBacked && !(fsType == "nfs" && vParams.MountBackingShareName != "")
+	if snap != nil && shareBackedNFS && !shareBackedSnapshotRestoreSupported {
+		return nil, status.Error(codes.Unimplemented,
+			"snapshot restore is not supported for share-backed NFS volumes; only file-backed and block volumes can be restored from a snapshot")
+	}
+
 	volumePath := common.SharePathPrefix + backingShareName
 	var volID string = volumePath
 	if fileBacked {
@@ -923,6 +991,9 @@ func (d *CSIDriver) deleteFileBackedVolume(ctx context.Context, filepath string)
 	// Check if file has snapshots and fail
 	snaps, _ := d.hsclient.GetFileSnapshots(ctx, filepath)
 	if len(snaps) > 0 {
+		// Log it: the CO retries DeleteVolume indefinitely on FailedPrecondition,
+		// so a silent return here looks exactly like a hang from the outside.
+		log.Warnf("refusing to delete volume %s: %d snapshot(s) still exist on the backend", filepath, len(snaps))
 		return status.Errorf(codes.FailedPrecondition, common.VolumeDeleteHasSnapshots)
 	}
 
@@ -994,9 +1065,19 @@ func (d *CSIDriver) deleteShareBackedVolume(ctx context.Context, share *common.S
 	}
 	err = d.hsclient.DeleteShare(ctx, share.Name, deleteDelay)
 	if err != nil {
-		return status.Errorf(codes.Internal, "%s", err.Error())
+		return hsError(err)
 	}
 	return nil
+}
+
+// hsError returns err as a gRPC error. A code the Hammerspace client already
+// chose is kept, such as Aborted for a task Anvil is still working on, so the
+// provisioner retries it as pending; anything else is Internal.
+func hsError(err error) error {
+	if _, ok := status.FromError(err); ok {
+		return err
+	}
+	return status.Errorf(codes.Internal, "%s", err.Error())
 }
 
 func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeRequest) (_ *csi.DeleteVolumeResponse, err error) {
@@ -1035,9 +1116,16 @@ func (d *CSIDriver) DeleteVolume(ctx context.Context, req *csi.DeleteVolumeReque
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "%s", err.Error())
 	}
-	if share == nil { // legacy/single-segment ID with no share: treat as file-backed
-		err = d.deleteFileBackedVolume(ctx, volumeId)
-		return &csi.DeleteVolumeResponse{}, err
+	if share == nil {
+		// A single-segment ID always names a share, so a missing share means the
+		// volume is already deleted -- typically by an earlier attempt whose reply
+		// was lost to a restart or timeout. CSI requires DeleteVolume to succeed
+		// for a volume that no longer exists. The Anvil can keep the share's
+		// directory for a while after the share object is gone; handing the ID to
+		// the file-backed path then derived a backing share of "/" and failed on
+		// every retry, stranding the PV.
+		log.Infof("share for volume %s no longer exists; treating it as already deleted", volumeId)
+		return &csi.DeleteVolumeResponse{}, nil
 	}
 	// Share exists and is a Filesystem
 	err = d.deleteShareBackedVolume(ctx, share)
@@ -1293,6 +1381,54 @@ func (d *CSIDriver) ListVolumes(ctx context.Context, req *csi.ListVolumesRequest
 	}, nil
 }
 
+// cachedClusterAvailableCapacity returns the cluster's free capacity, preferring
+// the cached figure.
+//
+// GetClusterAvailableCapacity always queries the Anvil (~1.5s measured) and
+// refreshes the cache as a side effect. That is too slow for GetCapacity: the
+// external provisioner refreshes CSIStorageCapacity for every StorageClass
+// serially, so with dozens of classes alive a newly created one waits behind
+// the queue for longer than the CSI capacity test's 60s budget -- and, more
+// importantly, longer than a scheduler will wait before treating every node as
+// out of storage.
+//
+// Capacity is advisory for scheduling, so a slightly stale figure published
+// promptly beats an exact one published late.
+func (d *CSIDriver) cachedClusterAvailableCapacity(ctx context.Context) (int64, error) {
+	if cached, err := common.GetCacheData("FREE_CAPACITY"); err == nil && cached != nil {
+		if free, ok := cached.(int64); ok {
+			return free, nil
+		}
+	}
+	return d.hsclient.GetClusterAvailableCapacity(ctx)
+}
+
+// backingShareCapacitySeconds is how long a backing share's free space is
+// reused by GetCapacity, for the same reason as cachedClusterAvailableCapacity:
+// the provisioner refreshes every StorageClass in turn, so one share lookup
+// stuck on a slow Anvil held up every other class, including a new class
+// waiting for its first CSIStorageCapacity.
+const backingShareCapacitySeconds = 60
+
+// cachedBackingShareAvailable returns the free space of the named backing
+// share and whether the share exists, preferring a figure fetched in the last
+// backingShareCapacitySeconds. A share that doesn't exist yet isn't cached, so
+// its first creation is seen on the next poll.
+func (d *CSIDriver) cachedBackingShareAvailable(ctx context.Context, name string) (int64, bool, error) {
+	key := "BACKING_SHARE_FREE:" + name
+	if cached, _ := common.GetCacheData(key); cached != nil {
+		if free, ok := cached.(int64); ok {
+			return free, true, nil
+		}
+	}
+	share, err := d.hsclient.GetShare(ctx, name)
+	if err != nil || share == nil {
+		return 0, false, err
+	}
+	common.SetCacheData(key, share.Space.Available, backingShareCapacitySeconds)
+	return share.Space.Available, true, nil
+}
+
 func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest) (*csi.GetCapacityResponse, error) {
 	// Start a span for tracing
 	ctx, span := tracer.Start(ctx, "Controller/GetCapacity", trace.WithAttributes())
@@ -1300,19 +1436,12 @@ func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest
 
 	var blockRequested bool
 	var filesystemRequested bool
-	fileBacked := false
-	var fsType string
 	for _, cap := range req.VolumeCapabilities {
 		switch cap.AccessType.(type) {
 		case *csi.VolumeCapability_Block:
 			blockRequested = true
-			fileBacked = true
 		case *csi.VolumeCapability_Mount:
 			filesystemRequested = true
-			fsType = cap.GetMount().FsType
-			if fsType != "nfs" {
-				fileBacked = true
-			}
 		}
 	}
 
@@ -1327,26 +1456,33 @@ func (d *CSIDriver) GetCapacity(ctx context.Context, req *csi.GetCapacityRequest
 		return nil, err
 	}
 
-	var available int64 = 0
-	//  Check if the specified backing share or file exists
-	if fileBacked {
-		var backingShareName string
-		if blockRequested {
-			backingShareName = vParams.BlockBackingShareName
-		} else {
-			backingShareName = vParams.MountBackingShareName
-		}
-		backingShare, err := d.hsclient.GetShare(ctx, backingShareName)
-		if err != nil {
-			available = 0
-		}
-		if backingShare != nil {
-			available = backingShare.Space.Available
-		}
+	// The volume type comes from the StorageClass parameters, not from
+	// req.VolumeCapabilities. A capacity query carries no fsType, so deciding
+	// on the capability alone treated every class as file-backed and looked up
+	// an empty backing share name for the nfs and raw block classes.
+	backingShareName := vParams.BlockBackingShareName
+	if backingShareName == "" && vParams.FSType != "" && vParams.FSType != "nfs" {
+		backingShareName = vParams.MountBackingShareName
+	}
 
+	var available int64
+	if backingShareName != "" {
+		free, exists, err := d.cachedBackingShareAvailable(ctx, backingShareName)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "backing share %s: %v", backingShareName, err)
+		}
+		if exists {
+			available = free
+		} else {
+			// Not created yet; it will be carved from cluster capacity.
+			available, err = d.cachedClusterAvailableCapacity(ctx)
+			if err != nil {
+				return nil, status.Error(codes.Internal, err.Error())
+			}
+		}
 	} else {
 		// Return all capacity of cluster for share backed volumes
-		available, err = d.hsclient.GetClusterAvailableCapacity(ctx)
+		available, err = d.cachedClusterAvailableCapacity(ctx)
 		if err != nil {
 			return nil, status.Error(codes.Internal, err.Error())
 		}
@@ -1489,6 +1625,9 @@ func (d *CSIDriver) CreateSnapshot(ctx context.Context, req *csi.CreateSnapshotR
 			// Detach from the gRPC request so cancellation cannot leave the workload frozen.
 			defer d.freezer.Unfreeze(context.WithoutCancel(ctx), frozen)
 		}
+		// Snapshotting a share-backed (native NFS) volume is supported; only
+		// RESTORING one is not. See shareBackedSnapshotRestoreSupported.
+
 		// Create the snapshot.
 		var hsSnapName string
 		if !fileBackedSource {
@@ -1616,8 +1755,30 @@ func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReq
 	// Initialize a slice to hold the snapshot entries
 	var snapshots []*csi.ListSnapshotsResponse_Entry
 
+	// An exact snapshot_id lookup is how the external snapshotter decides
+	// whether a PRE-PROVISIONED VolumeSnapshotContent is ready: it never saw a
+	// CreateSnapshot response for that snapshot, so ListSnapshots is the only
+	// way it can ever be marked readyToUse.
+	//
+	// Resolve it from the ID itself rather than by scanning shares. The ID
+	// carries its own source volume ("<snapshot>|<volume>"), so this is one
+	// lookup instead of a full enumeration, and it works for file-backed
+	// snapshots, which do not appear in a share's .snapshot directory at all
+	// and so could never be found by that scan.
+	if req.GetSnapshotId() != "" {
+		entry, err := d.findSnapshotByID(ctx, req.GetSnapshotId())
+		if err != nil {
+			return nil, err
+		}
+		if entry != nil &&
+			(req.GetSourceVolumeId() == "" || entry.Snapshot.SourceVolumeId == req.GetSourceVolumeId()) {
+			snapshots = append(snapshots, entry)
+		}
+		return &csi.ListSnapshotsResponse{Entries: snapshots}, nil
+	}
+
 	// Fetch all snapshots from the backend storage
-	backendSnapshots, err := d.hsclient.ListSnapshots(ctx, req.SnapshotId, req.SourceVolumeId)
+	backendSnapshots, err := d.hsclient.ListSnapshots(ctx, "", req.SourceVolumeId)
 	if err != nil {
 		return nil, status.Error(codes.Internal, err.Error())
 	}
@@ -1629,37 +1790,111 @@ func (d *CSIDriver) ListSnapshots(ctx context.Context, req *csi.ListSnapshotsReq
 		}, nil
 	}
 
-	// Apply filtering based on snapshot_id and source_volume_id
 	for _, snapshot := range backendSnapshots {
-		// Filter by snapshot_id if provided
-		if req.GetSnapshotId() != "" && snapshot.Id != req.GetSnapshotId() {
-			continue
-		}
-
 		// Filter by source_volume_id if provided
 		if req.GetSourceVolumeId() != "" && snapshot.SourceVolumeId != req.GetSourceVolumeId() {
 			continue
 		}
 
-		// Build the SnapshotEntry for each matching snapshot
-		snapshotEntry := &csi.ListSnapshotsResponse_Entry{
+		// The backend knows a snapshot only by its own name. The CO must get
+		// back the same composite ID CreateSnapshot handed out, or it cannot
+		// match these entries to the snapshots it already knows about.
+		snapshots = append(snapshots, &csi.ListSnapshotsResponse_Entry{
 			Snapshot: &csi.Snapshot{
 				SizeBytes:      snapshot.Size,
-				SnapshotId:     snapshot.Id,
+				SnapshotId:     GetSnapshotIDFromSnapshotName(snapshot.Id, snapshot.SourceVolumeId),
 				ReadyToUse:     snapshot.ReadyToUse,
 				SourceVolumeId: snapshot.SourceVolumeId,
 				CreationTime: &timestamp.Timestamp{
 					Seconds: snapshot.Created,
 				},
 			},
-		}
-
-		// Add the snapshot entry to the response
-		snapshots = append(snapshots, snapshotEntry)
+		})
 	}
 
 	// Return the ListSnapshotsResponse with filtered snapshots
 	return &csi.ListSnapshotsResponse{
 		Entries: snapshots,
 	}, nil
+}
+
+// findSnapshotByID resolves a single CSI snapshot ID against the backend,
+// returning (nil, nil) when no such snapshot exists -- the CSI specification
+// requires an unknown snapshot_id to produce an empty list, not an error.
+func (d *CSIDriver) findSnapshotByID(ctx context.Context, snapshotID string) (*csi.ListSnapshotsResponse_Entry, error) {
+	snapshotName, nameErr := GetSnapshotNameFromSnapshotId(snapshotID)
+	sourceVolumeID, volErr := GetSnapshotSourceVolumeId(snapshotID)
+	if nameErr != nil || volErr != nil {
+		log.Warnf("ListSnapshots: malformed snapshot ID %s; reporting it as absent", snapshotID)
+		return nil, nil
+	}
+
+	entry := func(size, created int64) *csi.ListSnapshotsResponse_Entry {
+		return &csi.ListSnapshotsResponse_Entry{
+			Snapshot: &csi.Snapshot{
+				SizeBytes:      size,
+				SnapshotId:     snapshotID,
+				SourceVolumeId: sourceVolumeID,
+				ReadyToUse:     true,
+				CreationTime:   &timestamp.Timestamp{Seconds: created},
+			},
+		}
+	}
+
+	if isFileBackedVolumeID(sourceVolumeID) {
+		// A file-backed snapshot's name IS its path on the Anvil
+		// (<share>/.fsnapshot/<timestamp>/<file>), so listing its parent
+		// directory settles both its existence and its size.
+		child, err := d.snapshotDirEntry(ctx, path.Dir(snapshotName), path.Base(snapshotName))
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "could not look up snapshot %s: %v", snapshotID, err)
+		}
+		if child == nil {
+			return nil, nil
+		}
+		return entry(child.Size, child.CreateTime), nil
+	}
+
+	shareName := GetVolumeNameFromPath(sourceVolumeID)
+	share, err := d.hsclient.GetShare(ctx, shareName)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not look up source share %s: %v", shareName, err)
+	}
+	if share == nil {
+		return nil, nil
+	}
+	snapshotNames, err := d.hsclient.GetShareSnapshots(ctx, shareName)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "could not list snapshots of share %s: %v", shareName, err)
+	}
+	if !slice.ContainsString(snapshotNames, snapshotName, strings.TrimSpace) {
+		return nil, nil
+	}
+
+	// Size and creation time are extra detail, not part of readiness: report
+	// the snapshot even when its .snapshot entry cannot be read.
+	var size, created int64
+	if child, err := d.snapshotDirEntry(ctx, path.Join(share.ExportPath, ".snapshot"), snapshotName); err == nil && child != nil {
+		size, created = child.Size, child.CreateTime
+	}
+	return entry(size, created), nil
+}
+
+// snapshotDirEntry returns the named child of dir, or nil when either the
+// directory or the child is absent. Only a directory listing carries a child's
+// size and creation time; a direct lookup of the child itself does not.
+func (d *CSIDriver) snapshotDirEntry(ctx context.Context, dir, name string) (*common.FileChildren, error) {
+	parent, err := d.hsclient.GetFile(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	if parent == nil {
+		return nil, nil
+	}
+	for i := range parent.Children {
+		if parent.Children[i].Name == name {
+			return &parent.Children[i], nil
+		}
+	}
+	return nil, nil
 }
